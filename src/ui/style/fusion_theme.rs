@@ -41,43 +41,47 @@ fn rgb(hex: u32) -> Color {
 }
 
 /// Near-black chrome, white text, blue accent.
+#[must_use]
 pub fn fusion_black() -> Theme {
     Theme::custom(
         FUSION_BLACK,
         Seed {
-            background: rgb(0x1A1A1A),
-            text: rgb(0xF2F2F2),
-            primary: rgb(0x0696D7),
-            success: rgb(0x4CAF50),
-            warning: rgb(0xFFB300),
-            danger: rgb(0xE53935),
+            background: rgb(0x1A_1A1A),
+            text: rgb(0xF2_F2F2),
+            primary: rgb(0x06_96D7),
+            success: rgb(0x4C_AF50),
+            warning: rgb(0xFF_B300),
+            danger: rgb(0xE5_3935),
         },
     )
 }
 
 /// The inverse: light chrome, near-black text. The accent darkens so it
 /// keeps its contrast against a light surface.
+#[must_use]
 pub fn fusion_white() -> Theme {
     Theme::custom(
         FUSION_WHITE,
         Seed {
-            background: rgb(0xFAFAFA),
-            text: rgb(0x1A1A1A),
-            primary: rgb(0x0277BD),
-            success: rgb(0x2E7D32),
-            warning: rgb(0xE65100),
-            danger: rgb(0xC62828),
+            background: rgb(0xFA_FAFA),
+            text: rgb(0x1A_1A1A),
+            primary: rgb(0x02_77BD),
+            success: rgb(0x2E_7D32),
+            warning: rgb(0xE6_5100),
+            danger: rgb(0xC6_2828),
         },
     )
 }
 
 /// Both Fusion themes, in the order the theme picker should show them.
+#[must_use]
 pub fn fusion_themes() -> Vec<Theme> {
     vec![fusion_black(), fusion_white()]
 }
 
 /// The canvas colour a Fusion theme asks for, or `None` for any other theme.
 /// Keyed by name because `Theme::Custom` carries no discriminant to match on.
+#[must_use]
 pub fn fusion_canvas(theme: &Theme) -> Option<[u8; 3]> {
     match theme.to_string().as_str() {
         FUSION_BLACK => Some(FUSION_BLACK_CANVAS),
