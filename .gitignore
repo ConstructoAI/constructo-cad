@@ -38,3 +38,6 @@ __pycache__/
 
 # nix-direnv
 .direnv/
+
+# Worktrees created for isolated runs
+.claude/worktrees/
