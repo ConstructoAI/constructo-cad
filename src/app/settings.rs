@@ -646,8 +646,10 @@ impl Default for UserSettings {
             literal_spaces: false,
             command_history_height: crate::ui::command_line::HISTORY_HEIGHT_DEFAULT,
             // Snapper::default(): END|MID|CEN|NODE|QUAD|INT|NEA (575), master
-            // off (suppress bit 16384).
-            osmode: 575 | OSMODE_SUPPRESS,
+            // on. Object snap is a drafting aid users expect to be live from
+            // the first click; the suppress bit (16384) is left for the user
+            // to set via the status-bar pill or OSNAP.
+            osmode: 575,
             texteditmode: false,
             quick_dimension_snap_priority: 0,
             dimension_continue_mode: 1,
