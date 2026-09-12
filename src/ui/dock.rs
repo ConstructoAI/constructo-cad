@@ -42,6 +42,8 @@ pub enum PanelId {
     Properties,
     BlockPalette,
     ExternalReferences,
+    /// Outline of the drawing's origin planes, open sketch and solid bodies.
+    Browser,
 }
 
 impl PanelId {
@@ -51,6 +53,7 @@ impl PanelId {
             PanelId::Properties => "Properties",
             PanelId::BlockPalette => "Block Palette",
             PanelId::ExternalReferences => "External References",
+            PanelId::Browser => "Browser",
         }
     }
 
@@ -60,6 +63,7 @@ impl PanelId {
             PanelId::Properties => 250.0,
             PanelId::BlockPalette => 260.0,
             PanelId::ExternalReferences => 460.0,
+            PanelId::Browser => 230.0,
         }
     }
 
@@ -117,7 +121,7 @@ impl Default for DockState {
     fn default() -> Self {
         Self {
             left: vec![PanelId::Properties],
-            right: vec![PanelId::BlockPalette],
+            right: vec![PanelId::Browser, PanelId::BlockPalette],
             panels: BTreeMap::new(),
         }
     }
@@ -143,7 +147,12 @@ impl DockState {
     /// resize never hit a missing configuration. Also a cheap heal for configs
     /// written by an older version.
     pub fn ensure_settings(&mut self) {
-        for id in [PanelId::Properties, PanelId::BlockPalette, PanelId::ExternalReferences] {
+        for id in [
+            PanelId::Properties,
+            PanelId::BlockPalette,
+            PanelId::ExternalReferences,
+            PanelId::Browser,
+        ] {
             self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
         }
     }

@@ -733,6 +733,9 @@ pub(super) struct OpenCADStudio {
     pub(crate) show_block_palette: bool,
     /// Docked External References panel visibility (EXTERNALREFERENCES).
     pub(crate) show_external_references: bool,
+    /// Whether the Browser panel is shown. Off until BROWSER opens it, so
+    /// the default layout is unchanged for existing users.
+    pub(crate) show_browser: bool,
     /// General edge-stack dock layout for the side panels.
     pub(crate) dock: crate::ui::dock::DockState,
     /// Which panel is currently floated at full height (hovered, or a pinned
@@ -3929,6 +3932,7 @@ impl OpenCADStudio {
             show_properties: true,
             show_block_palette: false,
             show_external_references: false,
+            show_browser: false,
             block_palette: Default::default(),
             xref_manager: Default::default(),
             dock: Default::default(),
