@@ -611,3 +611,78 @@ pub(super) fn build_window_icon() -> Option<Vec<u8>> {
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     Some(pixmap.take())
 }
+
+#[cfg(test)]
+mod ucs_from_normal_tests {
+    use super::ucs_from_normal;
+    use glam::DVec3;
+
+    fn axes(ucs: &acadrust::tables::Ucs) -> (DVec3, DVec3, DVec3) {
+        let x = DVec3::new(ucs.x_axis.x, ucs.x_axis.y, ucs.x_axis.z);
+        let y = DVec3::new(ucs.y_axis.x, ucs.y_axis.y, ucs.y_axis.z);
+        (x, y, x.cross(y))
+    }
+
+    /// The contract `UCS FACE` depends on: the plane's Z is the face normal it
+    /// was handed. If this drifts, sketches tilt off the face they were
+    /// started on.
+    #[test]
+    fn z_axis_is_the_supplied_normal() {
+        for normal in [
+            DVec3::Z,
+            DVec3::NEG_Z,
+            DVec3::X,
+            DVec3::Y,
+            DVec3::new(1.0, 2.0, 3.0).normalize(),
+        ] {
+            let ucs = ucs_from_normal(DVec3::ZERO, normal).expect("a normal defines a plane");
+            let (_, _, z) = axes(&ucs);
+            assert!(
+                (z - normal).length() < 1e-9,
+                "expected Z {normal:?}, got {z:?}"
+            );
+        }
+    }
+
+    /// Right-handed and unit length, or every coordinate read off the plane is
+    /// skewed.
+    #[test]
+    fn axes_are_orthonormal() {
+        for normal in [DVec3::Z, DVec3::new(-2.0, 0.5, 1.0).normalize()] {
+            let ucs = ucs_from_normal(DVec3::ZERO, normal).unwrap();
+            let (x, y, z) = axes(&ucs);
+            for (name, axis) in [("X", x), ("Y", y), ("Z", z)] {
+                assert!((axis.length() - 1.0).abs() < 1e-9, "{name} is not unit");
+            }
+            assert!(x.dot(y).abs() < 1e-9, "X and Y are not perpendicular");
+            assert!(x.dot(z).abs() < 1e-9, "X and Z are not perpendicular");
+        }
+    }
+
+    /// The 1/64 branch exists so a normal along world Z does not cross-product
+    /// with itself. Both sides of that branch must still produce a usable
+    /// plane.
+    #[test]
+    fn a_normal_along_world_z_still_yields_a_plane() {
+        let ucs = ucs_from_normal(DVec3::ZERO, DVec3::Z).expect("world Z is a valid normal");
+        let (x, _, _) = axes(&ucs);
+        assert!(x.length() > 0.5, "X degenerated next to the world Z axis");
+    }
+
+    /// The same face must always give the same X axis, or a sketch would spin
+    /// each time the UCS was rebuilt from it.
+    #[test]
+    fn the_same_normal_is_reproducible() {
+        let normal = DVec3::new(0.3, -0.7, 0.2).normalize();
+        let first = axes(&ucs_from_normal(DVec3::ZERO, normal).unwrap());
+        let second = axes(&ucs_from_normal(DVec3::ZERO, normal).unwrap());
+        assert!((first.0 - second.0).length() < 1e-12);
+    }
+
+    /// A zero vector defines no plane; it must be refused rather than
+    /// producing a degenerate UCS that silently misplaces geometry.
+    #[test]
+    fn a_degenerate_normal_is_rejected() {
+        assert!(ucs_from_normal(DVec3::ZERO, DVec3::ZERO).is_none());
+    }
+}
