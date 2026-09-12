@@ -739,6 +739,11 @@ inventory::submit!(crate::command::CommandRegistration {
         "SELSIM",
         // Draw a new object of the same type as the selected one. (#239)
         "ADDSELECTED",
+        // Open and close a sketch: a drawing plane, a square-on view and
+        // snapping, held together until the profile is done.
+        "BROWSER",
+        "CREATESKETCH",
+        "FINISHSKETCH",
         "SHEETSET",
         "SHORTCUTS",
         "SSM",

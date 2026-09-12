@@ -101,6 +101,27 @@ fn default_role_for(component: DynComponent) -> crate::command::DynRole {
     }
 }
 
+/// An open sketch — the state CREATESKETCH parks so FINISHSKETCH can put it
+/// back.
+///
+/// A sketch here is a *mode*, not a document object: the drawing plane, a
+/// square-on view, and snapping forced live. The geometry it produces is
+/// ordinary model-space entities, which is what keeps the result a normal
+/// DWG that other software can open. `opened_with` is the handle set at the
+/// moment the sketch opened, so the difference on finish is exactly what the
+/// user drew — that difference is what gets offered to EXTRUDE.
+pub(super) struct SketchSession {
+    /// Display name, e.g. `"Sketch1"`.
+    pub(super) name: String,
+    /// UCS active before the sketch opened. Restored on finish.
+    pub(super) previous_ucs: Option<Ucs>,
+    /// Snap master state before the sketch forced it on, so a user who works
+    /// with snapping off gets that back rather than silently keeping it.
+    pub(super) previous_snap_enabled: bool,
+    /// Entity handles already present when the sketch opened.
+    pub(super) opened_with: std::collections::HashSet<acadrust::Handle>,
+}
+
 // ── Per-document tab state ─────────────────────────────────────────────────
 
 pub(super) struct DocumentTab {
@@ -186,6 +207,11 @@ pub(super) struct DocumentTab {
     pub(super) active_layer: String,
     /// Currently active UCS. `None` means WCS (identity transform).
     pub(super) active_ucs: Option<Ucs>,
+    /// Open sketch, if CREATESKETCH is in effect. `None` is the normal
+    /// direct-modelling state.
+    pub(super) sketch_session: Option<SketchSession>,
+    /// Sketches opened in this tab so far, so each gets a distinct name.
+    pub(super) sketch_count: u32,
     /// Custom model-space background color.  `None` = default dark grey.
     pub(super) bg_color: Option<[f32; 4]>,
     /// Custom paper-space background color.  `None` = default off-white grey.
@@ -629,6 +655,8 @@ impl DocumentTab {
             history: HistoryState::default(),
             active_layer: "0".to_string(),
             active_ucs: None,
+            sketch_session: None,
+            sketch_count: 0,
             bg_color: None,
             paper_bg_color: None,
             refedit_session: None,
