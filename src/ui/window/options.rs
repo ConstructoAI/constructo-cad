@@ -179,7 +179,7 @@ pub fn view_window<'a>(
         .copied()
         .find(|candidate| *candidate == default_save_format);
 
-    let theme_options = Theme::ALL
+    let theme_options = crate::app::config::all_themes()
         .iter()
         .map(ToString::to_string)
         .chain(std::iter::once("Custom".to_string()))
