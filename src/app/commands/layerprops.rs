@@ -314,6 +314,131 @@ impl OpenCADStudio {
                         self.command_line
                             .push_output(crate::t!("UCS aligned to the current view.").as_ref());
                     }
+                    // UCS FACE <handle> <x,y,z> — adopt a solid's planar face
+                    // as the drawing plane. This is the move Fusion calls
+                    // "create sketch on a face": pick the face, draw flat on
+                    // it, extrude. The pick comes from a surface pick, so it
+                    // already lies on the face and serves as the origin.
+                    "FACE" | "F" => {
+                        let target = parts
+                            .get(2)
+                            .and_then(|token| {
+                                u64::from_str_radix(token.trim().trim_start_matches("0x"), 16).ok()
+                            })
+                            .map(acadrust::Handle::new)
+                            .zip(
+                                parts
+                                    .get(3)
+                                    .and_then(|value| super::super::helpers::parse_coord(value))
+                                    .map(|(point, _)| point),
+                            );
+                        match target {
+                            // Bare `UCS FACE` starts the pick. The click comes
+                            // back through this same arm with a handle and a
+                            // surface point, so both entry points share the
+                            // plane construction below.
+                            None => {
+                                let picker = crate::command::UcsFaceCommand;
+                                self.command_line.push_info(&picker.prompt());
+                                self.tabs[i].active_cmd = Some(Box::new(picker));
+                            }
+                            Some((handle, pick)) => {
+                                let built = self.tabs[i]
+                                    .scene
+                                    .solid_models
+                                    .get(&handle)
+                                    .and_then(|body| {
+                                        use crate::scene::model::solid_model;
+                                        let face =
+                                            solid_model::nearest_planar_face(body, pick.to_array())?;
+                                        solid_model::planar_face_normal(body, face)
+                                    })
+                                    .and_then(|normal| {
+                                        super::super::helpers::ucs_from_normal(
+                                            pick,
+                                            glam::DVec3::from_array(normal),
+                                        )
+                                    });
+                                match built {
+                                    Some(ucs) => {
+                                        self.tabs[i].active_ucs = Some(ucs);
+                                        active_changed = true;
+                                        self.command_line.push_output(
+                                            crate::t!("UCS aligned to the selected face.").as_ref(),
+                                        );
+                                    }
+                                    None => self.command_line.push_error(
+                                        crate::t!("UCS FACE: no planar face at that point.")
+                                            .as_ref(),
+                                    ),
+                                }
+                            }
+                        }
+                    }
+                    // UCS OBJECT <handle> — adopt the plane of a planar
+                    // entity. Reuses the profile extraction EXTRUDE already
+                    // runs, so anything extrudable can also be sketched on.
+                    "OBJECT" | "OB" => {
+                        let target = parts
+                            .get(2)
+                            .and_then(|token| {
+                                u64::from_str_radix(token.trim().trim_start_matches("0x"), 16).ok()
+                            })
+                            .map(acadrust::Handle::new);
+                        match target {
+                            None => self
+                                .command_line
+                                .push_error(crate::t!("Usage: UCS OBJECT <handle>").as_ref()),
+                            Some(handle) => {
+                                let built = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .get_entity(handle)
+                                    .and_then(crate::scene::model::sweep_model::extrusion_profile_of)
+                                    .and_then(|(profile, _)| {
+                                        // The profile plane already carries the
+                                        // entity's own in-plane axes, so adopt
+                                        // them rather than re-deriving X from
+                                        // the normal: a sketch started on a
+                                        // circle then lines up with how that
+                                        // circle is stored, not with an
+                                        // arbitrary reference direction.
+                                        let plane = profile.plane;
+                                        let x = glam::DVec3::from_array(plane.x_axis);
+                                        let y = glam::DVec3::from_array(plane.y_axis);
+                                        if x.length_squared() < 1e-12
+                                            || y.length_squared() < 1e-12
+                                        {
+                                            return None;
+                                        }
+                                        let mut ucs = Ucs::new("*ACTIVE*");
+                                        ucs.origin = Vector3::new(
+                                            plane.origin[0],
+                                            plane.origin[1],
+                                            plane.origin[2],
+                                        );
+                                        ucs.x_axis =
+                                            Vector3::new(x.x, x.y, x.z);
+                                        ucs.y_axis =
+                                            Vector3::new(y.x, y.y, y.z);
+                                        Some(ucs)
+                                    });
+                                match built {
+                                    Some(ucs) => {
+                                        self.tabs[i].active_ucs = Some(ucs);
+                                        active_changed = true;
+                                        self.command_line.push_output(
+                                            crate::t!("UCS aligned to the selected object.")
+                                                .as_ref(),
+                                        );
+                                    }
+                                    None => self.command_line.push_error(
+                                        crate::t!("UCS OBJECT: entity defines no plane.").as_ref(),
+                                    ),
+                                }
+                            }
+                        }
+                    }
                     "3POINTW" => {
                         let raw = parts.get(2).copied().unwrap_or("");
                         let points: Vec<glam::DVec3> = raw
