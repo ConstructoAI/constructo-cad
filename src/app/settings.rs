@@ -687,6 +687,39 @@ impl Default for UserSettings {
 mod tests {
     use super::*;
 
+    /// Object snap ships live. The modes were always pre-selected; only the
+    /// master switch was off, so a new user got a configured snap set that
+    /// did nothing until they found the status-bar pill.
+    ///
+    /// This is asserted rather than checked by eye because the default is
+    /// only observable in a fresh profile: the app persists settings on
+    /// change, so an existing settings.json keeps whatever osmode it already
+    /// holds and never reveals what a new install would do.
+    #[test]
+    fn snapping_is_enabled_in_a_fresh_profile() {
+        let settings = UserSettings::default();
+        assert_eq!(
+            settings.osmode & OSMODE_SUPPRESS,
+            0,
+            "the suppress bit is set, so snapping ships off"
+        );
+
+        let (modes, master_on) = snaps_from_osmode(settings.osmode);
+        assert!(master_on, "decoding the default must report snapping on");
+        for expected in [
+            SnapType::Endpoint,
+            SnapType::Midpoint,
+            SnapType::Center,
+            SnapType::Intersection,
+        ] {
+            assert!(modes.contains(&expected), "{expected:?} is not in the default set");
+        }
+
+        // The Snapper and the persisted default have to agree, or the running
+        // state and the saved state disagree the moment anything is written.
+        assert_eq!(crate::snap::Snapper::default().snap_enabled, master_on);
+    }
+
     #[test]
     fn osmode_encodes_bits_and_suppress() {
         // Endpoint(1) + Midpoint(2) + Intersection(32) = 35, master on.

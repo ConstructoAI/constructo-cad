@@ -59,15 +59,20 @@
 
             cargoLock = {
               lockFile = ./Cargo.lock;
-              # One entry per distinct git source in Cargo.lock. Replace each
-              # lib.fakeHash with the sha256 that `nix build` prints on the
-              # first attempt; they must be refreshed whenever the matching
-              # rev in Cargo.toml moves.
+              # One entry per distinct git source in Cargo.lock, keyed by any
+              # one package from it. Two of these are transitive and easy to
+              # miss by reading Cargo.toml alone: cryoglyph and dpi arrive
+              # through iced, which pins its own forks. Regenerate the list
+              # from the lock rather than the manifest:
+              #   grep -B2 'source = "git+' Cargo.lock
+              # Each hash must be refreshed whenever the matching rev moves.
               outputHashes = {
-                "acadrust-0.5.5" = lib.fakeHash;
-                "cadkernel-0.1.0" = lib.fakeHash;
-                "iced-0.15.0-dev" = lib.fakeHash;
-                "iced_aw-0.14.1" = lib.fakeHash;
+                "acadrust-0.5.5" = "sha256-rYtJaJsb+lZZIDBtPTCfWRVyA1Gfinn3UqJlfzkhhGk=";
+                "cadkernel-0.1.0" = "sha256-7smcL9oo5mJwoCLYUbD4+lA9Xcm+/qpVswYxzoGjTDk=";
+                "cryoglyph-0.1.0" = "sha256-5BOJNDcjhpt17/XSri3JGtX8NwC7db18bddp5wanMes=";
+                "dpi-0.1.1" = "sha256-pQn1lCFSJMkjUfHoggEzMHnm5k+Chnzi5JEDjahnjUA=";
+                "iced-0.15.0-dev" = "sha256-Atg+nr1VgXwW5I7LiMAMqHemz/9ZiehTc2EWuSFEGHI=";
+                "iced_aw-0.14.1" = "sha256-OynSIjv8SgSoxpw1S4wH58vDdqga/YojOR5A9ZLKrd8=";
               };
             };
 
