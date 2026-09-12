@@ -673,9 +673,20 @@ impl OpenCADStudio {
             "BROWSER" => {
                 self.show_browser ^= true;
                 if self.show_browser {
+                    // Dock it on first use rather than shipping it in the
+                    // default layout: an existing user's edges should not
+                    // rearrange themselves on upgrade for a panel they have
+                    // not asked for.
+                    let id = crate::ui::dock::PanelId::Browser;
+                    if self.dock.location(id).is_none() {
+                        // dock() clamps an out-of-range index to the end of
+                        // the edge, so this appends below whatever is there.
+                        self.dock
+                            .dock(id, crate::app::config::DockSide::Right, usize::MAX);
+                    }
                     // Open expanded so it is usable straight away; the pin
                     // button still collapses it.
-                    self.dock_expanded = Some(crate::ui::dock::PanelId::Browser);
+                    self.dock_expanded = Some(id);
                     self.command_line
                         .push_output(crate::t!("Browser opened.").as_ref());
                 } else {

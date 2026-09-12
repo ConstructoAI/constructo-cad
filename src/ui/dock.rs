@@ -121,7 +121,7 @@ impl Default for DockState {
     fn default() -> Self {
         Self {
             left: vec![PanelId::Properties],
-            right: vec![PanelId::Browser, PanelId::BlockPalette],
+            right: vec![PanelId::BlockPalette],
             panels: BTreeMap::new(),
         }
     }
