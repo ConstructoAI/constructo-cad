@@ -849,6 +849,36 @@ impl OpenCADStudio {
     /// command, so `was_active` is false and their selection is preserved.
     pub(super) fn apply_cmd_result(&mut self, mut result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
+        if let CmdResult::AddParametricConstraint {
+            kind,
+            refs,
+            ..
+        } = &mut result
+        {
+            if *kind == crate::scene::parametric_constraints::ConstraintKind::Smooth
+                && refs.len() == 1
+            {
+                let source = refs[0];
+                let scope = self.tabs[i].current_parametric_scope();
+                let Some(resolved) = self.tabs[i]
+                    .scene
+                    .smooth_refs_from_connected_spline(scope, source.entity, source.marker)
+                else {
+                    self.tabs[i].snap_result = None;
+                    self.command_line
+                        .push_error("No valid constraint point found.");
+                    if let Some(prompt) = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|command| command.prompt())
+                    {
+                        self.command_line.push_info(&prompt);
+                    }
+                    return Task::none();
+                };
+                *refs = resolved;
+            }
+        }
         if let CmdResult::ReturnPoint(pt) = result {
             self.tabs[i].scene.clear_preview_wire();
             if let Some(mut suspended) = self.tabs[i].suspended_cmd.take() {
