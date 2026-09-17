@@ -4,6 +4,7 @@
 
 mod coincident;
 mod concentric;
+mod constraint_bar;
 mod equal_distance;
 mod geom_constraint;
 #[path = "horizontal.rs"]
@@ -18,6 +19,7 @@ mod tools;
 mod value;
 pub use coincident::{coincident_tool, CoincidentConstraintCommand};
 pub use concentric::ConcentricConstraintCommand;
+pub use constraint_bar::ConstraintBarOptionCommand;
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
 pub use geom_constraint::GeomConstraintCommand;
 pub use horizontal_command::HorizontalConstraintCommand;
