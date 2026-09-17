@@ -2765,131 +2765,175 @@ impl WirePlane {
 }
 
 fn wire_plane(wire: &WireModel) -> Option<WirePlane> {
-    let [geom] = wire.tangent_geoms.as_slice() else {
-        return None;
-    };
-    let (origin, axis_x, axis_y) = match geom {
-        TangentGeom::Circle { center, .. } => (DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64), DVec3::X, DVec3::Y),
-        TangentGeom::PlanarCircle { center, axis_x, axis_y, .. } | TangentGeom::Arc { center, axis_x, axis_y, .. } => (
-            DVec3::new(center[0], center[1], center[2]),
-            DVec3::new(axis_x[0], axis_x[1], axis_x[2]),
-            DVec3::new(axis_y[0], axis_y[1], axis_y[2]),
-        ),
-        TangentGeom::PlanarEllipse { center, major_axis, normal, .. } => {
-            let origin = DVec3::new(center[0], center[1], center[2]);
-            let n = DVec3::new(normal[0], normal[1], normal[2]).normalize();
-            let major = DVec3::new(major_axis[0], major_axis[1], major_axis[2]);
-            if major.length() <= 1e-12 {
-                return None;
+    for geom in &wire.tangent_geoms {
+        let plane_axes = match geom {
+            TangentGeom::Circle { center, .. } => Some((
+                DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64),
+                DVec3::X,
+                DVec3::Y,
+            )),
+            TangentGeom::PlanarCircle { center, axis_x, axis_y, .. }
+            | TangentGeom::Arc { center, axis_x, axis_y, .. } => Some((
+                DVec3::new(center[0], center[1], center[2]),
+                DVec3::new(axis_x[0], axis_x[1], axis_x[2]),
+                DVec3::new(axis_y[0], axis_y[1], axis_y[2]),
+            )),
+            TangentGeom::PlanarEllipse { center, major_axis, normal, .. } => {
+                let origin = DVec3::new(center[0], center[1], center[2]);
+                let n = DVec3::new(normal[0], normal[1], normal[2]).normalize();
+                let major = DVec3::new(major_axis[0], major_axis[1], major_axis[2]);
+                if major.length() <= 1e-12 {
+                    None
+                } else {
+                    Some((origin, major.normalize(), n.cross(major.normalize())))
+                }
             }
-            (origin, major.normalize(), n.cross(major.normalize()))
+            TangentGeom::Line { .. } => None,
+        };
+        if let Some((origin, axis_x, axis_y)) = plane_axes {
+            return Some(WirePlane { origin, axis_x, axis_y, normal: axis_x.cross(axis_y).normalize() });
         }
-        TangentGeom::Line { .. } => return None,
-    };
-    Some(WirePlane { origin, axis_x, axis_y, normal: axis_x.cross(axis_y).normalize() })
+    }
+    None
 }
 
-fn curve_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Curve> {
+fn curves_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Vec<Curve> {
     use cadkernel::geom2d::{Arc as KArc, Circle as KCircle, Ellipse as KEllipse, EllipseArc as KEllipseArc, Line as KLine};
 
+    let mut curves = Vec::new();
+
     if wire.tangent_geoms.is_empty() {
-        if wire.points.len() != 2 {
-            return None;
+        if wire.points.len() == 2 {
+            let (p0, p1) = (wp_f64(wire, 0), wp_f64(wire, 1));
+            if frame.contains(p0, tol) && frame.contains(p1, tol) {
+                curves.push(Curve::Line(KLine { start: frame.to_2d(p0), end: frame.to_2d(p1) }));
+            }
+        } else if wire.points.len() > 2 {
+            for i in 0..wire.points.len().saturating_sub(1) {
+                let p0 = wp_f64(wire, i);
+                let p1 = wp_f64(wire, i + 1);
+                if !p0.is_nan() && !p1.is_nan() && frame.contains(p0, tol) && frame.contains(p1, tol) {
+                    curves.push(Curve::Line(KLine { start: frame.to_2d(p0), end: frame.to_2d(p1) }));
+                }
+            }
         }
-        let (p0, p1) = (wp_f64(wire, 0), wp_f64(wire, 1));
-        return (frame.contains(p0, tol) && frame.contains(p1, tol)).then(|| Curve::Line(KLine { start: frame.to_2d(p0), end: frame.to_2d(p1) }));
+        return curves;
     }
 
-    let [geom] = wire.tangent_geoms.as_slice() else {
-        return None;
-    };
     let angle_in_frame = |world_point: DVec3, centre: DVec3| {
         let (p2, c2) = (frame.to_2d(world_point), frame.to_2d(centre));
         (p2[1] - c2[1]).atan2(p2[0] - c2[0])
     };
 
-    match geom {
-        TangentGeom::Line { p1, p2 } => {
-            let (p1, p2) = if wire.points.len() == 2 {
-                (wp_f64(wire, 0), wp_f64(wire, 1))
-            } else {
-                (Vec3::from_array(*p1).as_dvec3(), Vec3::from_array(*p2).as_dvec3())
-            };
-            (frame.contains(p1, tol) && frame.contains(p2, tol)).then(|| Curve::Line(KLine { start: frame.to_2d(p1), end: frame.to_2d(p2) }))
-        }
-        TangentGeom::Circle { center, radius } => {
-            let c = DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64);
-            (DVec3::Z.cross(frame.normal).length() <= tol && frame.contains(c, tol)).then(|| Curve::Circle(KCircle { centre: frame.to_2d(c), radius: *radius as f64 }))
-        }
-        TangentGeom::PlanarCircle { center, axis_x, axis_y, radius } => {
-            let c = DVec3::new(center[0], center[1], center[2]);
-            let n = DVec3::new(axis_x[0], axis_x[1], axis_x[2]).cross(DVec3::new(axis_y[0], axis_y[1], axis_y[2])).normalize();
-            (n.cross(frame.normal).length() <= tol && frame.contains(c, tol)).then(|| Curve::Circle(KCircle { centre: frame.to_2d(c), radius: *radius }))
-        }
-        TangentGeom::Arc { center, axis_x, axis_y, radius, start_angle, end_angle } => {
-            let c = DVec3::new(center[0], center[1], center[2]);
-            let (ax, ay) = (DVec3::new(axis_x[0], axis_x[1], axis_x[2]), DVec3::new(axis_y[0], axis_y[1], axis_y[2]));
-            let n = ax.cross(ay).normalize();
-            if n.cross(frame.normal).length() > tol || !frame.contains(c, tol) {
-                return None;
+    for (geom_idx, geom) in wire.tangent_geoms.iter().enumerate() {
+        match geom {
+            TangentGeom::Line { p1, p2 } => {
+                let (p1, p2) = if wire.key_vertices.len() > geom_idx + 1 {
+                    (
+                        DVec3::from_array(wire.key_vertices[geom_idx]),
+                        DVec3::from_array(wire.key_vertices[geom_idx + 1]),
+                    )
+                } else if wire.points.len() == 2 && wire.tangent_geoms.len() == 1 {
+                    (wp_f64(wire, 0), wp_f64(wire, 1))
+                } else {
+                    (Vec3::from_array(*p1).as_dvec3(), Vec3::from_array(*p2).as_dvec3())
+                };
+                if frame.contains(p1, tol) && frame.contains(p2, tol) {
+                    curves.push(Curve::Line(KLine { start: frame.to_2d(p1), end: frame.to_2d(p2) }));
+                }
             }
-            let arc = KArc { centre: frame.to_2d(c), radius: *radius, start_angle: *start_angle, end_angle: *end_angle };
-            let sweep = arc.sweep();
-            if (sweep - std::f64::consts::TAU).abs() <= 1e-12 {
-                return Some(Curve::Circle(KCircle { centre: arc.centre, radius: *radius }));
+            TangentGeom::Circle { center, radius } => {
+                let c = DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64);
+                if DVec3::Z.cross(frame.normal).length() <= tol && frame.contains(c, tol) {
+                    curves.push(Curve::Circle(KCircle { centre: frame.to_2d(c), radius: *radius as f64 }));
+                }
             }
-            let boundary = if n.dot(frame.normal) < 0.0 { *end_angle } else { *start_angle };
-            let start_angle = angle_in_frame(c + *radius * (boundary.cos() * ax + boundary.sin() * ay), c);
-            Some(Curve::Arc(KArc { start_angle, end_angle: start_angle + sweep, ..arc }))
-        }
-
-        TangentGeom::PlanarEllipse { center, major_axis, normal, minor_axis_ratio, start_param, end_param } => {
-            let c = DVec3::new(center[0], center[1], center[2]);
-            let ell_normal = DVec3::new(normal[0], normal[1], normal[2]).normalize();
-            if ell_normal.cross(frame.normal).length() > tol || !frame.contains(c, tol) {
-                return None;
+            TangentGeom::PlanarCircle { center, axis_x, axis_y, radius } => {
+                let c = DVec3::new(center[0], center[1], center[2]);
+                let n = DVec3::new(axis_x[0], axis_x[1], axis_x[2]).cross(DVec3::new(axis_y[0], axis_y[1], axis_y[2])).normalize();
+                if n.cross(frame.normal).length() <= tol && frame.contains(c, tol) {
+                    curves.push(Curve::Circle(KCircle { centre: frame.to_2d(c), radius: *radius }));
+                }
             }
-            let major = DVec3::new(major_axis[0], major_axis[1], major_axis[2]);
-            let major_radius = major.length();
-            if major_radius <= 1e-12 {
-                return None;
+            TangentGeom::Arc { center, axis_x, axis_y, radius, start_angle, end_angle } => {
+                let c = DVec3::new(center[0], center[1], center[2]);
+                let (ax, ay) = (DVec3::new(axis_x[0], axis_x[1], axis_x[2]), DVec3::new(axis_y[0], axis_y[1], axis_y[2]));
+                let n = ax.cross(ay).normalize();
+                if n.cross(frame.normal).length() <= tol && frame.contains(c, tol) {
+                    let arc = KArc { centre: frame.to_2d(c), radius: *radius, start_angle: *start_angle, end_angle: *end_angle };
+                    let sweep = arc.sweep();
+                    if (sweep - std::f64::consts::TAU).abs() <= 1e-12 {
+                        curves.push(Curve::Circle(KCircle { centre: arc.centre, radius: *radius }));
+                    } else {
+                        let boundary = if n.dot(frame.normal) < 0.0 { *end_angle } else { *start_angle };
+                        let start_angle = angle_in_frame(c + *radius * (boundary.cos() * ax + boundary.sin() * ay), c);
+                        curves.push(Curve::Arc(KArc { start_angle, end_angle: start_angle + sweep, ..arc }));
+                    }
+                }
             }
-            let minor_radius = major_radius * *minor_axis_ratio;
-            let dir2d = frame.dir_to_2d(major / major_radius);
-            let len = (dir2d[0] * dir2d[0] + dir2d[1] * dir2d[1]).sqrt();
-            if len <= 1e-12 {
-                return None;
+            TangentGeom::PlanarEllipse { center, major_axis, normal, minor_axis_ratio, start_param, end_param } => {
+                let c = DVec3::new(center[0], center[1], center[2]);
+                let ell_normal = DVec3::new(normal[0], normal[1], normal[2]).normalize();
+                if ell_normal.cross(frame.normal).length() <= tol && frame.contains(c, tol) {
+                    let major = DVec3::new(major_axis[0], major_axis[1], major_axis[2]);
+                    let major_radius = major.length();
+                    if major_radius > 1e-12 {
+                        let minor_radius = major_radius * *minor_axis_ratio;
+                        let dir2d = frame.dir_to_2d(major / major_radius);
+                        let len = (dir2d[0] * dir2d[0] + dir2d[1] * dir2d[1]).sqrt();
+                        if len > 1e-12 {
+                            let major_axis_2d = [dir2d[0] / len, dir2d[1] / len];
+                            let (start_parameter, end_parameter) = if ell_normal.dot(frame.normal) < 0.0 {
+                                (-*end_param, -*start_param)
+                            } else {
+                                (*start_param, *end_param)
+                            };
+                            curves.push(Curve::Ellipse(KEllipseArc {
+                                ellipse: KEllipse { centre: frame.to_2d(c), major_radius, minor_radius, major_axis: major_axis_2d },
+                                start_parameter,
+                                end_parameter,
+                            }));
+                        }
+                    }
+                }
             }
-            let major_axis_2d = [dir2d[0] / len, dir2d[1] / len];
-            let (start_parameter, end_parameter) = if ell_normal.dot(frame.normal) < 0.0 {
-                (-*end_param, -*start_param)
-            } else {
-                (*start_param, *end_param)
-            };
-            Some(Curve::Ellipse(KEllipseArc {
-                ellipse: KEllipse { centre: frame.to_2d(c), major_radius, minor_radius, major_axis: major_axis_2d },
-                start_parameter,
-                end_parameter,
-            }))
         }
     }
+
+    curves
 }
 
 fn exact_curve_intersections(wire_a: &WireModel, wire_b: &WireModel) -> Option<Vec<DVec3>> {
     let frame = wire_plane(wire_a).or_else(|| wire_plane(wire_b))?;
 
     const PLANE_TOL: f64 = 1e-7;
-    let curve_a = curve_in_frame(wire_a, &frame, PLANE_TOL)?;
-    let curve_b = curve_in_frame(wire_b, &frame, PLANE_TOL)?;
+    let curves_a = curves_in_frame(wire_a, &frame, PLANE_TOL);
+    let curves_b = curves_in_frame(wire_b, &frame, PLANE_TOL);
+    if curves_a.is_empty() || curves_b.is_empty() {
+        return None;
+    }
+
     // Two lines have nothing this path can improve on (the segment sweep is
     // already exact for a straight pair); avoid the extra work.
-    if matches!(curve_a, Curve::Line(_)) && matches!(curve_b, Curve::Line(_)) {
+    let a_all_lines = curves_a.iter().all(|c| matches!(c, Curve::Line(_)));
+    let b_all_lines = curves_b.iter().all(|c| matches!(c, Curve::Line(_)));
+    if a_all_lines && b_all_lines {
         return None;
     }
 
     let tolerance = cadkernel::geom2d::Tolerance::new(1e-9_f64.max(PLANE_TOL));
-    let crossings = cadkernel::geom2d::intersect(&curve_a, &curve_b, tolerance);
-    let points: Vec<DVec3> = crossings.into_iter().map(|c| frame.to_3d(c.point)).collect();
+    let mut points: Vec<DVec3> = Vec::new();
+    for ca in &curves_a {
+        for cb in &curves_b {
+            let crossings = cadkernel::geom2d::intersect(ca, cb, tolerance);
+            for c in crossings {
+                let pt = frame.to_3d(c.point);
+                if !points.iter().any(|existing| existing.distance_squared(pt) <= 1e-12) {
+                    points.push(pt);
+                }
+            }
+        }
+    }
     Some(points)
 }
 
@@ -4180,6 +4224,70 @@ mod ext_tests {
         assert_eq!(res.snap_type, SnapType::Grid);
         assert!((res.world.x - 0.0).abs() < 1e-9, "x rounds to 0: {:?}", res.world);
         assert!((res.world.y - 0.5).abs() < 1e-9, "y rounds to 0.5: {:?}", res.world);
+    }
+
+    #[test]
+    fn exact_curve_intersections_handles_multisegment_polyline_against_circle_at_vertex() {
+        let polyline = WireModel {
+            key_vertices: vec![[-10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 10.0, 0.0]],
+            tangent_geoms: vec![
+                TangentGeom::Line { p1: [-10.0, 0.0, 0.0], p2: [0.0, 0.0, 0.0] },
+                TangentGeom::Line { p1: [0.0, 0.0, 0.0], p2: [0.0, 10.0, 0.0] },
+            ],
+            ..Default::default()
+        };
+        let circle = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: [0.0, 5.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 5.0,
+            }],
+            ..Default::default()
+        };
+        let pts = exact_curve_intersections(&polyline, &circle)
+            .expect("polyline must analytically intersect circle");
+        assert_eq!(pts.len(), 2, "expected intersections at (0,0) and (0,10), got {pts:?}");
+        let mut ys: Vec<f64> = pts.iter().map(|p| p.y).collect();
+        ys.sort_by(f64::total_cmp);
+        assert!((ys[0] - 0.0).abs() < 1e-9, "expected corner intersection at y=0, got {}", ys[0]);
+        assert!((ys[1] - 10.0).abs() < 1e-9, "expected endpoint intersection at y=10, got {}", ys[1]);
+        for p in &pts {
+            assert!(p.x.abs() < 1e-9, "expected x=0, got {}", p.x);
+            assert!(p.z.abs() < 1e-9, "expected z=0, got {}", p.z);
+        }
+    }
+
+    #[test]
+    fn exact_curve_intersections_handles_polyline_with_bulge_arc_against_circle() {
+        let polyline = WireModel {
+            tangent_geoms: vec![
+                TangentGeom::Line { p1: [-10.0, 0.0, 0.0], p2: [0.0, 0.0, 0.0] },
+                TangentGeom::Arc {
+                    center: [0.0, 4.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 4.0,
+                    start_angle: -std::f64::consts::FRAC_PI_2,
+                    end_angle: std::f64::consts::FRAC_PI_2,
+                },
+            ],
+            ..Default::default()
+        };
+        let circle = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: [0.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 5.0,
+            }],
+            ..Default::default()
+        };
+        let pts = exact_curve_intersections(&polyline, &circle)
+            .expect("polyline with arc must intersect circle");
+        assert!(!pts.is_empty());
+        let line_pt = pts.iter().find(|p| (p.x - -5.0).abs() < 1e-9 && p.y.abs() < 1e-9);
+        assert!(line_pt.is_some(), "expected line crossing at (-5, 0, 0), got {pts:?}");
     }
 
 }
