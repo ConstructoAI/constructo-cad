@@ -4421,6 +4421,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             M::PrinterProperties => self.on_printer_properties(),
+            M::Import(msg) => self.on_page_setup_import(msg),
             M::PrinterOptionsLoaded(printer, result) => {
                 if let Some(draft) = self.plot_dialog.printer_editor.as_mut() {
                     if draft.printer == printer {
@@ -4814,7 +4815,7 @@ impl OpenCADStudio {
         }
     }
 
-    fn refresh_page_setups(&mut self) {
+    pub(super) fn refresh_page_setups(&mut self) {
         use crate::ui::window::plot::{SETUP_NONE, SETUP_PREV};
         let scene = &self.tabs[self.active_tab].scene;
         // <none> / <previous>, then layouts (`*name*`), then named setups.
@@ -4827,7 +4828,7 @@ impl OpenCADStudio {
     /// Apply a page-setup list selection to the editor. Handles the pseudo
     /// entries (`<none>` / `<previous>`), layout rows (`*name*`) and named
     /// setups.
-    fn select_page_setup(&mut self, name: &str) {
+    pub(super) fn select_page_setup(&mut self, name: &str) {
         use crate::ui::window::plot::{SETUP_NONE, SETUP_PREV};
         self.plot_dialog.selected_setup = name.to_string();
         if name == SETUP_NONE {

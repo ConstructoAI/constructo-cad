@@ -94,6 +94,7 @@ mod context_menu;
 mod dialog;
 mod dynamic;
 mod file;
+mod page_setup_import;
 mod style;
 mod util;
 mod viewport;
@@ -7237,6 +7238,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PageSetupImportFile(path) => self.on_page_setup_import_file(path),
+            Message::PageSetupOnNewLayoutChanged(enabled) => {
+                self.plot_dialog.page_setup_on_new_layout = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
             Message::BackupOnSaveChanged(enabled) => {
                 self.backup_on_save = enabled;
                 self.persist_settings_if_changed();

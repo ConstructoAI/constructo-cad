@@ -77,6 +77,8 @@ pub struct AppPrefs {
     pub right_click_mode: RightClickMode,
     /// SHORTCUTMENUDURATION: time-sensitive hold threshold, ms.
     pub right_click_hold_ms: i32,
+    /// Open the Plot / Page Setup dialog for every new layout.
+    pub page_setup_on_new_layout: bool,
 }
 
 /// The fixed locations the Files page lists.
@@ -323,6 +325,29 @@ pub fn view_window<'a>(
         ]
         .spacing(10)
         .align_y(iced::Center),
+        Space::new().height(22),
+        text(crate::t!("Plotting")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Plot device, paper, scale and plot styles"))
+                .size(12)
+                .width(Fill),
+            button(text(crate::t!("Plot and Page Setup…")).size(11))
+                .on_press(Message::PlotDialogOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.page_setup_on_new_layout)
+                .on_toggle(Message::PageSetupOnNewLayoutChanged)
+                .size(15),
+            text(crate::t!("Show the page setup for new layouts")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
     ]
     .spacing(0)
     .width(sizing.width);
@@ -417,20 +442,6 @@ pub fn view_window<'a>(
             text(crate::t!("Keep a .bak copy when overwriting a drawing (ISAVEBAK)")).size(12),
         ]
         .spacing(8)
-        .align_y(iced::Center),
-        Space::new().height(22),
-        text(crate::t!("Plotting")).size(15),
-        Space::new().height(10),
-        row![
-            text(crate::t!("Plot device, paper, scale and plot styles"))
-                .size(12)
-                .width(Fill),
-            button(text(crate::t!("Plot and Page Setup…")).size(11))
-                .on_press(Message::PlotDialogOpen)
-                .padding([4, 10])
-                .style(button::secondary),
-        ]
-        .spacing(10)
         .align_y(iced::Center),
     ]
     .spacing(0)
