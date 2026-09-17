@@ -1304,6 +1304,16 @@ pub struct CoincidentPick {
     pub whole_curve: bool,
 }
 
+/// The two input forms accepted by the Horizontal geometric constraint.
+/// Object picks are resolved while the entity snapshot is available; point
+/// picks are resolved by the host against the live document so two points on
+/// the same entity remain distinguishable.
+#[derive(Clone, Copy, Debug)]
+pub enum HorizontalConstraintSelection {
+    Reference(crate::scene::parametric_constraints::ParametricRef),
+    Points(CoincidentPick, CoincidentPick),
+}
+
 /// Construction options shared by SWEEP creation and its live preview.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SweepOptions {
@@ -1550,6 +1560,14 @@ pub enum CmdResult {
         /// Undo-history label, e.g. `"Horizontal constraint"`.
         label: &'static str,
     },
+    /// Adds a Horizontal relation against the UCS X direction captured when
+    /// the command starts. The direction is persisted with the constraint so
+    /// later edits and save/reopen do not silently fall back to world X.
+    AddHorizontalConstraint {
+        selection: HorizontalConstraintSelection,
+        direction: acadrust::types::Vector3,
+        label: &'static str,
+    },
     /// Adds an ordered perpendicular relation. The first picked direction and
     /// the second direction's start point stay fixed during the initial solve;
     /// those temporary anchors are not persisted as geometric constraints.
@@ -1564,6 +1582,13 @@ pub enum CmdResult {
     /// fixed during the initial solve and the second keeps its intrinsic
     /// shape while it moves into tangency.
     AddTangentConstraint {
+        first: crate::scene::parametric_constraints::ParametricRef,
+        second: crate::scene::parametric_constraints::ParametricRef,
+        label: &'static str,
+    },
+    /// Adds an ordered concentric relation. The first picked center remains
+    /// fixed during the initial solve while the second curve moves rigidly.
+    AddConcentricConstraint {
         first: crate::scene::parametric_constraints::ParametricRef,
         second: crate::scene::parametric_constraints::ParametricRef,
         label: &'static str,
@@ -2826,14 +2851,14 @@ mod constraint_registry_tests {
             "CPCONSTRAINT",
             "MPCONSTRAINT",
             "OCCONSTRAINT",
-            "HCONSTRAINT",
+            "GCHORIZONTAL",
             "VCONSTRAINT",
             "PCONSTRAINT",
             "QCONSTRAINT",
             "GCPERPENDICULAR",
             "ECONSTRAINT",
             "TCONSTRAINT",
-            "NCONSTRAINT",
+            "GCCONCENTRIC",
             "NRCONSTRAINT",
             "LCONSTRAINT",
             "FXCONSTRAINT",

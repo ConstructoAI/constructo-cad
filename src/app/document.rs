@@ -1,5 +1,4 @@
 use crate::command::CadCommand;
-use crate::io::linetypes;
 use crate::modules::draw::modify::block_edit::BlockEditSession;
 use crate::modules::draw::modify::refedit::RefEditSession;
 use crate::scene::pick::grip::GripEdit;
@@ -593,24 +592,7 @@ impl DocumentTab {
 
     pub(super) fn new_drawing(n: usize) -> Self {
         let mut scene = Scene::new();
-        linetypes::populate_document(&mut scene.document);
-        // Paper layouts start as A4 landscape.
-        for obj in scene.document.objects.values_mut() {
-            if let acadrust::objects::ObjectType::Layout(l) = obj {
-                if l.name != "Model" {
-                    l.min_limits = (0.0, 0.0);
-                    l.max_limits = (297.0, 210.0);
-                    l.min_extents = (0.0, 0.0, 0.0);
-                    l.max_extents = (297.0, 210.0, 0.0);
-                    l.paper_width = 297.0;
-                    l.paper_height = 210.0;
-                    l.plot_paper_units = 1;
-                    l.plot_scale_numerator = 1.0;
-                    l.plot_scale_denominator = 1.0;
-                    l.paper_size = "ISO_A4_(297.00_x_210.00_MM)".into();
-                }
-            }
-        }
+        scene.populate_new_drawing_defaults();
         Self {
             id: NEXT_DOCUMENT_TAB_ID.fetch_add(1, Ordering::Relaxed),
             scene,

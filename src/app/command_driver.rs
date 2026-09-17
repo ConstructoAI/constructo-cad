@@ -3182,9 +3182,24 @@ impl OpenCADStudio {
                     &refs,
                     driving_param.as_ref(),
                 ) {
-                    self.tabs[i].active_cmd = None;
+                    let keep_smooth_selection = kind
+                        == crate::scene::parametric_constraints::ConstraintKind::Smooth
+                        && self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .is_some_and(|command| command.name() == "GCSMOOTH");
+                    if !keep_smooth_selection {
+                        self.tabs[i].active_cmd = None;
+                    }
                     self.tabs[i].snap_result = None;
                     self.command_line.push_error(message);
+                    if keep_smooth_selection {
+                        if let Some(prompt) =
+                            self.tabs[i].active_cmd.as_ref().map(|command| command.prompt())
+                        {
+                            self.command_line.push_info(&prompt);
+                        }
+                    }
                     return Task::none();
                 }
                 let scope = self.tabs[i].current_parametric_scope();
@@ -3224,6 +3239,150 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.command_line.push_output("Constraint applied.");
+                self.refresh_properties();
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
+                }
+            }
+            CmdResult::AddHorizontalConstraint {
+                selection,
+                direction,
+                label,
+            } => {
+                use crate::command::HorizontalConstraintSelection;
+                use crate::scene::parametric_constraints::{
+                    nearest_parametric_point, nearest_parametric_point_on_entity, ConstraintKind,
+                    DirectionalAxis, ParametricRef,
+                };
+
+                let scope = self.tabs[i].current_parametric_scope();
+                let to_world = |point: glam::DVec3| {
+                    acadrust::types::Vector3::new(point.x, point.y, point.z)
+                };
+                let (refs, initial_fixed) = match selection {
+                    HorizontalConstraintSelection::Reference(reference) => {
+                        let initial_fixed = match reference.directional_axis() {
+                            Some(DirectionalAxis::EllipseMajor | DirectionalAxis::EllipseMinor) => {
+                                vec![ParametricRef::center(reference.entity)]
+                            }
+                            Some(DirectionalAxis::TextBaseline) => {
+                                vec![ParametricRef::point(reference.entity, 0)]
+                            }
+                            None => Vec::new(),
+                        };
+                        (vec![reference], initial_fixed)
+                    }
+                    HorizontalConstraintSelection::Points(first, second) => {
+                        let resolve = |pick: crate::command::CoincidentPick| {
+                            if let Some(handle) = pick.handle {
+                                nearest_parametric_point_on_entity(
+                                    &self.tabs[i].scene.document,
+                                    scope,
+                                    handle,
+                                    to_world(pick.point),
+                                )
+                            } else {
+                                nearest_parametric_point(
+                                    &self.tabs[i].scene.document,
+                                    scope,
+                                    to_world(pick.point),
+                                    None,
+                                )
+                            }
+                        };
+                        let (Some(first_ref), Some(second_ref)) =
+                            (resolve(first), resolve(second))
+                        else {
+                            self.command_line.push_error(
+                                "Horizontal: select supported endpoints, centers, midpoints, or vertices.",
+                            );
+                            return Task::none();
+                        };
+                        if first_ref == second_ref {
+                            self.command_line
+                                .push_error("Horizontal: select two different points.");
+                            return Task::none();
+                        }
+                        (vec![first_ref, second_ref], vec![first_ref])
+                    }
+                };
+                let axis_length = direction.x.hypot(direction.y);
+                if axis_length <= 1.0e-12 {
+                    self.command_line
+                        .push_error("Horizontal: the current UCS X axis is not supported.");
+                    return Task::none();
+                }
+                let direction = acadrust::types::Vector3::new(
+                    direction.x / axis_length,
+                    direction.y / axis_length,
+                    0.0,
+                );
+                if let Err(message) = self.tabs[i].scene.validate_parametric_constraint(
+                    ConstraintKind::Horizontal,
+                    &refs,
+                    None,
+                ) {
+                    self.command_line.push_error(message);
+                    return Task::none();
+                }
+                if self
+                    .tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .is_some_and(|set| {
+                        set.contains_axis_constraint(
+                            ConstraintKind::Horizontal,
+                            &refs,
+                            direction,
+                        )
+                    })
+                {
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.command_line
+                        .push_error("Horizontal constraint is already applied.");
+                    return Task::none();
+                }
+                let constraints_before = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::scene::parametric_constraints::ParametricConstraintSet::new(scope)
+                    });
+                let mut touched = Vec::new();
+                for reference in &refs {
+                    if !touched.contains(&reference.entity) {
+                        touched.push(reference.entity);
+                    }
+                }
+                let pending = self.begin_undo(i, label, touched.len(), true);
+                self.tabs[i]
+                    .scene
+                    .record_undo_parametric_constraints_before(scope, constraints_before);
+                let id = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set_mut(scope)
+                    .add_axis_constraint(ConstraintKind::Horizontal, refs, direction);
+                self.tabs[i].scene.note_parametric_constraint_applied(
+                    scope,
+                    id,
+                    self.constraint_bar_display,
+                );
+                let changes = touched
+                    .into_iter()
+                    .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+                    .collect::<Vec<_>>();
+                self.tabs[i].scene.bump_entities_with_parametric_policy(
+                    &changes,
+                    &initial_fixed,
+                    self.constraint_solve_mode,
+                );
+                self.tabs[i].dirty = true;
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.command_line
+                    .push_output("Horizontal constraint applied.");
                 self.refresh_properties();
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
@@ -3280,7 +3439,7 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                     .collect::<Vec<_>>();
-                self.tabs[i].scene.bump_entities_with_parametric_policy(
+                self.tabs[i].scene.bump_entities_with_initial_parametric_policy(
                     &changes,
                     &[first_fixed, second_start],
                     true,
@@ -3331,6 +3490,88 @@ impl OpenCADStudio {
                     .record_undo_parametric_constraints_before(scope, constraints_before);
                 let id = self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
                     ConstraintKind::Tangent,
+                    refs,
+                    None,
+                );
+                self.tabs[i].scene.note_parametric_constraint_applied(
+                    scope,
+                    id,
+                    self.constraint_bar_display,
+                );
+                let changes = touched
+                    .into_iter()
+                    .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+                    .collect::<Vec<_>>();
+                self.tabs[i].scene.bump_entities_with_initial_parametric_policy(
+                    &changes,
+                    &[first],
+                    true,
+                );
+                self.tabs[i].dirty = true;
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.command_line.push_output("Constraint applied.");
+                self.refresh_properties();
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
+                }
+            }
+            CmdResult::AddConcentricConstraint {
+                first,
+                second,
+                label,
+            } => {
+                use crate::scene::parametric_constraints::ConstraintKind;
+
+                let refs = vec![first, second];
+                if let Err(message) = self.tabs[i].scene.validate_parametric_constraint(
+                    ConstraintKind::Concentric,
+                    &refs,
+                    None,
+                ) {
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.command_line.push_error(message);
+                    return Task::none();
+                }
+                let scope = self.tabs[i].current_parametric_scope();
+                let duplicate = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .is_some_and(|set| {
+                        set.constraints.iter().any(|constraint| {
+                            constraint.enabled
+                                && constraint.kind == ConstraintKind::Concentric
+                                && matches!(constraint.refs.as_slice(), [a, b]
+                                    if (*a == first && *b == second)
+                                        || (*a == second && *b == first))
+                        })
+                    });
+                if duplicate {
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.command_line
+                        .push_output("The Concentric constraint already exists.");
+                    return Task::none();
+                }
+                let constraints_before = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::scene::parametric_constraints::ParametricConstraintSet::new(scope)
+                    });
+                let touched = if first.entity == second.entity {
+                    vec![first.entity]
+                } else {
+                    vec![first.entity, second.entity]
+                };
+                let pending = self.begin_undo(i, label, touched.len(), true);
+                self.tabs[i]
+                    .scene
+                    .record_undo_parametric_constraints_before(scope, constraints_before);
+                let id = self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
+                    ConstraintKind::Concentric,
                     refs,
                     None,
                 );
@@ -8448,6 +8689,159 @@ mod parametric_constraint_undo_tests {
             1,
             "redo should restore the constraint record"
         );
+    }
+
+    #[test]
+    fn perpendicular_initial_solve_rotates_parallel_second_line_in_kernel() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let first = add_line(&mut app, 0.0, 0.0, 10.0, 0.0);
+        let second = add_line(&mut app, 20.0, 0.0, 30.0, 0.0);
+
+        let _ = app.apply_cmd_result(CmdResult::AddPerpendicularConstraint {
+            first: ParametricRef::whole(first),
+            second: ParametricRef::whole(second),
+            first_fixed: ParametricRef::whole(first),
+            second_start: ParametricRef::point(second, 0),
+            label: "Perpendicular constraint",
+        });
+
+        let line = |handle| match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(line)) => line.clone(),
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        let fixed = line(first);
+        let moving = line(second);
+        assert_eq!(fixed.start, acadrust::types::Vector3::new(0.0, 0.0, 0.0));
+        assert_eq!(fixed.end, acadrust::types::Vector3::new(10.0, 0.0, 0.0));
+        assert!((moving.start - acadrust::types::Vector3::new(20.0, 0.0, 0.0)).length() < 1.0e-9);
+        assert!((moving.length() - 10.0).abs() < 1.0e-7);
+        assert!(
+            (fixed.end - fixed.start)
+                .dot(&(moving.end - moving.start))
+                .abs()
+                < 1.0e-7,
+            "fixed={fixed:?}, moving={moving:?}"
+        );
+    }
+
+    #[test]
+    fn horizontal_initial_solve_uses_the_captured_axis_in_kernel() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let handle = add_line(&mut app, 0.0, 0.0, 5.0, 2.0);
+        let (original_start, original_end, original_length) = match app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(handle)
+        {
+            Some(acadrust::EntityType::Line(line)) => (line.start, line.end, line.length()),
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        let direction = acadrust::types::Vector3::new(3.0, 4.0, 0.0).normalize();
+
+        let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+            selection: crate::command::HorizontalConstraintSelection::Reference(
+                ParametricRef::whole(handle),
+            ),
+            direction,
+            label: "Horizontal constraint",
+        });
+
+        let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(line)) => line,
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        let solved = (line.end - line.start).normalize();
+        assert!(solved.cross(&direction).length() < 1.0e-7);
+        assert!((line.length() - original_length).abs() < 1.0e-7);
+        let constraint = &app.tabs[app.active_tab]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .unwrap()
+            .constraints[0];
+        assert_eq!(constraint.axis_direction, Some(direction));
+
+        app.undo_steps(1);
+        let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(line)) => line,
+            other => panic!("expected a Line after undo, got {other:?}"),
+        };
+        assert_eq!((line.start, line.end), (original_start, original_end));
+        assert_eq!(
+            app.tabs[app.active_tab]
+                .scene
+                .parametric_constraint_set(ParametricScope::ModelSpace)
+                .map(|set| set.constraints.len())
+                .unwrap_or(0),
+            0
+        );
+
+        app.redo_steps(1);
+        let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(line)) => line,
+            other => panic!("expected a Line after redo, got {other:?}"),
+        };
+        assert!((line.end - line.start).normalize().cross(&direction).length() < 1.0e-7);
+    }
+
+    #[test]
+    fn horizontal_two_point_solve_keeps_the_first_point_fixed() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let first = add_line(&mut app, 0.0, 0.0, 0.0, 5.0);
+        let second = add_line(&mut app, 8.0, 3.0, 8.0, 7.0);
+        let pick = |handle, point| crate::command::CoincidentPick {
+            handle: Some(handle),
+            point,
+            whole_curve: false,
+        };
+
+        let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+            selection: crate::command::HorizontalConstraintSelection::Points(
+                pick(first, glam::DVec3::ZERO),
+                pick(second, glam::DVec3::new(8.0, 3.0, 0.0)),
+            ),
+            direction: acadrust::types::Vector3::UNIT_X,
+            label: "Horizontal constraint",
+        });
+
+        let line = |handle| match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(line)) => line,
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        assert_eq!(line(first).start, acadrust::types::Vector3::ZERO);
+        assert!(line(second).start.y.abs() < 1.0e-8);
+    }
+
+    #[test]
+    fn horizontal_minor_axis_rotates_an_ellipse_around_its_center() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let mut ellipse = acadrust::entities::Ellipse::default();
+        ellipse.center = acadrust::types::Vector3::new(3.0, 7.0, 0.0);
+        ellipse.major_axis = acadrust::types::Vector3::new(3.0, 4.0, 0.0);
+        ellipse.minor_axis_ratio = 0.4;
+        let handle = app.tabs[app.active_tab]
+            .scene
+            .add_entity(acadrust::EntityType::Ellipse(ellipse));
+
+        let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+            selection: crate::command::HorizontalConstraintSelection::Reference(
+                ParametricRef::ellipse_minor_axis(handle),
+            ),
+            direction: acadrust::types::Vector3::UNIT_X,
+            label: "Horizontal constraint",
+        });
+
+        let ellipse = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Ellipse(ellipse)) => ellipse,
+            other => panic!("expected an Ellipse, got {other:?}"),
+        };
+        assert!((ellipse.center - acadrust::types::Vector3::new(3.0, 7.0, 0.0)).length() < 1.0e-9);
+        assert!(ellipse.major_axis.x.abs() < 1.0e-7);
+        assert!((ellipse.major_axis.length() - 5.0).abs() < 1.0e-7);
+        assert!((ellipse.minor_axis_ratio - 0.4).abs() < 1.0e-9);
     }
 
     /// Drawing commands must not create parametric constraints implicitly.

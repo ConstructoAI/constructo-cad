@@ -1016,6 +1016,26 @@ impl OpenCADStudio {
             }
 
             // ── Persistent constraints ────────────────────────────────────
+            "CONSTRAINTBAR" | "CONSTRAINTBAR_OPTIONS" => {
+                use crate::modules::parametric::ConstraintBarOptionCommand;
+
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() && cmd == "CONSTRAINTBAR" {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let command =
+                        SelectObjectsCommand::routed("CONSTRAINTBAR", "CONSTRAINTBAR_OPTIONS");
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                } else if handles.is_empty() {
+                    self.command_line.push_output("No objects selected.");
+                } else {
+                    let command = ConstraintBarOptionCommand::new(handles);
+                    self.command_line.push_info(&command.prompt());
+                    self.command_line.set_step_options(command.options());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                }
+            }
+
             "GCSHOW" | "GCHIDE" | "DCSHOW" | "DCHIDE" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
@@ -1046,6 +1066,24 @@ impl OpenCADStudio {
                     .set_parametric_constraint_visibility(scope, None, false, true);
                 self.command_line
                     .push_output(format!("{} constraint indicator(s) reset.", count).as_str());
+            }
+
+            "CONSTRAINTBAR_RESET" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    self.command_line.push_output("No objects selected.");
+                } else {
+                    let scope = self.tabs[i].current_parametric_scope();
+                    let count = self.tabs[i].scene.set_parametric_constraint_visibility(
+                        scope,
+                        Some(&handles),
+                        false,
+                        true,
+                    );
+                    self.command_line.push_output(
+                        format!("{} constraint bar(s) reset.", count).as_str(),
+                    );
+                }
             }
 
             "GCSHOWALL" | "GCHIDEALL" | "DCSHOWALL" | "DCHIDEALL" => {
@@ -1206,17 +1244,38 @@ impl OpenCADStudio {
                 }
             }
 
-            "SMOOTHCONSTRAINT" => {
+            "GCSMOOTH" => {
+                use crate::modules::parametric::SmoothConstraintCommand;
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
-                    use crate::modules::draw::select::SelectObjectsCommand;
-                    let sel = SelectObjectsCommand::new(cmd);
-                    self.command_line.push_info(&sel.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                    let command = SmoothConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                } else if handles.len() != 2 {
+                    self.tabs[i].scene.deselect_all();
+                    self.command_line.push_error(
+                        "Smooth requires an open spline first and a target curve second.",
+                    );
+                    let command = SmoothConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
                 } else {
-                    let Some(refs) = self.tabs[i].scene.smooth_constraint_refs(&handles) else {
-                        self.command_line
-                            .push_output("Select one open spline and one open target curve.");
+                    let first = self.tabs[i].scene.document.get_entity(handles[0]);
+                    let second = self.tabs[i].scene.document.get_entity(handles[1]);
+                    let refs = first.zip(second).and_then(|(first, second)| {
+                        SmoothConstraintCommand::preselected_refs(
+                            (first, handles[0]),
+                            (second, handles[1]),
+                        )
+                    });
+                    let Some(refs) = refs else {
+                        self.tabs[i].scene.deselect_all();
+                        self.command_line.push_error(
+                            "Smooth requires an open spline first and a line, arc, polyline segment or open spline second.",
+                        );
+                        let command = SmoothConstraintCommand::new();
+                        self.command_line.push_info(&command.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(command));
                         return None;
                     };
                     use crate::command::CmdResult;
@@ -1318,7 +1377,50 @@ impl OpenCADStudio {
                 }
             }
 
-            "HCONSTRAINT" | "VCONSTRAINT" | "FXCONSTRAINT" => {
+            "GCHORIZONTAL" => {
+                use crate::command::{CmdResult, HorizontalConstraintSelection};
+                use crate::modules::parametric::HorizontalConstraintCommand;
+
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    let command = HorizontalConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                } else if handles.len() != 1 {
+                    self.command_line
+                        .push_error("Horizontal: select exactly one compatible object.");
+                } else {
+                    let handle = handles[0];
+                    let reference = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(handle)
+                        .and_then(|entity| {
+                            HorizontalConstraintCommand::preselected_reference(entity, handle)
+                        });
+                    if let Some(reference) = reference {
+                        let direction = self.tabs[i].ucs_xform().working_plane().x;
+                        return Some(self.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+                            selection: HorizontalConstraintSelection::Reference(reference),
+                            direction: acadrust::types::Vector3::new(
+                                direction.x,
+                                direction.y,
+                                direction.z,
+                            ),
+                            label: "Horizontal constraint",
+                        }));
+                    }
+                    self.tabs[i].scene.deselect_all();
+                    self.command_line.push_error(
+                        "Horizontal: select a line, straight polyline segment, text, MText, or an ellipse axis.",
+                    );
+                    let command = HorizontalConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                }
+            }
+
+            "VCONSTRAINT" | "FXCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1331,10 +1433,10 @@ impl OpenCADStudio {
                 } else {
                     use crate::command::CmdResult;
                     use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
-                    let (kind, label) = match cmd {
-                        "HCONSTRAINT" => (ConstraintKind::Horizontal, "Horizontal constraint"),
-                        "VCONSTRAINT" => (ConstraintKind::Vertical, "Vertical constraint"),
-                        _ => (ConstraintKind::Fixed, "Fixed constraint"),
+                    let (kind, label) = if cmd == "VCONSTRAINT" {
+                        (ConstraintKind::Vertical, "Vertical constraint")
+                    } else {
+                        (ConstraintKind::Fixed, "Fixed constraint")
                     };
                     return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
                         kind,
@@ -1475,29 +1577,41 @@ impl OpenCADStudio {
                 }
             }
 
-            "NCONSTRAINT" => {
+            "GCCONCENTRIC" => {
+                use crate::command::CmdResult;
+                use crate::modules::parametric::ConcentricConstraintCommand;
+
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
-                    use crate::modules::draw::select::SelectObjectsCommand;
-                    let sel = SelectObjectsCommand::new(cmd);
-                    self.command_line.push_info(&sel.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(sel));
-                } else if handles.len() != 2 {
-                    self.command_line.push_output(
-                        "Select exactly two circles/arcs, then run this constraint again.",
-                    );
+                    let command = ConcentricConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
                 } else {
-                    use crate::command::CmdResult;
-                    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
-                    return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
-                        kind: ConstraintKind::Concentric,
-                        refs: vec![
-                            ParametricRef::center(handles[0]),
-                            ParametricRef::center(handles[1]),
-                        ],
-                        driving_param: None,
-                        label: "Concentric constraint",
-                    }));
+                    let refs = handles
+                        .iter()
+                        .filter_map(|handle| {
+                            let entity = self.tabs[i].scene.document.get_entity(*handle)?;
+                            ConcentricConstraintCommand::preselected_reference(entity, *handle)
+                        })
+                        .collect::<Vec<_>>();
+                    if handles.len() == 2 && refs.len() == 2 && refs[0] != refs[1] {
+                        return Some(self.apply_cmd_result(CmdResult::AddConcentricConstraint {
+                            first: refs[0],
+                            second: refs[1],
+                            label: "Concentric constraint",
+                        }));
+                    }
+                    self.tabs[i].scene.deselect_all();
+                    self.command_line.push_error(
+                        "Invalid selection for Concentric. Select a circle, arc, ellipse or polyline arc segment.",
+                    );
+                    let command = refs
+                        .first()
+                        .copied()
+                        .map(ConcentricConstraintCommand::with_first)
+                        .unwrap_or_else(ConcentricConstraintCommand::new);
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
                 }
             }
 

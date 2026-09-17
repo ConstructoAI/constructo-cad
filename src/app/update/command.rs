@@ -1739,15 +1739,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         .get_entity(popup.handle)
                         .is_some_and(|entity| match (item.action, entity) {
                             (GripMenuAction::ShowFit, acadrust::EntityType::Spline(spline)) => {
-                                !spline.cv_frame_visible
-                                    && crate::entities::spline::uses_fit_method(spline)
+                                crate::entities::spline::shows_fit_points(spline)
                             }
                             (
                                 GripMenuAction::ShowControlVertices,
                                 acadrust::EntityType::Spline(spline),
                             ) => {
-                                spline.cv_frame_visible
-                                    || !crate::entities::spline::uses_fit_method(spline)
+                                crate::entities::spline::shows_control_vertices(spline)
                             }
                             _ => false,
                         });

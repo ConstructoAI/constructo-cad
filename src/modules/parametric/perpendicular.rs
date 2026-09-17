@@ -33,24 +33,37 @@ impl PerpendicularConstraintCommand {
     }
 
     fn distance_to_axis(point: DVec3, endpoints: [acadrust::types::Vector3; 2]) -> f64 {
-        let start = DVec3::new(endpoints[0].x, endpoints[0].y, endpoints[0].z);
-        let end = DVec3::new(endpoints[1].x, endpoints[1].y, endpoints[1].z);
-        let direction = end - start;
-        if direction.length_squared() <= 1.0e-24 {
-            return f64::INFINITY;
-        }
-        (point - start).cross(direction.normalize()).length()
+        cadkernel::space::Vec3::from(point.to_array())
+            .distance_to_line(
+                cadkernel::space::Vec3::new(endpoints[0].x, endpoints[0].y, endpoints[0].z),
+                cadkernel::space::Vec3::new(endpoints[1].x, endpoints[1].y, endpoints[1].z),
+            )
+            .unwrap_or(f64::INFINITY)
     }
 
-    fn ellipse_reference(entity: &EntityType, handle: Handle, point: DVec3) -> Option<ParametricRef> {
+    fn ellipse_reference(
+        entity: &EntityType,
+        handle: Handle,
+        point: DVec3,
+    ) -> Option<ParametricRef> {
         let major = ParametricRef::ellipse_major_axis(handle);
         let minor = ParametricRef::ellipse_minor_axis(handle);
-        let major_distance = Self::distance_to_axis(point, directional_axis_endpoints(entity, major)?);
-        let minor_distance = Self::distance_to_axis(point, directional_axis_endpoints(entity, minor)?);
-        Some(if minor_distance < major_distance { minor } else { major })
+        let major_distance =
+            Self::distance_to_axis(point, directional_axis_endpoints(entity, major)?);
+        let minor_distance =
+            Self::distance_to_axis(point, directional_axis_endpoints(entity, minor)?);
+        Some(if minor_distance < major_distance {
+            minor
+        } else {
+            major
+        })
     }
 
-    fn picked_reference(entity: &EntityType, handle: Handle, point: DVec3) -> Option<PerpendicularPick> {
+    fn picked_reference(
+        entity: &EntityType,
+        handle: Handle,
+        point: DVec3,
+    ) -> Option<PerpendicularPick> {
         let (reference, fixed_reference, start_reference) = match entity {
             EntityType::Line(_) => (
                 ParametricRef::whole(handle),
@@ -58,7 +71,8 @@ impl PerpendicularConstraintCommand {
                 ParametricRef::point(handle, 0),
             ),
             EntityType::LwPolyline(_) | EntityType::Polyline2D(_) => {
-                let (source, _, _) = crate::scene::centerline::picked_source(entity, handle, point)?;
+                let (source, _, _) =
+                    crate::scene::centerline::picked_source(entity, handle, point)?;
                 let index = usize::try_from(source.segment_index).ok()?;
                 (
                     ParametricRef::segment(handle, index),
@@ -101,12 +115,13 @@ impl PerpendicularConstraintCommand {
                 } else {
                     polyline.vertices.len().saturating_sub(1)
                 };
-                (segment_count == 1 && polyline.vertices.first()?.bulge.abs() <= 1.0e-12)
-                    .then_some(PerpendicularPick {
-                        reference: ParametricRef::segment(handle, 0),
-                        fixed_reference: ParametricRef::segment(handle, 0),
-                        start_reference: ParametricRef::point(handle, 0),
-                    })
+                let index = (0..segment_count)
+                    .find(|index| polyline.vertices[*index].bulge.abs() <= 1.0e-12)?;
+                Some(PerpendicularPick {
+                    reference: ParametricRef::segment(handle, index),
+                    fixed_reference: ParametricRef::segment(handle, index),
+                    start_reference: ParametricRef::point(handle, index as i32),
+                })
             }
             EntityType::Polyline2D(polyline) => {
                 let segment_count = if polyline.is_closed() {
@@ -114,12 +129,13 @@ impl PerpendicularConstraintCommand {
                 } else {
                     polyline.vertices.len().saturating_sub(1)
                 };
-                (segment_count == 1 && polyline.vertices.first()?.bulge.abs() <= 1.0e-12)
-                    .then_some(PerpendicularPick {
-                        reference: ParametricRef::segment(handle, 0),
-                        fixed_reference: ParametricRef::segment(handle, 0),
-                        start_reference: ParametricRef::point(handle, 0),
-                    })
+                let index = (0..segment_count)
+                    .find(|index| polyline.vertices[*index].bulge.abs() <= 1.0e-12)?;
+                Some(PerpendicularPick {
+                    reference: ParametricRef::segment(handle, index),
+                    fixed_reference: ParametricRef::segment(handle, index),
+                    start_reference: ParametricRef::point(handle, index as i32),
+                })
             }
             _ => None,
         }
@@ -231,5 +247,24 @@ mod tests {
         assert_eq!(second_ref, ParametricRef::whole(second));
         assert_eq!(first_fixed, ParametricRef::whole(first));
         assert_eq!(second_start, ParametricRef::point(second, 0));
+    }
+
+    #[test]
+    fn preselection_uses_the_first_straight_polyline_segment() {
+        let handle = Handle::new(11);
+        let mut polyline = acadrust::entities::LwPolyline::new();
+        polyline.vertices = vec![
+            acadrust::entities::LwVertex::with_bulge(acadrust::types::Vector2::new(0.0, 0.0), 1.0),
+            acadrust::entities::LwVertex::from_coords(4.0, 0.0),
+            acadrust::entities::LwVertex::from_coords(8.0, 0.0),
+        ];
+
+        let pick = PerpendicularConstraintCommand::preselected_reference(
+            &EntityType::LwPolyline(polyline),
+            handle,
+        )
+        .expect("straight segment");
+        assert_eq!(pick.reference, ParametricRef::segment(handle, 1));
+        assert_eq!(pick.start_reference, ParametricRef::point(handle, 1));
     }
 }

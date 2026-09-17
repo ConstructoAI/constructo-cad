@@ -14,8 +14,8 @@ use acadrust::types::{Handle, Vector3};
 /// ordered per-entity-type point list when non-negative (0/1 = a line's
 /// start/end, ...), or names a special case when negative (-3 = a
 /// circle/arc's center; -2 = a bounded curve's midpoint). Polyline segment
-/// and segment-midpoint references use private negative ranges so they stay
-/// distinct from vertex markers.
+    /// segment-midpoint, and curved-segment-center references use private
+    /// negative ranges so they stay distinct from vertex markers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ParametricRef {
     pub entity: Handle,
@@ -28,6 +28,7 @@ pub struct ParametricRef {
 
 const POLYLINE_SEGMENT_MARKER_BASE: i32 = -1_000_000;
 const POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE: i32 = -2_000_000;
+const POLYLINE_SEGMENT_CENTER_MARKER_BASE: i32 = -3_000_000;
 const ELLIPSE_MAJOR_AXIS_MARKER: i32 = -4;
 const ELLIPSE_MINOR_AXIS_MARKER: i32 = -5;
 const TEXT_BASELINE_MARKER: i32 = -6;
@@ -88,8 +89,23 @@ impl ParametricRef {
 
     pub fn segment_midpoint_index(self) -> Option<usize> {
         let marker = self.marker?;
-        (marker <= POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE)
+        (marker <= POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE
+            && marker > POLYLINE_SEGMENT_CENTER_MARKER_BASE)
             .then(|| (POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE - marker) as usize)
+    }
+
+    /// Select the center of one curved polyline segment.
+    pub fn segment_center(entity: Handle, index: usize) -> Self {
+        Self {
+            entity,
+            marker: Some(POLYLINE_SEGMENT_CENTER_MARKER_BASE - index as i32),
+        }
+    }
+
+    pub fn segment_center_index(self) -> Option<usize> {
+        let marker = self.marker?;
+        (marker <= POLYLINE_SEGMENT_CENTER_MARKER_BASE)
+            .then(|| (POLYLINE_SEGMENT_CENTER_MARKER_BASE - marker) as usize)
     }
 
     /// Select the displayed baseline of a Text or MText entity.
@@ -373,6 +389,10 @@ pub struct ParametricConstraint {
     /// identifies the direction line for the line-relative modes.
     pub(crate) distance_direction_type: u8,
     pub(crate) distance_direction: Option<Vector3>,
+    /// World-space datum direction captured for Horizontal/Vertical. Native
+    /// files store the same vector on the connected constrained datum line.
+    /// `None` keeps legacy world-X/world-Y behavior.
+    pub(crate) axis_direction: Option<Vector3>,
     /// Which of the four directed sectors an angular constraint measures.
     pub(crate) angle_sector: u8,
 }
@@ -460,9 +480,69 @@ impl ParametricConstraintSet {
             rigid_points: Vec::new(),
             distance_direction_type: 0,
             distance_direction: None,
+            axis_direction: None,
             angle_sector: angle_sector::PARALLEL_COUNTERCLOCKWISE,
         });
         id
+    }
+
+    /// Appends a Horizontal/Vertical constraint tied to an explicit datum
+    /// direction rather than silently interpreting it in world coordinates.
+    pub fn add_axis_constraint(
+        &mut self,
+        kind: ConstraintKind,
+        refs: Vec<ParametricRef>,
+        direction: Vector3,
+    ) -> ConstraintId {
+        let fallback = if kind == ConstraintKind::Vertical {
+            Vector3::UNIT_Y
+        } else {
+            Vector3::UNIT_X
+        };
+        let direction = if direction.length_squared() > 1.0e-24 {
+            direction.normalize()
+        } else {
+            fallback
+        };
+        let id = self.add(kind, refs, None);
+        if let Some(constraint) = self.constraints.last_mut() {
+            constraint.axis_direction = Some(direction);
+        }
+        id
+    }
+
+    pub fn contains_axis_constraint(
+        &self,
+        kind: ConstraintKind,
+        refs: &[ParametricRef],
+        direction: Vector3,
+    ) -> bool {
+        let fallback = if kind == ConstraintKind::Vertical {
+            Vector3::UNIT_Y
+        } else {
+            Vector3::UNIT_X
+        };
+        let direction = if direction.length_squared() > 1.0e-24 {
+            direction.normalize()
+        } else {
+            fallback
+        };
+        self.constraints.iter().any(|constraint| {
+            if !constraint.enabled || constraint.kind != kind {
+                return false;
+            }
+            let same_refs = constraint.refs == refs
+                || (refs.len() == 2
+                    && constraint.refs.len() == 2
+                    && constraint.refs[0] == refs[1]
+                    && constraint.refs[1] == refs[0]);
+            if !same_refs {
+                return false;
+            }
+            let existing = constraint.axis_direction.unwrap_or(fallback);
+            existing.length_squared() > 1.0e-24
+                && existing.normalize().dot(&direction).abs() >= 1.0 - 1.0e-10
+        })
     }
 
     /// Removes a constraint by id. Returns whether one was actually removed.
@@ -503,7 +583,7 @@ impl ParametricConstraintSet {
 /// endpoint's equivalent of `dimension_assoc::resolve_reference`, restricted
 /// to the marker conventions constraint endpoints actually use (whole-entity
 /// `None`, an ordinary `source_points()` index, the `-3` center case, or a
-/// bounded curve/segment midpoint).
+/// bounded curve/segment midpoint, or a curved polyline-segment center).
 ///
 /// Solver-side registration reads raw entity fields directly. This helper is
 /// for UI-side consumers that need the current world-space position.
@@ -524,12 +604,20 @@ pub(crate) fn resolve_point(entity: &acadrust::EntityType, marker: i32) -> Optio
         let point = curve.point_at(0.5);
         return Some(Vector3::new(point[0], point[1], point[2]));
     }
-    let segment = ParametricRef {
+    let reference = ParametricRef {
         entity: Handle::NULL,
         marker: Some(marker),
+    };
+    if let Some(segment) = reference.segment_center_index() {
+        let planar = crate::entities::curve::entity_curve(entity)?;
+        let curve = planar.curve.segments().into_iter().nth(segment)?;
+        let cadkernel::geom2d::Curve::Arc(arc) = curve else {
+            return None;
+        };
+        let point = planar.plane.point_at(arc.centre);
+        return Some(Vector3::new(point[0], point[1], point[2]));
     }
-    .segment_midpoint_index();
-    if let Some(segment) = segment {
+    if let Some(segment) = reference.segment_midpoint_index() {
         let planar = crate::entities::curve::entity_curve(entity)?;
         let curve = planar.curve.segments().into_iter().nth(segment)?;
         let point = planar.plane.point_at(curve.point_at(0.5));
@@ -687,6 +775,27 @@ pub(crate) fn parametric_curve_ref_for_pick(
 }
 
 impl ConstraintKind {
+    /// Per-kind visibility bit used by CONSTRAINTBARMODE for the standard
+    /// geometric-constraint family. Helper relations which have no standard
+    /// bit stay visible under the normal display policy.
+    pub const fn bar_mode_bit(self) -> Option<i16> {
+        match self {
+            Self::Horizontal => Some(1),
+            Self::Vertical => Some(2),
+            Self::Perpendicular => Some(4),
+            Self::Parallel => Some(8),
+            Self::Tangent => Some(16),
+            Self::Smooth => Some(32),
+            Self::Coincident => Some(64),
+            Self::Concentric => Some(128),
+            Self::Colinear => Some(256),
+            Self::Symmetric => Some(512),
+            Self::Equal => Some(1024),
+            Self::Fixed => Some(2048),
+            _ => None,
+        }
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Coincident => "Coincident",
@@ -809,6 +918,18 @@ fn glyph_placement_for_reference(
         let [start, end] = directional_axis_endpoints(entity, r)?;
         let anchor = (start + end) * 0.5;
         return Some((anchor, segment_normal(start, end)));
+    }
+    if let Some(segment) = r.segment_center_index() {
+        let planar = crate::entities::curve::entity_curve(entity)?;
+        let curve = planar.curve.segments().into_iter().nth(segment)?;
+        let on_arc = planar.plane.point_at(curve.point_at(0.5));
+        let cadkernel::geom2d::Curve::Arc(arc) = curve else {
+            return None;
+        };
+        let center = planar.plane.point_at(arc.centre);
+        let center = Vector3::new(center[0], center[1], center[2]);
+        let on_arc = Vector3::new(on_arc[0], on_arc[1], on_arc[2]);
+        return Some((on_arc, on_arc - center));
     }
     if let Some(segment) = r.segment_index() {
         let anchor = resolve_point(
@@ -1083,10 +1204,15 @@ impl super::Scene {
         &self,
         scope: ParametricScope,
         id: ConstraintId,
+        kind: ConstraintKind,
         related_entity_selected: bool,
         display_mode: i16,
+        bar_mode: i16,
     ) -> bool {
         self.is_parametric_constraint_visible(scope, id)
+            && kind
+                .bar_mode_bit()
+                .is_none_or(|bit| bar_mode & bit != 0)
             && (self.shown_parametric_constraints.contains(&(scope, id))
                 || (display_mode & 2 != 0 && related_entity_selected))
     }
@@ -1437,40 +1563,6 @@ impl super::Scene {
         inferred
     }
 
-    pub fn smooth_constraint_refs(&self, handles: &[Handle]) -> Option<Vec<ParametricRef>> {
-        let [first, second] = handles else {
-            return None;
-        };
-        let first_entity = self.document.get_entity(*first)?;
-        let second_entity = self.document.get_entity(*second)?;
-        let (spline_handle, spline, target_handle, target) = match (first_entity, second_entity) {
-            (acadrust::EntityType::Spline(spline), target) => (*first, spline, *second, target),
-            (target, acadrust::EntityType::Spline(spline)) => (*second, spline, *first, target),
-            _ => return None,
-        };
-        if spline.flags.closed || spline.flags.periodic {
-            return None;
-        }
-        let spline_points =
-            super::dimension_assoc::source_points(&acadrust::EntityType::Spline(spline.clone()));
-        let target_points = super::dimension_assoc::source_points(target);
-        let spline_ends = [*spline_points.first()?, *spline_points.last()?];
-        let target_ends = [*target_points.first()?, *target_points.last()?];
-        let mut best = (f64::INFINITY, 0, 0);
-        for (source_marker, source) in spline_ends.iter().enumerate() {
-            for (target_marker, target) in target_ends.iter().enumerate() {
-                let distance = (*source - *target).length_squared();
-                if distance < best.0 {
-                    best = (distance, source_marker, target_marker);
-                }
-            }
-        }
-        Some(vec![
-            ParametricRef::point(spline_handle, best.1 as i32),
-            ParametricRef::point(target_handle, best.2 as i32),
-        ])
-    }
-
     /// The constraint set for `scope`, if one has been created.
     pub fn parametric_constraint_set(
         &self,
@@ -1521,6 +1613,7 @@ impl super::Scene {
         vp_size: (f32, f32),
         show_values: bool,
         display_mode: i16,
+        bar_mode: i16,
     ) -> Vec<(
         ConstraintId,
         iced::Point,
@@ -1555,7 +1648,14 @@ impl super::Scene {
                     .iter()
                     .any(|reference| self.selected.contains(&reference.entity)
                         || self.preview_hidden.contains(&reference.entity));
-                self.should_display_parametric_constraint(scope, c.id, selected, display_mode)
+                self.should_display_parametric_constraint(
+                    scope,
+                    c.id,
+                    c.kind,
+                    selected,
+                    display_mode,
+                    bar_mode,
+                )
             })
             .flat_map(|c| {
                 let is_conflicting = set.conflicts.iter().any(|(id, _)| *id == c.id);
@@ -1627,6 +1727,7 @@ impl super::Scene {
         vp_size: (f32, f32),
         show_values: bool,
         display_mode: i16,
+        bar_mode: i16,
         p: iced::Point,
     ) -> Option<ConstraintId> {
         let placements = self.constraint_glyph_placements_screen(
@@ -1634,6 +1735,7 @@ impl super::Scene {
             vp_size,
             show_values,
             display_mode,
+            bar_mode,
         );
         let glyphs: Vec<(iced::Point, [f32; 2], String, bool)> = placements
             .iter()
@@ -1671,6 +1773,7 @@ impl super::Scene {
             ConstraintKind,
             Vec<ParametricRef>,
             Option<DrivingValue>,
+            Option<Vector3>,
         )> = Vec::new();
         for (scope_index, set) in self.parametric_constraints.iter().enumerate() {
             for c in &set.constraints {
@@ -1685,16 +1788,27 @@ impl super::Scene {
                         marker: r.marker,
                     })
                     .collect();
-                to_add.push((scope_index, c.kind, new_refs, c.driving_param.clone()));
+                to_add.push((
+                    scope_index,
+                    c.kind,
+                    new_refs,
+                    c.driving_param.clone(),
+                    c.axis_direction,
+                ));
             }
         }
         if to_add.is_empty() {
             return;
         }
         let mut touched: Vec<Handle> = Vec::new();
-        for (scope_index, kind, refs, driving_param) in to_add {
+        for (scope_index, kind, refs, driving_param, axis_direction) in to_add {
             touched.extend(refs.iter().map(|r| r.entity));
             self.parametric_constraints[scope_index].add(kind, refs, driving_param);
+            self.parametric_constraints[scope_index]
+                .constraints
+                .last_mut()
+                .expect("the copied constraint was just added")
+                .axis_direction = axis_direction;
         }
         touched.sort();
         touched.dedup();
@@ -1790,6 +1904,7 @@ mod tests {
             rigid_points: Vec::new(),
             distance_direction_type: 0,
             distance_direction: None,
+            axis_direction: None,
             angle_sector: angle_sector::PARALLEL_COUNTERCLOCKWISE,
         };
         let (anchor, direction) =
@@ -1825,6 +1940,7 @@ mod tests {
             rigid_points: Vec::new(),
             distance_direction_type: 0,
             distance_direction: None,
+            axis_direction: None,
             angle_sector: angle_sector::PARALLEL_COUNTERCLOCKWISE,
         };
         let tangent = relation(
@@ -2213,18 +2329,34 @@ mod tests {
             vec![ParametricRef::whole(h(1))],
             None,
         );
-        assert!(!scene.should_display_parametric_constraint(scope, id, false, 3));
-        assert!(scene.should_display_parametric_constraint(scope, id, true, 2));
-        assert!(!scene.should_display_parametric_constraint(scope, id, true, 1));
+        assert!(!scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, false, 3, 4095
+        ));
+        assert!(scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, true, 2, 4095
+        ));
+        assert!(!scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, true, 1, 4095
+        ));
         scene.note_parametric_constraint_applied(scope, id, 1);
-        assert!(scene.should_display_parametric_constraint(scope, id, false, 0));
+        assert!(scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, false, 0, 4095
+        ));
         scene.set_parametric_constraint_visibility(scope, None, false, false);
-        assert!(!scene.should_display_parametric_constraint(scope, id, true, 3));
+        assert!(!scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, true, 3, 4095
+        ));
         scene.set_parametric_constraint_visibility(scope, None, false, true);
-        assert!(scene.should_display_parametric_constraint(scope, id, false, 0));
+        assert!(scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, false, 0, 4095
+        ));
         scene.note_parametric_constraint_applied(scope, id, 0);
-        assert!(!scene.should_display_parametric_constraint(scope, id, false, 3));
-        assert!(scene.should_display_parametric_constraint(scope, id, true, 2));
+        assert!(!scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, false, 3, 4095
+        ));
+        assert!(scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, true, 2, 4095
+        ));
     }
 
     #[test]
@@ -2238,7 +2370,9 @@ mod tests {
         );
         scene.hidden_parametric_constraints.insert((scope, id));
 
-        assert!(!scene.should_display_parametric_constraint(scope, id, true, 2));
+        assert!(!scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, true, 2, 4095
+        ));
     }
 
     #[test]
@@ -2312,5 +2446,38 @@ mod tests {
             scene.parametric_connected_handles(ParametricScope::ModelSpace, &[h(1)], false),
             vec![h(1), h(2), h(3)]
         );
+    }
+
+    #[test]
+    fn duplicating_an_axis_constraint_keeps_its_direction() {
+        let mut scene = super::super::Scene::new();
+        let line = |y| {
+            acadrust::EntityType::Line(acadrust::entities::Line::from_points(
+                Vector3::new(0.0, y, 0.0),
+                Vector3::new(4.0, y + 1.0, 0.0),
+            ))
+        };
+        let source = scene.add_entity(line(0.0));
+        let copied = scene.add_entity(line(10.0));
+        let direction = Vector3::new(3.0, 4.0, 0.0);
+        scene
+            .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+            .add_axis_constraint(
+                ConstraintKind::Horizontal,
+                vec![ParametricRef::whole(source)],
+                direction,
+            );
+        let mut handle_map = rustc_hash::FxHashMap::default();
+        handle_map.insert(source, copied);
+
+        scene.duplicate_parametric_constraints_for(&handle_map);
+
+        let constraints = &scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .unwrap()
+            .constraints;
+        assert_eq!(constraints.len(), 2);
+        assert_eq!(constraints[1].refs, vec![ParametricRef::whole(copied)]);
+        assert_eq!(constraints[1].axis_direction, Some(direction.normalize()));
     }
 }

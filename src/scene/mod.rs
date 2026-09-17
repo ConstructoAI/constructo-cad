@@ -33,6 +33,7 @@ pub(crate) mod centermark;
 pub(crate) mod dimension_assoc;
 pub(crate) mod dimension_assoc_chain;
 pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
+pub use page_setup::{apply_default_page_setup, rotated_margins};
 mod dwg_native_constraints;
 mod entity;
 #[cfg(test)]
@@ -3245,6 +3246,23 @@ impl Scene {
         );
     }
 
+    pub fn bump_entities_with_parametric_transform_policy(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        driven_refs: &[parametric_constraints::ParametricRef],
+        transformed_refs: &[parametric_constraints::ParametricRef],
+        retained_originals: &[(Handle, EntityType)],
+    ) {
+        self.bump_entities_with_solve_policy(
+            changes,
+            driven_refs,
+            true,
+            retained_originals,
+            transformed_refs,
+            true,
+        );
+    }
+
     fn bump_entities_with_solve_policy(
         &mut self,
         changes: &[(Handle, ChangeKind)],
@@ -4361,13 +4379,8 @@ impl Scene {
             None
         })?;
         // `paper_limits()` already swaps the sheet for a 90°/270° rotation, so the
-        // margins must rotate to the same edges: a margin on a physical side moves
-        // to the displayed side that side rotates onto.
-        let (ml, mb, mr, mt) = match rot {
-            1 | 3 => (bottom, left, top, right),
-            2 => (right, top, left, bottom),
-            _ => (left, bottom, right, top),
-        };
+        // margins must rotate to the same edges.
+        let (ml, mb, mr, mt) = page_setup::rotated_margins((left, bottom, right, top), rot);
         // Plot margins are millimetres like the paper size; scale them into the
         // layout's paper-space units so the inset matches the (already scaled)
         // sheet rect. Without this an inch paper space insets an ~8-inch sheet
@@ -4951,6 +4964,78 @@ impl Scene {
             Some(ObjectType::Dictionary(_))
         )
         .then_some(owner)
+    }
+
+    /// Millimetres in one unit of the paper side of this drawing's scale
+    /// family: 25.4 for an imperial drawing (whose `1/8" = 1'-0"` style scales
+    /// measure paper in inches), 1 for a metric one. Plot-scale factors built
+    /// from [`Scene::scale_list`] are expressed per this unit; page setups
+    /// store theirs per the layout's own paper unit, so the two are converted
+    /// through this value.
+    pub(crate) fn scale_family_unit_mm(&self) -> f64 {
+        if self.prefers_imperial_scales() == Some(true) {
+            25.4
+        } else {
+            1.0
+        }
+    }
+
+    /// The `paper : drawing` ratio behind a scale-list name, from the
+    /// drawing's own `Scale` object when it has one, otherwise from the
+    /// built-in family. A ratio keeps the plot scale readable in a page setup
+    /// (`1 : 250` rather than `0.004 : 1`).
+    pub(crate) fn scale_ratio(&self, name: &str) -> Option<(f64, f64)> {
+        use acadrust::objects::ObjectType;
+        let stored = self.document.objects.values().find_map(|o| match o {
+            ObjectType::Scale(s) if !s.is_temporary && s.name.eq_ignore_ascii_case(name) => {
+                Some((s.paper_units, s.drawing_units))
+            }
+            _ => None,
+        });
+        stored
+            .or_else(|| Self::parse_scale_name_ratio(name))
+            .filter(|(paper, drawing)| *paper > 0.0 && *drawing > 0.0)
+    }
+
+    /// The `paper : drawing` ratio spelled by a scale name: `1:250` gives
+    /// `(1, 250)`, an architectural `1/8" = 1'-0"` gives `(0.125, 12)` in
+    /// inches. Anything else is not a scale name.
+    pub(crate) fn parse_scale_name_ratio(name: &str) -> Option<(f64, f64)> {
+        if let Some((paper, drawing)) = name.split_once(':') {
+            let paper: f64 = paper.trim().parse().ok()?;
+            let drawing: f64 = drawing.trim().parse().ok()?;
+            return (paper > 0.0 && drawing > 0.0).then_some((paper, drawing));
+        }
+        let (paper, drawing) = name.split_once('=')?;
+        let paper = Self::parse_feet_inches(paper)?;
+        let drawing = Self::parse_feet_inches(drawing)?;
+        (paper > 0.0 && drawing > 0.0).then_some((paper, drawing))
+    }
+
+    /// Inches in a `F'-I"` / `I"` / `F'` length, where the inch part may be a
+    /// fraction (`3/32"`).
+    fn parse_feet_inches(text: &str) -> Option<f64> {
+        let text = text.trim();
+        let (feet, inches) = match text.split_once('\'') {
+            Some((feet, rest)) => (
+                feet.trim().parse::<f64>().ok()?,
+                rest.trim_start_matches('-').trim(),
+            ),
+            None => (0.0, text),
+        };
+        let inches = inches.trim_end_matches('"').trim();
+        let inches = if inches.is_empty() {
+            0.0
+        } else if let Some((num, den)) = inches.split_once('/') {
+            let den: f64 = den.trim().parse().ok()?;
+            if den <= 0.0 {
+                return None;
+            }
+            num.trim().parse::<f64>().ok()? / den
+        } else {
+            inches.parse::<f64>().ok()?
+        };
+        Some(feet * 12.0 + inches)
     }
 
     /// Handle of the real (non-temporary) `Scale` object with this display name.
