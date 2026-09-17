@@ -5096,6 +5096,12 @@ plot =
     .system-default-printer = Výchozí tiskárna systému
     .what-to-plot = Co fabulovat
     .x-mm = X (mm)
+    .x-in = X (palce)
+    .y-in = Y (palce)
+    .hide-paperspace-objects = Skrýt objekty výkresového prostoru
+    .save-changes-to-layout = Uložit změny do rozvržení
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ nepodporuje __ocs_fmt_1__; přepnuto na výchozí list __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ nepodporuje __ocs_fmt_1__; list byl zachován (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

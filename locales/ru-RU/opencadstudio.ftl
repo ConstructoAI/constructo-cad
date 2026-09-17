@@ -5100,6 +5100,12 @@ plot =
     .system-default-printer = Системный принтер по умолчанию
     .what-to-plot = Что спланировать
     .x-mm = X (мм)
+    .x-in = X (дюймы)
+    .y-in = Y (дюймы)
+    .hide-paperspace-objects = Скрыть объекты пространства листа
+    .save-changes-to-layout = Сохранить изменения в листе
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ не поддерживает __ocs_fmt_1__; выбран формат по умолчанию __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ не поддерживает __ocs_fmt_1__; формат сохранён (PAPERUPDATE = 0).
     .y-mm = Y (мм)
 
 manage =

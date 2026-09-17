@@ -5099,6 +5099,12 @@ plot =
     .system-default-printer = Impressora padrão do sistema
     .what-to-plot = O que plotar
     .x-mm = X (mm)
+    .x-in = X (pol)
+    .y-in = Y (pol)
+    .hide-paperspace-objects = Ocultar objetos do espaço do papel
+    .save-changes-to-layout = Salvar alterações no layout
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ não suporta __ocs_fmt_1__; alterado para sua folha padrão __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ não suporta __ocs_fmt_1__; a folha foi mantida (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

@@ -5098,6 +5098,12 @@ plot =
     .system-default-printer = Domyślna drukarka systemowa
     .what-to-plot = Co nakreślić
     .x-mm = X (mm)
+    .x-in = X (cale)
+    .y-in = Y (cale)
+    .hide-paperspace-objects = Ukryj obiekty przestrzeni papieru
+    .save-changes-to-layout = Zapisz zmiany w arkuszu
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ nie obsługuje __ocs_fmt_1__; przełączono na domyślny arkusz __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ nie obsługuje __ocs_fmt_1__; arkusz zachowano (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

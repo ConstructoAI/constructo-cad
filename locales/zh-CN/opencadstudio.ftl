@@ -5082,6 +5082,12 @@ plot =
     .system-default-printer = 系统默认打印机
     .what-to-plot = 打印内容
     .x-mm = X (毫米)
+    .x-in = X（英寸）
+    .y-in = Y（英寸）
+    .hide-paperspace-objects = 隐藏图纸空间对象
+    .save-changes-to-layout = 将修改保存到布局
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ 不支持 __ocs_fmt_1__；已切换到其默认图纸 __ocs_fmt_2__（PAPERUPDATE = 1）。
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ 不支持 __ocs_fmt_1__；保留原图纸（PAPERUPDATE = 0）。
     .y-mm = Y (毫米)
 
 manage =

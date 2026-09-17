@@ -5097,6 +5097,12 @@ plot =
     .system-default-printer = Systemstandarddrucker
     .what-to-plot = Was zu plotten
     .x-mm = X (mm)
+    .x-in = X (Zoll)
+    .y-in = Y (Zoll)
+    .hide-paperspace-objects = Papierbereichsobjekte ausblenden
+    .save-changes-to-layout = Änderungen im Layout speichern
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ unterstützt __ocs_fmt_1__ nicht; auf das Standardblatt __ocs_fmt_2__ gewechselt (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ unterstützt __ocs_fmt_1__ nicht; das Blatt wird beibehalten (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

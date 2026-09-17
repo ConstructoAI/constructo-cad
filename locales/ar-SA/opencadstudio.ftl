@@ -5111,6 +5111,12 @@ plot =
     .system-default-printer = طابعة النظام الافتراضية
     .what-to-plot = ما المراد طباعته
     .x-mm = X (مم)
+    .x-in = X (بوصة)
+    .y-in = Y (بوصة)
+    .hide-paperspace-objects = إخفاء كائنات مساحة الورق
+    .save-changes-to-layout = حفظ التغييرات في التخطيط
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ لا يدعم __ocs_fmt_1__؛ تم التبديل إلى الورقة الافتراضية __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ لا يدعم __ocs_fmt_1__؛ تم الاحتفاظ بالورقة (PAPERUPDATE = 0).
     .y-mm = Y (مم)
 
 manage =

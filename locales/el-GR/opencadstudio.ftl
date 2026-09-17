@@ -5099,6 +5099,12 @@ plot =
     .system-default-printer = Προεπιλεγμένος εκτυπωτής συστήματος
     .what-to-plot = Τι θα εκτυπωθεί
     .x-mm = X (mm)
+    .x-in = X (in)
+    .y-in = Y (in)
+    .hide-paperspace-objects = Απόκρυψη αντικειμένων χώρου χαρτιού
+    .save-changes-to-layout = Αποθήκευση αλλαγών στο layout
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = Ο __ocs_fmt_0__ δεν υποστηρίζει το __ocs_fmt_1__· έγινε αλλαγή στο προεπιλεγμένο φύλλο του __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = Ο __ocs_fmt_0__ δεν υποστηρίζει το __ocs_fmt_1__· το φύλλο διατηρείται (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

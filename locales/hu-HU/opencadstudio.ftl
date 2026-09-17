@@ -5098,6 +5098,12 @@ plot =
     .system-default-printer = Rendszer alapértelmezett nyomtató
     .what-to-plot = Mit kell kitalálni
     .x-mm = X (mm)
+    .x-in = X (hüvelyk)
+    .y-in = Y (hüvelyk)
+    .hide-paperspace-objects = Papírtér-objektumok elrejtése
+    .save-changes-to-layout = Módosítások mentése az elrendezésbe
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = A(z) __ocs_fmt_0__ nem támogatja a(z) __ocs_fmt_1__ lapot; átváltva az alapértelmezett __ocs_fmt_2__ lapra (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = A(z) __ocs_fmt_0__ nem támogatja a(z) __ocs_fmt_1__ lapot; a lap megmarad (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

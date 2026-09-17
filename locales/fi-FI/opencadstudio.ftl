@@ -5098,6 +5098,12 @@ plot =
     .system-default-printer = Järjestelmän oletustulostin
     .what-to-plot = Mitä piirtää
     .x-mm = X (mm)
+    .x-in = X (tuumaa)
+    .y-in = Y (tuumaa)
+    .hide-paperspace-objects = Piilota paperitilan objektit
+    .save-changes-to-layout = Tallenna muutokset asetteluun
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ ei tue arkkia __ocs_fmt_1__; vaihdettiin oletusarkkiin __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ ei tue arkkia __ocs_fmt_1__; arkki säilytetään (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

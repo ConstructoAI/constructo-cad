@@ -5039,6 +5039,12 @@ plot =
     .system-default-printer = Varsayılan sistem yazıcısı
     .what-to-plot = Yazdırılacak Alan
     .x-mm = X (mm)
+    .x-in = X (inç)
+    .y-in = Y (inç)
+    .hide-paperspace-objects = Kağıt alanı nesnelerini gizle
+    .save-changes-to-layout = Değişiklikleri yerleşime kaydet
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__, __ocs_fmt_1__ sayfasını desteklemiyor; varsayılan sayfası __ocs_fmt_2__ seçildi (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__, __ocs_fmt_1__ sayfasını desteklemiyor; sayfa korunuyor (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =
