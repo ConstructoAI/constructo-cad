@@ -64,3 +64,39 @@ impl CadCommand for ConstraintBarOptionCommand {
 inventory::submit!(crate::command::CommandRegistration {
     names: &["CONSTRAINTBAR"]
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn relaunch(result: CmdResult) -> (String, Vec<Handle>) {
+        let CmdResult::Relaunch(command, handles) = result else {
+            panic!("expected relaunch");
+        };
+        (command, handles)
+    }
+
+    #[test]
+    fn enter_defaults_to_show_and_keeps_the_selection() {
+        let handles = vec![Handle::new(2), Handle::new(5)];
+        let mut command = ConstraintBarOptionCommand::new(handles.clone());
+
+        assert_eq!(relaunch(command.on_enter()), ("GCSHOW".to_string(), handles));
+    }
+
+    #[test]
+    fn hide_and_reset_route_to_their_apply_commands() {
+        let handle = Handle::new(7);
+        let mut hide = ConstraintBarOptionCommand::new(vec![handle]);
+        assert_eq!(
+            relaunch(hide.on_text_input("hide").unwrap()),
+            ("GCHIDE".to_string(), vec![handle])
+        );
+
+        let mut reset = ConstraintBarOptionCommand::new(vec![handle]);
+        assert_eq!(
+            relaunch(reset.on_text_input("r").unwrap()),
+            ("CONSTRAINTBAR_RESET".to_string(), vec![handle])
+        );
+    }
+}

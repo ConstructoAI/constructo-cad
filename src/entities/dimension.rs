@@ -1669,9 +1669,9 @@ pub(crate) fn resolved_dimension_style(
     }
 
     // Negative DIMLFAC applies only in paper space, and there only to a
-    // dimension that measures model space through a viewport. AutoCAD writes
-    // the factor it actually applied as ACAD_DIMASSOC_CALC_DIMLFAC: zero for a
-    // dimension of paper-space geometry, which then reads its sheet distance.
+    // dimension that measures model space through a viewport. The associative
+    // record stores the applied factor; zero marks paper-space geometry whose
+    // dimension reads its sheet distance.
     if style.dimlfac < 0.0 {
         style.dimlfac = match calculated_dimlfac(dimension) {
             Some(calculated) if calculated.abs() < 1e-12 => 1.0,
@@ -1685,7 +1685,7 @@ pub(crate) fn resolved_dimension_style(
     style
 }
 
-/// The linear factor AutoCAD applied when it last regenerated the dimension.
+/// The linear factor recorded when the dimension was last regenerated.
 fn calculated_dimlfac(dimension: &Dimension) -> Option<f64> {
     dimension
         .base()
@@ -1694,7 +1694,7 @@ fn calculated_dimlfac(dimension: &Dimension) -> Option<f64> {
         .get_record("ACAD_DIMASSOC_CALC_DIMLFAC")
         .and_then(|record| {
             record.values.iter().find_map(|value| match value {
-                acadrust::xdata::XDataValue::Real(factor) => Some(*factor),
+                acadrust::xdata::XDataValue::Real(factor) if factor.is_finite() => Some(*factor),
                 _ => None,
             })
         })
@@ -4437,8 +4437,8 @@ fn text_fill_rect(
     }
     let pos = dimension_text_pos_f64(dim, style, text_height, dim_scale);
     let dimgap = style.map(|s| s.dimgap.abs()).unwrap_or(0.0) * dim_scale;
-    // ~0.6 × text_height per character; matches average glyph aspect for
-    // the bundled stick fonts. Inflate by 1 DIMGAP on each side.
+    // CELL_WIDTH × text_height per character approximates the average glyph
+    // aspect of the bundled stick fonts. Inflate by 1 DIMGAP on each side.
     let stack_scale = style.map(dimtfac_or_one).unwrap_or(1.0);
     let approx_w = text_cells(&value, stack_scale) * text_height * CELL_WIDTH + dimgap * 2.0;
     let approx_h = dimension_text_extent_height(dim, style, text_height) + dimgap * 2.0;
@@ -6366,8 +6366,8 @@ fn dimension_text_parts(
     };
     let primary_raw = match dim {
         Dimension::Radius(_) | Dimension::LargeRadial(_) => format!("R{}", value),
-        // U+2205 is the diameter sign AutoCAD writes (and what `%%c` resolves
-        // to); the bundled dimension fonts carry it where Latin Ø is missing.
+        // U+2205 is the native diameter sign and what `%%c` resolves to; the
+        // bundled dimension fonts carry it where Latin Ø is missing.
         Dimension::Diameter(_) => format!("∅{}", value),
         _ => value,
     };
@@ -7323,9 +7323,9 @@ fn text_on_single_arrow_dim_line(
     )
 }
 
-/// AutoCAD writes the text middle point (group 11) for automatic and hand
-/// placed text alike, so a non-zero point is where the text was drawn and a
-/// regenerated dimension keeps it. Only a cleared point is placed from the style.
+/// The stored text middle point (group 11) applies to automatic and hand-placed
+/// text alike. A regenerated dimension keeps any non-zero point; only a cleared
+/// point is placed from the style.
 fn stored_text_point(dim: &Dimension) -> Option<Vector3> {
     let p = dim.base().text_middle_point;
     (p.x * p.x + p.y * p.y + p.z * p.z > 1e-16).then_some(p)
@@ -8622,8 +8622,8 @@ mod layout_parity_tests {
         d
     }
 
-    // AutoCAD writes group 11 for every dimension; the regenerated text goes
-    // where the file says it was, moved by the user or not.
+    // Group 11 is authoritative whenever present, whether or not the user moved
+    // the text.
     #[test]
     fn stored_text_point_places_automatic_text() {
         let document = document();
@@ -8681,10 +8681,10 @@ mod layout_parity_tests {
     }
 
     // A negative DIMLFAC scales only a paper-space dimension that measures
-    // model space through a viewport. AutoCAD records the factor it applied;
-    // zero means the dimension reads its sheet distance unscaled.
+    // model space through a viewport. The association record carries the
+    // applied factor; zero means the dimension reads its sheet distance.
     #[test]
-    fn negative_dimlfac_follows_the_factor_autocad_applied() {
+    fn negative_dimlfac_follows_the_recorded_association_factor() {
         use acadrust::xdata::{ExtendedDataRecord, XDataValue};
         let document = CadDocument::new();
         let mut source = style(&document);
@@ -8704,6 +8704,8 @@ mod layout_parity_tests {
         assert_eq!(through_viewport.dimlfac, 4.0, "the recorded factor, made positive");
         let unknown = resolved_dimension_style(&source, &Dimension::Linear(d.clone()), &document);
         assert_eq!(unknown.dimlfac, 1.0, "model space without a record: unscaled");
+        let invalid = resolved_dimension_style(&source, &with_factor(f64::NAN), &document);
+        assert_eq!(invalid.dimlfac, 1.0, "invalid recorded factor: unscaled");
     }
 
     // DIMTMOVE 1: the stored point is where the hook starts. The hook runs

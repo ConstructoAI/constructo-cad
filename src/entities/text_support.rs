@@ -197,7 +197,7 @@ pub fn text_local_bounds(
 /// Expand DXF `%%x` special-character sequences that appear in both TEXT and MTEXT values:
 /// - `%%d` / `%%D` → `°`
 /// - `%%p` / `%%P` → `±`
-/// - `%%c` / `%%C` → `∅` (U+2205, the character AutoCAD writes for the diameter sign)
+/// - `%%c` / `%%C` → `∅` (U+2205, the native diameter sign)
 /// - `%%u` / `%%U` → underline toggle (stripped — not renderable with stroke fonts)
 /// - `%%o` / `%%O` → overline toggle (stripped)
 /// - `%%%%` → `%`
