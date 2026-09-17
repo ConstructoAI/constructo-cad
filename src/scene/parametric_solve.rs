@@ -2961,8 +2961,8 @@ fn solve_scope(
                 }
             }
             (EntityType::Spline(spline), EntityGeom::Spline { curve, control_z }) => {
-                let mut changed =
-                    spline.fit_points.len() > 0 || spline.control_points.len() != curve.poles.len();
+                let mut changed = crate::entities::spline::uses_fit_method(spline)
+                    || spline.control_points.len() != curve.poles.len();
                 let control_points: Vec<_> = curve
                     .poles
                     .iter()
@@ -2983,7 +2983,18 @@ fn solve_scope(
                     updated.knots = curve.knots.clone();
                     updated.control_points = control_points;
                     updated.weights = curve.weights.iter().map(|id| store.get(*id)).collect();
-                    updated.fit_points.clear();
+                    if !updated.fit_points.is_empty() {
+                        if let (Some(first), Some(point)) =
+                            (updated.fit_points.first_mut(), updated.control_points.first())
+                        {
+                            *first = *point;
+                        }
+                        if let (Some(last), Some(point)) =
+                            (updated.fit_points.last_mut(), updated.control_points.last())
+                        {
+                            *last = *point;
+                        }
+                    }
                     updated.begin_tangent = Vector3::ZERO;
                     updated.end_tangent = Vector3::ZERO;
                     updated.flags.rational = updated
