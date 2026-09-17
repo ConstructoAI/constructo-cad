@@ -1016,6 +1016,26 @@ impl OpenCADStudio {
             }
 
             // ── Persistent constraints ────────────────────────────────────
+            "CONSTRAINTBAR" | "CONSTRAINTBAR_OPTIONS" => {
+                use crate::modules::parametric::ConstraintBarOptionCommand;
+
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() && cmd == "CONSTRAINTBAR" {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let command =
+                        SelectObjectsCommand::routed("CONSTRAINTBAR", "CONSTRAINTBAR_OPTIONS");
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                } else if handles.is_empty() {
+                    self.command_line.push_output("No objects selected.");
+                } else {
+                    let command = ConstraintBarOptionCommand::new(handles);
+                    self.command_line.push_info(&command.prompt());
+                    self.command_line.set_step_options(command.options());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                }
+            }
+
             "GCSHOW" | "GCHIDE" | "DCSHOW" | "DCHIDE" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
@@ -1046,6 +1066,24 @@ impl OpenCADStudio {
                     .set_parametric_constraint_visibility(scope, None, false, true);
                 self.command_line
                     .push_output(format!("{} constraint indicator(s) reset.", count).as_str());
+            }
+
+            "CONSTRAINTBAR_RESET" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    self.command_line.push_output("No objects selected.");
+                } else {
+                    let scope = self.tabs[i].current_parametric_scope();
+                    let count = self.tabs[i].scene.set_parametric_constraint_visibility(
+                        scope,
+                        Some(&handles),
+                        false,
+                        true,
+                    );
+                    self.command_line.push_output(
+                        format!("{} constraint bar(s) reset.", count).as_str(),
+                    );
+                }
             }
 
             "GCSHOWALL" | "GCHIDEALL" | "DCSHOWALL" | "DCHIDEALL" => {
