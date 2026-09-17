@@ -373,6 +373,10 @@ pub struct ParametricConstraint {
     /// identifies the direction line for the line-relative modes.
     pub(crate) distance_direction_type: u8,
     pub(crate) distance_direction: Option<Vector3>,
+    /// World-space datum direction captured for Horizontal/Vertical. Native
+    /// files store the same vector on the connected constrained datum line.
+    /// `None` keeps legacy world-X/world-Y behavior.
+    pub(crate) axis_direction: Option<Vector3>,
     /// Which of the four directed sectors an angular constraint measures.
     pub(crate) angle_sector: u8,
 }
@@ -460,9 +464,69 @@ impl ParametricConstraintSet {
             rigid_points: Vec::new(),
             distance_direction_type: 0,
             distance_direction: None,
+            axis_direction: None,
             angle_sector: angle_sector::PARALLEL_COUNTERCLOCKWISE,
         });
         id
+    }
+
+    /// Appends a Horizontal/Vertical constraint tied to an explicit datum
+    /// direction rather than silently interpreting it in world coordinates.
+    pub fn add_axis_constraint(
+        &mut self,
+        kind: ConstraintKind,
+        refs: Vec<ParametricRef>,
+        direction: Vector3,
+    ) -> ConstraintId {
+        let fallback = if kind == ConstraintKind::Vertical {
+            Vector3::UNIT_Y
+        } else {
+            Vector3::UNIT_X
+        };
+        let direction = if direction.length_squared() > 1.0e-24 {
+            direction.normalize()
+        } else {
+            fallback
+        };
+        let id = self.add(kind, refs, None);
+        if let Some(constraint) = self.constraints.last_mut() {
+            constraint.axis_direction = Some(direction);
+        }
+        id
+    }
+
+    pub fn contains_axis_constraint(
+        &self,
+        kind: ConstraintKind,
+        refs: &[ParametricRef],
+        direction: Vector3,
+    ) -> bool {
+        let fallback = if kind == ConstraintKind::Vertical {
+            Vector3::UNIT_Y
+        } else {
+            Vector3::UNIT_X
+        };
+        let direction = if direction.length_squared() > 1.0e-24 {
+            direction.normalize()
+        } else {
+            fallback
+        };
+        self.constraints.iter().any(|constraint| {
+            if !constraint.enabled || constraint.kind != kind {
+                return false;
+            }
+            let same_refs = constraint.refs == refs
+                || (refs.len() == 2
+                    && constraint.refs.len() == 2
+                    && constraint.refs[0] == refs[1]
+                    && constraint.refs[1] == refs[0]);
+            if !same_refs {
+                return false;
+            }
+            let existing = constraint.axis_direction.unwrap_or(fallback);
+            existing.length_squared() > 1.0e-24
+                && existing.normalize().dot(&direction).abs() >= 1.0 - 1.0e-10
+        })
     }
 
     /// Removes a constraint by id. Returns whether one was actually removed.
@@ -1790,6 +1854,7 @@ mod tests {
             rigid_points: Vec::new(),
             distance_direction_type: 0,
             distance_direction: None,
+            axis_direction: None,
             angle_sector: angle_sector::PARALLEL_COUNTERCLOCKWISE,
         };
         let (anchor, direction) =
@@ -1825,6 +1890,7 @@ mod tests {
             rigid_points: Vec::new(),
             distance_direction_type: 0,
             distance_direction: None,
+            axis_direction: None,
             angle_sector: angle_sector::PARALLEL_COUNTERCLOCKWISE,
         };
         let tangent = relation(

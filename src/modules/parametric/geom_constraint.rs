@@ -14,7 +14,7 @@ impl GeomConstraintCommand {
 
     fn dispatch(keyword: &str) -> Option<&'static str> {
         Some(match keyword {
-            "H" | "HORIZONTAL" => "HCONSTRAINT",
+            "H" | "HORIZONTAL" => "GCHORIZONTAL",
             "V" | "VERTICAL" => "VCONSTRAINT",
             "P" | "PERPENDICULAR" => "GCPERPENDICULAR",
             "PA" | "PARALLEL" => "PCONSTRAINT",

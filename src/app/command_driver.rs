@@ -3188,6 +3188,150 @@ impl OpenCADStudio {
                     self.commit_undo_delta(i, pd);
                 }
             }
+            CmdResult::AddHorizontalConstraint {
+                selection,
+                direction,
+                label,
+            } => {
+                use crate::command::HorizontalConstraintSelection;
+                use crate::scene::parametric_constraints::{
+                    nearest_parametric_point, nearest_parametric_point_on_entity, ConstraintKind,
+                    DirectionalAxis, ParametricRef,
+                };
+
+                let scope = self.tabs[i].current_parametric_scope();
+                let to_world = |point: glam::DVec3| {
+                    acadrust::types::Vector3::new(point.x, point.y, point.z)
+                };
+                let (refs, initial_fixed) = match selection {
+                    HorizontalConstraintSelection::Reference(reference) => {
+                        let initial_fixed = match reference.directional_axis() {
+                            Some(DirectionalAxis::EllipseMajor | DirectionalAxis::EllipseMinor) => {
+                                vec![ParametricRef::center(reference.entity)]
+                            }
+                            Some(DirectionalAxis::TextBaseline) => {
+                                vec![ParametricRef::point(reference.entity, 0)]
+                            }
+                            None => Vec::new(),
+                        };
+                        (vec![reference], initial_fixed)
+                    }
+                    HorizontalConstraintSelection::Points(first, second) => {
+                        let resolve = |pick: crate::command::CoincidentPick| {
+                            if let Some(handle) = pick.handle {
+                                nearest_parametric_point_on_entity(
+                                    &self.tabs[i].scene.document,
+                                    scope,
+                                    handle,
+                                    to_world(pick.point),
+                                )
+                            } else {
+                                nearest_parametric_point(
+                                    &self.tabs[i].scene.document,
+                                    scope,
+                                    to_world(pick.point),
+                                    None,
+                                )
+                            }
+                        };
+                        let (Some(first_ref), Some(second_ref)) =
+                            (resolve(first), resolve(second))
+                        else {
+                            self.command_line.push_error(
+                                "Horizontal: select supported endpoints, centers, midpoints, or vertices.",
+                            );
+                            return Task::none();
+                        };
+                        if first_ref == second_ref {
+                            self.command_line
+                                .push_error("Horizontal: select two different points.");
+                            return Task::none();
+                        }
+                        (vec![first_ref, second_ref], vec![first_ref])
+                    }
+                };
+                let axis_length = direction.x.hypot(direction.y);
+                if axis_length <= 1.0e-12 {
+                    self.command_line
+                        .push_error("Horizontal: the current UCS X axis is not supported.");
+                    return Task::none();
+                }
+                let direction = acadrust::types::Vector3::new(
+                    direction.x / axis_length,
+                    direction.y / axis_length,
+                    0.0,
+                );
+                if let Err(message) = self.tabs[i].scene.validate_parametric_constraint(
+                    ConstraintKind::Horizontal,
+                    &refs,
+                    None,
+                ) {
+                    self.command_line.push_error(message);
+                    return Task::none();
+                }
+                if self
+                    .tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .is_some_and(|set| {
+                        set.contains_axis_constraint(
+                            ConstraintKind::Horizontal,
+                            &refs,
+                            direction,
+                        )
+                    })
+                {
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.command_line
+                        .push_error("Horizontal constraint is already applied.");
+                    return Task::none();
+                }
+                let constraints_before = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::scene::parametric_constraints::ParametricConstraintSet::new(scope)
+                    });
+                let mut touched = Vec::new();
+                for reference in &refs {
+                    if !touched.contains(&reference.entity) {
+                        touched.push(reference.entity);
+                    }
+                }
+                let pending = self.begin_undo(i, label, touched.len(), true);
+                self.tabs[i]
+                    .scene
+                    .record_undo_parametric_constraints_before(scope, constraints_before);
+                let id = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set_mut(scope)
+                    .add_axis_constraint(ConstraintKind::Horizontal, refs, direction);
+                self.tabs[i].scene.note_parametric_constraint_applied(
+                    scope,
+                    id,
+                    self.constraint_bar_display,
+                );
+                let changes = touched
+                    .into_iter()
+                    .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+                    .collect::<Vec<_>>();
+                self.tabs[i].scene.bump_entities_with_parametric_policy(
+                    &changes,
+                    &initial_fixed,
+                    self.constraint_solve_mode,
+                );
+                self.tabs[i].dirty = true;
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.command_line
+                    .push_output("Horizontal constraint applied.");
+                self.refresh_properties();
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
+                }
+            }
             CmdResult::AddPerpendicularConstraint {
                 first,
                 second,

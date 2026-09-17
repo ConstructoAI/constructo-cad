@@ -901,6 +901,37 @@ fn build_constraint(
     let point_ref = |sys: &mut System, cache: &mut HashMap<_, _>, r: ParametricRef| {
         resolve_constraint_point(document, sys, cache, r)
     };
+    let directional_line =
+        |sys: &mut System, cache: &mut HashMap<_, _>, r: ParametricRef| {
+            let geometry = resolve_ref(document, sys, cache, r)?;
+            let minor_axis = matches!(
+                r.directional_axis(),
+                Some(super::parametric_constraints::DirectionalAxis::EllipseMinor)
+            );
+            let line = match geometry {
+                EntityGeom::TextLine(line)
+                    if matches!(
+                        r.directional_axis(),
+                        Some(super::parametric_constraints::DirectionalAxis::TextBaseline)
+                    ) => line,
+                EntityGeom::Line(line) | EntityGeom::Ray(line) | EntityGeom::XLine(line)
+                    if r.marker.is_none() => line,
+                EntityGeom::Polyline { .. } => geometry.line_segment(r.segment_index()?)?,
+                EntityGeom::Ellipse(ellipse)
+                    if matches!(
+                        r.directional_axis(),
+                        Some(
+                            super::parametric_constraints::DirectionalAxis::EllipseMajor
+                                | super::parametric_constraints::DirectionalAxis::EllipseMinor
+                        )
+                    ) => GLine {
+                        p1: ellipse.center,
+                        p2: ellipse.focus1,
+                    },
+                _ => return None,
+            };
+            Some((line, minor_axis))
+        };
 
     let point_on_bounded_arc = |sys: &mut System, point: GPoint, arc: GArc| {
         let initial = BoundedArcValue::initial_parameter(sys.store(), point, arc);
@@ -933,30 +964,49 @@ fn build_constraint(
         ConstraintKind::Coincident | ConstraintKind::Concentric | ConstraintKind::CenterPoint => {
             point_pair_equal(sys, cache, &c.refs)
         }
-        ConstraintKind::Horizontal => match c.refs.as_slice() {
-            [r] => whole_line(sys, cache, *r)
-                .map(|line| {
-                    vec![Rc::new(Equal::new(line.p1.y, line.p2.y, 1.0)) as Rc<dyn Constraint>]
-                })
-                .unwrap_or_default(),
-            [a, b] => match (point_ref(sys, cache, *a), point_ref(sys, cache, *b)) {
-                (Some(a), Some(b)) => vec![Rc::new(Equal::new(a.y, b.y, 1.0))],
+        ConstraintKind::Horizontal | ConstraintKind::Vertical => {
+            let fallback = if c.kind == ConstraintKind::Vertical {
+                Vector3::UNIT_Y
+            } else {
+                Vector3::UNIT_X
+            };
+            let direction = c.axis_direction.unwrap_or(fallback);
+            let length = direction.x.hypot(direction.y);
+            let (dx, dy) = if length > 1.0e-12 {
+                (direction.x / length, direction.y / length)
+            } else {
+                (fallback.x, fallback.y)
+            };
+            let datum = GLine {
+                p1: GPoint::new(sys.add_param(0.0, true), sys.add_param(0.0, true)),
+                p2: GPoint::new(sys.add_param(dx, true), sys.add_param(dy, true)),
+            };
+            match c.refs.as_slice() {
+                [reference] => directional_line(sys, cache, *reference)
+                    .map(|(line, minor_axis)| {
+                        if minor_axis {
+                            vec![Rc::new(PerpendicularConstraint::new(
+                                sys.store(),
+                                line,
+                                datum,
+                            )) as Rc<dyn Constraint>]
+                        } else {
+                            vec![Rc::new(ParallelConstraint::new(sys.store(), line, datum))
+                                as Rc<dyn Constraint>]
+                        }
+                    })
+                    .unwrap_or_default(),
+                [a, b] => match (point_ref(sys, cache, *a), point_ref(sys, cache, *b)) {
+                    (Some(a), Some(b)) => vec![Rc::new(ParallelConstraint::new(
+                        sys.store(),
+                        GLine { p1: a, p2: b },
+                        datum,
+                    ))],
+                    _ => Vec::new(),
+                },
                 _ => Vec::new(),
-            },
-            _ => Vec::new(),
-        },
-        ConstraintKind::Vertical => match c.refs.as_slice() {
-            [r] => whole_line(sys, cache, *r)
-                .map(|line| {
-                    vec![Rc::new(Equal::new(line.p1.x, line.p2.x, 1.0)) as Rc<dyn Constraint>]
-                })
-                .unwrap_or_default(),
-            [a, b] => match (point_ref(sys, cache, *a), point_ref(sys, cache, *b)) {
-                (Some(a), Some(b)) => vec![Rc::new(Equal::new(a.x, b.x, 1.0))],
-                _ => Vec::new(),
-            },
-            _ => Vec::new(),
-        },
+            }
+        }
         ConstraintKind::Parallel => {
             let [a, b] = c.refs.as_slice() else {
                 return Vec::new();
@@ -972,39 +1022,6 @@ fn build_constraint(
             let [a, b] = c.refs.as_slice() else {
                 return Vec::new();
             };
-            let directional_line =
-                |sys: &mut System, cache: &mut HashMap<_, _>, r: ParametricRef| {
-                    let geometry = resolve_ref(document, sys, cache, r)?;
-                    let minor_axis = matches!(
-                        r.directional_axis(),
-                        Some(super::parametric_constraints::DirectionalAxis::EllipseMinor)
-                    );
-                    let line = match geometry {
-                        EntityGeom::TextLine(line)
-                            if matches!(
-                                r.directional_axis(),
-                                Some(super::parametric_constraints::DirectionalAxis::TextBaseline)
-                            ) => line,
-                        EntityGeom::Line(line) | EntityGeom::Ray(line) | EntityGeom::XLine(line)
-                            if r.marker.is_none() => line,
-                        EntityGeom::Polyline { .. } => {
-                            geometry.line_segment(r.segment_index()?)?
-                        }
-                        EntityGeom::Ellipse(ellipse)
-                            if matches!(
-                                r.directional_axis(),
-                                Some(
-                                    super::parametric_constraints::DirectionalAxis::EllipseMajor
-                                        | super::parametric_constraints::DirectionalAxis::EllipseMinor
-                                )
-                            ) => GLine {
-                                p1: ellipse.center,
-                                p2: ellipse.focus1,
-                            },
-                        _ => return None,
-                    };
-                    Some((line, minor_axis))
-                };
             let (Some((fixed, fixed_minor)), Some((moving, moving_minor))) =
                 (directional_line(sys, cache, *a), directional_line(sys, cache, *b))
             else {
@@ -1868,7 +1885,21 @@ fn constrained_line_axes(constraints: &[&ParametricConstraint]) -> HashMap<Param
     for c in constraints.iter().filter(|c| c.enabled) {
         if let [reference] = c.refs.as_slice() {
             if matches!(c.kind, ConstraintKind::Horizontal | ConstraintKind::Vertical) {
-                axes.insert(*reference, c.kind == ConstraintKind::Vertical);
+                let fallback = if c.kind == ConstraintKind::Vertical {
+                    Vector3::UNIT_Y
+                } else {
+                    Vector3::UNIT_X
+                };
+                let direction = c.axis_direction.unwrap_or(fallback);
+                let length = direction.x.hypot(direction.y);
+                if length > 1.0e-12 {
+                    let (x, y) = (direction.x.abs() / length, direction.y.abs() / length);
+                    if x >= 1.0 - 1.0e-10 {
+                        axes.insert(*reference, false);
+                    } else if y >= 1.0 - 1.0e-10 {
+                        axes.insert(*reference, true);
+                    }
+                }
             }
         }
     }
@@ -1976,6 +2007,7 @@ fn solve_scope(
             rigid_points: Vec::new(),
             distance_direction_type: distance_direction_type::UNDIRECTED,
             distance_direction: None,
+            axis_direction: None,
             angle_sector: angle_sector::PARALLEL_COUNTERCLOCKWISE,
         };
         for constraint in build_constraint(
@@ -2295,7 +2327,12 @@ fn solve_scope(
         };
         let directional = set.constraints.iter().any(|constraint| {
             constraint.enabled
-                && constraint.kind == ConstraintKind::Perpendicular
+                && matches!(
+                    constraint.kind,
+                    ConstraintKind::Horizontal
+                        | ConstraintKind::Vertical
+                        | ConstraintKind::Perpendicular
+                )
                 && constraint.refs.iter().any(|reference| {
                     reference.entity == *handle && reference.directional_axis().is_some()
                 })
@@ -2336,7 +2373,12 @@ fn solve_scope(
         };
         let directional = set.constraints.iter().any(|constraint| {
             constraint.enabled
-                && constraint.kind == ConstraintKind::Perpendicular
+                && matches!(
+                    constraint.kind,
+                    ConstraintKind::Horizontal
+                        | ConstraintKind::Vertical
+                        | ConstraintKind::Perpendicular
+                )
                 && constraint.refs.iter().any(|reference| {
                     reference.entity == *handle
                         && matches!(
@@ -2930,6 +2972,7 @@ impl Scene {
             rigid_points: Vec::new(),
             distance_direction_type: 0,
             distance_direction: None,
+            axis_direction: None,
             angle_sector: angle_sector::PARALLEL_COUNTERCLOCKWISE,
         };
         let mut system = System::new();
