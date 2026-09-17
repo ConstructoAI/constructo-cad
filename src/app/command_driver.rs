@@ -3266,6 +3266,62 @@ impl OpenCADStudio {
                 self.tabs[i]
                     .scene
                     .record_undo_parametric_constraints_before(scope, constraints_before);
+                if first.entity != second.entity {
+                    use crate::scene::parametric_constraints::directional_reference_endpoints;
+
+                    let fixed_axis = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(first.entity)
+                        .and_then(|entity| directional_reference_endpoints(entity, first));
+                    let moving_axis = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(second.entity)
+                        .and_then(|entity| directional_reference_endpoints(entity, second));
+                    if let (Some([fixed_start, fixed_end]), Some([moving_start, moving_end])) =
+                        (fixed_axis, moving_axis)
+                    {
+                        let fixed_direction = fixed_end - fixed_start;
+                        let moving_direction = moving_end - moving_start;
+                        if fixed_direction.length_squared() > 1.0e-24
+                            && moving_direction.length_squared() > 1.0e-24
+                        {
+                            let fixed_angle = fixed_direction.y.atan2(fixed_direction.x);
+                            let moving_angle = moving_direction.y.atan2(moving_direction.x);
+                            let normalize = |angle: f64| {
+                                (angle + std::f64::consts::PI)
+                                    .rem_euclid(std::f64::consts::TAU)
+                                    - std::f64::consts::PI
+                            };
+                            let positive = normalize(
+                                fixed_angle + std::f64::consts::FRAC_PI_2 - moving_angle,
+                            );
+                            let negative = normalize(
+                                fixed_angle - std::f64::consts::FRAC_PI_2 - moving_angle,
+                            );
+                            let angle_rad = if positive.abs() <= negative.abs() {
+                                positive
+                            } else {
+                                negative
+                            };
+                            if angle_rad.abs() > 1.0e-12 {
+                                self.tabs[i].scene.transform_entities(
+                                    &[second.entity],
+                                    &crate::command::EntityTransform::Rotate {
+                                        center: glam::DVec3::new(
+                                            moving_start.x,
+                                            moving_start.y,
+                                            moving_start.z,
+                                        ),
+                                        axis: glam::DVec3::Z,
+                                        angle_rad,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
                 let id = self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
                     ConstraintKind::Perpendicular,
                     refs,
