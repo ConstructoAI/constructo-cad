@@ -3102,14 +3102,19 @@ impl Scene {
         let Some(style) = self.display_plot_style() else {
             return None;
         };
+        // Depth generation rides in the key: the fills below compose their
+        // depth from the live depth map, which can move independently of the
+        // wire set (a DRAWORDER edit re-ranks without retessellating).
         let key = (
             source_gen,
             style.name.to_ascii_lowercase(),
             pattern_scale.to_bits(),
+            self.draw_depth_generation(),
         );
         if let Some(hatches) = self.styled_wire_fill_cache.borrow().get(&key) {
             return Some(Arc::clone(hatches));
         }
+        let depths = self.draw_depth_map();
         let mut hatches = Vec::new();
         for wire in wires.iter().filter(|wire| wire.fill_is_2d_solid && wire.aci > 0) {
             let Some(pattern) = style
@@ -3161,7 +3166,14 @@ impl Scene {
                     line_weight_px,
                     angle_offset: 0.0,
                     scale: pattern_scale,
-                    draw_depth: wire.depth_override.unwrap_or(0.0),
+                    // Compose against the scene graph exactly like the wire
+                    // pipeline does. The raw depth_override is a per-block
+                    // child label (or None for top-level wires) — either way
+                    // it would place the fill outside its host's depth band
+                    // and let sibling wipes/masks bury it.
+                    draw_depth: crate::scene::pipeline::wire_gpu::wire_draw_depth(
+                        wire, &depths,
+                    ),
                 });
             }
         }
