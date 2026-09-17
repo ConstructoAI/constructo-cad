@@ -2979,6 +2979,9 @@ fn solve_scope(
                     .collect();
                 if changed {
                     let mut updated = spline.clone();
+                    if crate::entities::spline::uses_fit_method(spline) {
+                        updated.cv_frame_visible = true;
+                    }
                     updated.degree = curve.degree as i32;
                     updated.knots = curve.knots.clone();
                     updated.control_points = control_points;

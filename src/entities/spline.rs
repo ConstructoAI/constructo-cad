@@ -128,7 +128,6 @@ pub(crate) fn replace_with_nurbs(spline: &mut Spline, curve: &NurbsCurve3) {
     spline.fit_points = fit_points;
     spline.begin_tangent = acadrust::types::Vector3::ZERO;
     spline.end_tangent = acadrust::types::Vector3::ZERO;
-    spline.cv_frame_visible = true;
     spline.flags.rational = spline.weights.windows(2)
         .any(|pair| (pair[0] - pair[1]).abs() > 1e-12);
     spline.flags.closed = false;
