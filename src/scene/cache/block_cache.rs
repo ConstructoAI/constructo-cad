@@ -1703,6 +1703,14 @@ impl Batches {
                         );
                     }
                 }
+                // Glyph quads stay at neutral depth on purpose: the per-wire
+                // depth_override (b.local_depth) is composed with the insert's
+                // scene-graph level at upload time (wire_draw_depth:
+                // depths[insert] + override * half), the same place the
+                // wipeout/hatch fills get theirs. Baking the raw child rank
+                // into the vertices here would double-count it in per-block
+                // label units — for a negative rank that sinks the text below
+                // its own block's wipes instead of ahead of them.
                 if !b.pattern_stations.is_empty() {
                     b.pattern_stations = encode_pattern_stations(
                         std::mem::take(&mut b.pattern_stations),
@@ -2571,11 +2579,17 @@ fn emit_wire(
         .map(|marker| transformed_point_marker(marker, accum_xform));
     let point_marker = marker_transform.map(|(marker, _)| marker);
 
-    // Only band wires take a per-child composed depth: their solid area is
-    // what covers siblings, and their width already splits them into their own
-    // batches — thin wires keep the shared whole-insert depth so same-style
-    // batches stay merged.
-    let local_depth = (lw.world_width > 0.0)
+    // Band wires take a per-child composed depth: their solid area is what
+    // covers siblings, and their width already splits them into their own
+    // batches. Text-bearing wires need it too — but as `depth_override`, not
+    // baked into vertices: the upload resolves it against the insert's
+    // scene-graph entry (depths[insert] + override * half), which is what
+    // keeps text interleaved with its sibling wipeout/hatch fills. Without a
+    // composed rank the text sits at the bare insert level, an exact tie with
+    // every sibling fill, and the later wipeout pass erases it (unselected
+    // block text vanished under its wipeout; selecting won only because the
+    // xray pass ignores depth).
+    let local_depth = (lw.world_width > 0.0 || !lw.text_verts.is_empty())
         .then(|| d_range.0 + lw.local_rank * d_range.1);
     let plot_visible = ctx.plot_visible
         && lw.plot_visible
