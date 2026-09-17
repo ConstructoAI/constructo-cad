@@ -602,6 +602,7 @@ pub(super) struct OpenCADStudio {
     pub constraint_solve_mode: bool,
     pub constraint_infer: bool,
     pub constraint_bar_display: i16,
+    pub constraint_bar_mode: i16,
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command);
     /// 0 disables autosave.
     pub savetime_min: i32,
@@ -3882,6 +3883,7 @@ impl OpenCADStudio {
             constraint_solve_mode: true,
             constraint_infer: false,
             constraint_bar_display: 3,
+            constraint_bar_mode: 4095,
             savetime_min: 10,
             default_bg_color: None,
             default_paper_bg_color: None,

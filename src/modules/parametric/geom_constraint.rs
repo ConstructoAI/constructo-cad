@@ -19,7 +19,7 @@ impl GeomConstraintCommand {
             "P" | "PERPENDICULAR" => "GCPERPENDICULAR",
             "PA" | "PARALLEL" => "PCONSTRAINT",
             "T" | "TANGENT" => "TCONSTRAINT",
-            "SM" | "SMOOTH" => "SMOOTHCONSTRAINT",
+            "SM" | "SMOOTH" => "GCSMOOTH",
             "C" | "COINCIDENT" => "GCCOINCIDENT",
             "CON" | "CONCENTRIC" => "NCONSTRAINT",
             "COL" | "COLLINEAR" | "COLINEAR" => "LCONSTRAINT",

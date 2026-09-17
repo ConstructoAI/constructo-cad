@@ -1697,26 +1697,167 @@ fn build_constraint(
     }
 }
 
-fn smooth_target_jet(entity: &EntityType, marker: i32) -> Option<cadkernel::space::CurveJet> {
-    let parameter = match marker {
-        0 => 0.0,
-        1 => 1.0,
-        _ => return None,
-    };
-    let curve = crate::entities::curve::entity_curve(entity)?;
-    if curve.is_closed() {
-        return None;
+fn smooth_refs(refs: &[ParametricRef]) -> Option<(ParametricRef, ParametricRef, ParametricRef)> {
+    match refs {
+        [source, target_endpoint] => Some((
+            *source,
+            *target_endpoint,
+            ParametricRef::whole(target_endpoint.entity),
+        )),
+        [source, target_endpoint, target_curve]
+            if target_endpoint.entity == target_curve.entity =>
+        {
+            Some((*source, *target_endpoint, *target_curve))
+        }
+        _ => None,
     }
-    let step = if marker == 0 { 1.0e-4 } else { -1.0e-4 };
+}
+
+fn smooth_target_planar_curve(
+    entity: &EntityType,
+    curve_reference: ParametricRef,
+) -> Option<cadkernel::space::PlanarCurve> {
+    let planar = crate::entities::curve::entity_curve(entity)?;
+    let Some(segment) = curve_reference.segment_index() else {
+        return (!planar.is_closed()).then_some(planar);
+    };
+    let curve = planar.curve.segments().into_iter().nth(segment)?;
+    Some(cadkernel::space::PlanarCurve::new(planar.plane, curve))
+}
+
+fn smooth_endpoint_parameter(
+    entity: &EntityType,
+    endpoint_reference: ParametricRef,
+    curve: &cadkernel::space::PlanarCurve,
+) -> Option<f64> {
+    let marker = endpoint_reference.marker?;
+    let endpoint = super::parametric_constraints::resolve_point(entity, marker)?;
+    let endpoint = cadkernel::space::Vec3::new(endpoint.x, endpoint.y, endpoint.z);
+    let start = cadkernel::space::Vec3::from(curve.point_at(0.0));
+    let end = cadkernel::space::Vec3::from(curve.point_at(1.0));
+    Some(if endpoint.distance(start) <= endpoint.distance(end) {
+        0.0
+    } else {
+        1.0
+    })
+}
+
+fn smooth_target_jet(
+    entity: &EntityType,
+    endpoint_reference: ParametricRef,
+    curve_reference: ParametricRef,
+) -> Option<cadkernel::space::CurveJet> {
+    if curve_reference.segment_index().is_none() {
+        if let EntityType::Spline(spline) = entity {
+            let endpoint = match endpoint_reference.marker {
+                Some(0) => cadkernel::space::SplineEnd::Start,
+                Some(1) => cadkernel::space::SplineEnd::End,
+                _ => return None,
+            };
+            let nurbs = crate::entities::spline::nurbs3(spline)?;
+            return cadkernel::space::CurveJet::from_nurbs(&nurbs, endpoint);
+        }
+    }
+
+    let curve = smooth_target_planar_curve(entity, curve_reference)?;
+    let parameter = smooth_endpoint_parameter(entity, endpoint_reference, &curve)?;
+
     let point = curve.point_at(parameter);
     let tangent = curve.tangent_at(parameter);
-    let next = curve.point_at(parameter + step);
-    let third = curve.point_at(parameter + 2.0 * step);
-    Some(cadkernel::space::CurveJet {
-        point,
-        tangent,
-        curvature: cadkernel::space::curve::curvature_through(point, next, third),
-    })
+    match &curve.curve {
+        cadkernel::geom2d::Curve::Line(_) => {
+            cadkernel::space::CurveJet::linear(point, tangent)
+        }
+        cadkernel::geom2d::Curve::Arc(arc) => cadkernel::space::CurveJet::circular(
+            point,
+            tangent,
+            curve.plane.point_at(arc.centre),
+        ),
+        _ => None,
+    }
+}
+
+fn smooth_spline_plane(spline: &acadrust::entities::Spline) -> Option<cadkernel::space::Plane> {
+    let source = if crate::entities::spline::uses_fit_method(spline) {
+        &spline.fit_points
+    } else {
+        &spline.control_points
+    };
+    let origin = source.first()?;
+    let origin_vector = cadkernel::space::Vec3::new(origin.x, origin.y, origin.z);
+    let along = source
+        .iter()
+        .skip(1)
+        .map(|point| cadkernel::space::Vec3::new(point.x, point.y, point.z) - origin_vector)
+        .find(|vector| vector.length_squared() > 1.0e-24)?;
+    let normal = source
+        .iter()
+        .skip(1)
+        .map(|point| cadkernel::space::Vec3::new(point.x, point.y, point.z) - origin_vector)
+        .map(|vector| along.cross(vector))
+        .find(|vector| vector.length_squared() > 1.0e-24)?;
+    let plane = cadkernel::space::Plane::orthonormal(
+        origin_vector.to_array(),
+        along.to_array(),
+        normal.to_array(),
+    )?;
+    let points: Vec<_> = source.iter().map(|point| [point.x, point.y, point.z]).collect();
+    let tolerance = cadkernel::space::coplanarity_tolerance(&points);
+    source
+        .iter()
+        .all(|point| plane.contains([point.x, point.y, point.z], tolerance))
+        .then_some(plane)
+}
+
+fn smooth_entity_plane(
+    entity: &EntityType,
+    curve_reference: ParametricRef,
+) -> Option<cadkernel::space::Plane> {
+    if let EntityType::Spline(spline) = entity {
+        return crate::entities::curve::entity_curve(entity)
+            .map(|curve| curve.plane)
+            .or_else(|| smooth_spline_plane(spline));
+    }
+    smooth_target_planar_curve(entity, curve_reference).map(|curve| curve.plane)
+}
+
+fn smooth_refs_share_plane(
+    document: &acadrust::CadDocument,
+    source_ref: ParametricRef,
+    target_curve_ref: ParametricRef,
+) -> bool {
+    let Some(source_entity) = document.get_entity(source_ref.entity) else {
+        return false;
+    };
+    let Some(source_plane) = smooth_entity_plane(source_entity, ParametricRef::whole(source_ref.entity))
+    else {
+        return false;
+    };
+    let Some(target_entity) = document.get_entity(target_curve_ref.entity) else {
+        return false;
+    };
+    let Some(target_plane) = smooth_entity_plane(target_entity, target_curve_ref) else {
+        return false;
+    };
+    let points = [source_plane.origin, target_plane.origin];
+    let tolerance = cadkernel::space::coplanarity_tolerance(&points);
+    if let EntityType::Line(line) = target_entity {
+        return source_plane
+            .contains([line.start.x, line.start.y, line.start.z], tolerance)
+            && source_plane
+                .contains([line.end.x, line.end.y, line.end.z], tolerance);
+    }
+    let (Some(source_normal), Some(target_normal)) =
+        (source_plane.normal(), target_plane.normal())
+    else {
+        return false;
+    };
+    cadkernel::space::Vec3::from(source_normal)
+        .cross(cadkernel::space::Vec3::from(target_normal))
+        .length()
+        <= 1.0e-9
+        && source_plane.contains(target_plane.origin, tolerance)
+        && target_plane.contains(source_plane.origin, tolerance)
 }
 
 fn apply_smooth_constraints(
@@ -1729,7 +1870,9 @@ fn apply_smooth_constraints(
         .iter()
         .filter(|constraint| constraint.enabled && constraint.kind == ConstraintKind::Smooth)
     {
-        let [source_ref, target_ref] = constraint.refs.as_slice() else {
+        let Some((source_ref, target_ref, target_curve_ref)) =
+            smooth_refs(&constraint.refs)
+        else {
             continue;
         };
         let source = results
@@ -1750,10 +1893,7 @@ fn apply_smooth_constraints(
             Some(1) => cadkernel::space::SplineEnd::End,
             _ => continue,
         };
-        let Some(target_marker) = target_ref.marker else {
-            continue;
-        };
-        let Some(target_jet) = smooth_target_jet(&target, target_marker) else {
+        let Some(target_jet) = smooth_target_jet(&target, target_ref, target_curve_ref) else {
             continue;
         };
         let Some(curve) = crate::entities::spline::nurbs3(&spline) else {
@@ -2821,8 +2961,8 @@ fn solve_scope(
                 }
             }
             (EntityType::Spline(spline), EntityGeom::Spline { curve, control_z }) => {
-                let mut changed =
-                    spline.fit_points.len() > 0 || spline.control_points.len() != curve.poles.len();
+                let mut changed = crate::entities::spline::uses_fit_method(spline)
+                    || spline.control_points.len() != curve.poles.len();
                 let control_points: Vec<_> = curve
                     .poles
                     .iter()
@@ -2839,11 +2979,25 @@ fn solve_scope(
                     .collect();
                 if changed {
                     let mut updated = spline.clone();
+                    if crate::entities::spline::uses_fit_method(spline) {
+                        updated.cv_frame_visible = true;
+                    }
                     updated.degree = curve.degree as i32;
                     updated.knots = curve.knots.clone();
                     updated.control_points = control_points;
                     updated.weights = curve.weights.iter().map(|id| store.get(*id)).collect();
-                    updated.fit_points.clear();
+                    if !updated.fit_points.is_empty() {
+                        if let (Some(first), Some(point)) =
+                            (updated.fit_points.first_mut(), updated.control_points.first())
+                        {
+                            *first = *point;
+                        }
+                        if let (Some(last), Some(point)) =
+                            (updated.fit_points.last_mut(), updated.control_points.last())
+                        {
+                            *last = *point;
+                        }
+                    }
                     updated.begin_tangent = Vector3::ZERO;
                     updated.end_tangent = Vector3::ZERO;
                     updated.flags.rational = updated
@@ -2871,13 +3025,8 @@ impl Scene {
         refs: &[ParametricRef],
         driving_param: Option<&super::named_parameters::DrivingValue>,
     ) -> Result<(), &'static str> {
-        if !refs_share_supported_plane(&self.document, refs) {
-            return Err(
-                "Constraint references must be supported entities on the same world-XY plane.",
-            );
-        }
         if kind == ConstraintKind::Smooth {
-            let [source_ref, target_ref] = refs else {
+            let Some((source_ref, target_ref, target_curve_ref)) = smooth_refs(refs) else {
                 return Err("Smooth requires one spline endpoint and one target endpoint.");
             };
             if source_ref.entity == target_ref.entity {
@@ -2895,13 +3044,16 @@ impl Scene {
                 Some(1) => cadkernel::space::SplineEnd::End,
                 _ => return Err("Smooth requires a spline endpoint."),
             };
-            let Some(target_marker) = target_ref.marker else {
+            let Some(_) = target_ref.marker else {
                 return Err("Smooth requires a target endpoint.");
             };
             let Some(target) = self.document.get_entity(target_ref.entity) else {
                 return Err("Smooth target does not exist.");
             };
-            let Some(target_jet) = smooth_target_jet(target, target_marker) else {
+            if !smooth_refs_share_plane(&self.document, source_ref, target_curve_ref) {
+                return Err("Smooth requires both curves to lie on the same plane.");
+            }
+            let Some(target_jet) = smooth_target_jet(target, target_ref, target_curve_ref) else {
                 return Err("The selected target does not support endpoint smoothing.");
             };
             let Some(curve) = crate::entities::spline::nurbs3(spline) else {
@@ -2911,6 +3063,11 @@ impl Scene {
                 return Err("The selected spline cannot satisfy curvature continuity.");
             }
             return Ok(());
+        }
+        if !refs_share_supported_plane(&self.document, refs) {
+            return Err(
+                "Constraint references must be supported entities on the same world-XY plane.",
+            );
         }
         let validation_target = match driving_param {
             Some(super::named_parameters::DrivingValue::Named(name))

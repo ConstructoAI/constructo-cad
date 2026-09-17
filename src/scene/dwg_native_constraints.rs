@@ -771,7 +771,13 @@ fn constraint_node(
 ) -> Option<i32> {
     let refs: &[ParametricRef] = &constraint.refs;
     if constraint.kind == ConstraintKind::Smooth {
-        let [first, second] = refs else { return None };
+        let (first, second, second_curve_ref) = match refs {
+            [first, second] => (*first, *second, ParametricRef::whole(second.entity)),
+            [first, second, second_curve] if second.entity == second_curve.entity => {
+                (*first, *second, *second_curve)
+            }
+            _ => return None,
+        };
         let endpoint_parameter = |reference: ParametricRef| {
             let entity = document.get_entity(reference.entity)?;
             let EntityType::Spline(spline) = entity else {
@@ -791,15 +797,15 @@ fn constraint_node(
             }?;
             Some(Some(value))
         };
-        let first_parameter = endpoint_parameter(*first)?;
-        let second_parameter = endpoint_parameter(*second)?;
+        let first_parameter = endpoint_parameter(first)?;
+        let second_parameter = endpoint_parameter(second)?;
         if first_parameter.is_none() && second_parameter.is_none() {
             return None;
         }
         let first_curve = builder.geometry_node(first.entity)?;
-        let second_curve = builder.geometry_node(second.entity)?;
-        let first_point = builder.ref_node(*first)?;
-        let second_point = builder.ref_node(*second)?;
+        let second_curve = builder.ref_node(second_curve_ref)?;
+        let first_point = builder.ref_node(first)?;
+        let second_point = builder.ref_node(second)?;
 
         let coincidence = builder.alloc_node_id();
         builder.push_node(
@@ -2130,7 +2136,7 @@ pub(super) fn native_constraint_set(
                     owned_constraint_ids,
                     ..
                 } if kind == ConstraintKind::Smooth => {
-                    let endpoints = owned_constraint_ids
+                    let mut endpoints: Vec<ParametricRef> = owned_constraint_ids
                         .iter()
                         .filter_map(|id| group.nodes.iter().find(|child| child.node_id == *id))
                         .find(|child| {
@@ -2146,6 +2152,23 @@ pub(super) fn native_constraint_set(
                                 .collect()
                         })
                         .unwrap_or_default();
+                    if let Some(target) = endpoints.get(1).copied() {
+                        let segment = owned_constraint_ids
+                            .iter()
+                            .filter_map(|id| group.nodes.iter().find(|child| child.node_id == *id))
+                            .filter(|child| {
+                                child.class_name.eq_ignore_ascii_case("AcTangentConstraint")
+                            })
+                            .flat_map(|child| child.connections.iter())
+                            .filter_map(|id| refs.get(id).copied())
+                            .find(|reference| {
+                                reference.entity == target.entity
+                                    && reference.segment_index().is_some()
+                            });
+                        if let Some(segment) = segment {
+                            endpoints.push(segment);
+                        }
+                    }
                     (endpoints, Vec::new())
                 }
                 _ => (
@@ -2192,6 +2215,7 @@ pub(super) fn native_constraint_set(
                 ConstraintKind::DistanceDirected => matches!(targets.len(), 2 | 3),
                 ConstraintKind::EqualDistance => targets.len() == 4,
                 ConstraintKind::RigidSet => !targets.is_empty() && rigid_points.len() >= 2,
+                ConstraintKind::Smooth => matches!(targets.len(), 2 | 3),
                 _ => targets.len() == 2,
             };
             if !valid_target_count {

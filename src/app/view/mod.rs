@@ -611,7 +611,8 @@ bg={bg_ms:.1}ms n={view_count}"
             };
             let control_polygon = tab.selected_handle.and_then(|handle| {
                 let spline = match tab.scene.document.get_entity(handle) {
-                    Some(acadrust::EntityType::Spline(spline)) if spline.cv_frame_visible => spline,
+                    Some(acadrust::EntityType::Spline(spline))
+                        if crate::entities::spline::shows_control_vertices(spline) => spline,
                     _ => return None,
                 };
                 if tab
@@ -850,6 +851,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         sel_ref.vp_size,
                         self.show_constraint_values,
                         self.constraint_bar_display,
+                        self.constraint_bar_mode,
                     )
                     .into_iter()
                     .map(|(id, point, direction, label, is_conflicting, hover_points)| {
