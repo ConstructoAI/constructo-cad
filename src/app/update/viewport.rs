@@ -3036,6 +3036,7 @@ impl OpenCADStudio {
             vp_size,
             self.show_constraint_values,
             self.constraint_bar_display,
+            self.constraint_bar_mode,
             cursor,
         )?;
         let set = self.tabs[i].scene.parametric_constraint_set(scope)?;
@@ -4643,6 +4644,7 @@ properties={:.1}ms picked={}",
                                 canvas_sz,
                                 self.show_constraint_values,
                                 self.constraint_bar_display,
+                                self.constraint_bar_mode,
                                 p_full,
                             )
                         })
@@ -6591,6 +6593,7 @@ mod selection_preview_tests {
             (800.0, 600.0),
             true,
             3,
+            4095,
         )[0].1;
         let point = (-30..=30).find_map(|y| {
             (-30..=30).find_map(|x| {

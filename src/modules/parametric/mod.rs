@@ -8,6 +8,7 @@ mod geom_constraint;
 #[path = "perpendicular.rs"]
 mod perpendicular_command;
 mod point_on_entity;
+mod smooth;
 #[path = "tangent.rs"]
 mod tangent_command;
 mod tools;
@@ -19,6 +20,7 @@ pub use perpendicular_command::{PerpendicularConstraintCommand, PerpendicularPic
 pub use point_on_entity::{
     center_point_tool, midpoint_tool, point_on_curve_tool, PointOnEntityConstraintCommand,
 };
+pub use smooth::SmoothConstraintCommand;
 pub use tangent_command::TangentConstraintCommand;
 pub use tools::{
     colinear, concentric, equal, fixed, horizontal, normal, parallel, perpendicular, symmetric,
@@ -62,7 +64,7 @@ impl CadModule for ParametricModule {
                         RibbonItem::LargeTool(colinear::tool()),
                         RibbonItem::LargeTool(perpendicular::tool()),
                         RibbonItem::LargeTool(command(
-                            "SMOOTHCONSTRAINT", "Smooth",
+                            "GCSMOOTH", "Smooth",
                             include_bytes!("../../../assets/icons/constrain/smooth.svg"),
                         )),
                         RibbonItem::LargeTool(concentric::tool()),
@@ -136,7 +138,7 @@ impl CadModule for ParametricModule {
 
 inventory::submit!(crate::command::CommandRegistration {
     names: &[
-        "AUTOCONSTRAIN", "CONSTRAINTSETTINGS", "SMOOTHCONSTRAINT", "GCSHOW", "GCHIDE", "GCRESET",
+        "AUTOCONSTRAIN", "CONSTRAINTSETTINGS", "GCSMOOTH", "SMOOTHCONSTRAINT", "GCSHOW", "GCHIDE", "GCRESET",
         "GCSHOWALL", "GCHIDEALL", "DCSHOW", "DCHIDE", "DCSHOWALL", "DCHIDEALL",
         "DCCONVERT", "DELCONSTRAINT",
     ]
@@ -168,7 +170,7 @@ mod tests {
             groups[0].tools.iter().map(item_id).collect::<Vec<_>>(),
             [
                 "AUTOCONSTRAIN", "CCONSTRAINT", "PCONSTRAINT", "TCONSTRAINT",
-                "LCONSTRAINT", "QCONSTRAINT", "SMOOTHCONSTRAINT", "NCONSTRAINT",
+                "LCONSTRAINT", "QCONSTRAINT", "GCSMOOTH", "NCONSTRAINT",
                 "HCONSTRAINT", "SYCONSTRAINT", "FXCONSTRAINT", "VCONSTRAINT",
                 "ECONSTRAINT", "GCVISIBILITY", "GCSHOWALL", "GCHIDEALL",
             ]

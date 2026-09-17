@@ -1206,17 +1206,38 @@ impl OpenCADStudio {
                 }
             }
 
-            "SMOOTHCONSTRAINT" => {
+            "GCSMOOTH" | "SMOOTHCONSTRAINT" => {
+                use crate::modules::parametric::SmoothConstraintCommand;
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
-                    use crate::modules::draw::select::SelectObjectsCommand;
-                    let sel = SelectObjectsCommand::new(cmd);
-                    self.command_line.push_info(&sel.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                    let command = SmoothConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                } else if handles.len() != 2 {
+                    self.tabs[i].scene.deselect_all();
+                    self.command_line.push_error(
+                        "Smooth requires an open spline first and a target curve second.",
+                    );
+                    let command = SmoothConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
                 } else {
-                    let Some(refs) = self.tabs[i].scene.smooth_constraint_refs(&handles) else {
-                        self.command_line
-                            .push_output("Select one open spline and one open target curve.");
+                    let first = self.tabs[i].scene.document.get_entity(handles[0]);
+                    let second = self.tabs[i].scene.document.get_entity(handles[1]);
+                    let refs = first.zip(second).and_then(|(first, second)| {
+                        SmoothConstraintCommand::preselected_refs(
+                            (first, handles[0]),
+                            (second, handles[1]),
+                        )
+                    });
+                    let Some(refs) = refs else {
+                        self.tabs[i].scene.deselect_all();
+                        self.command_line.push_error(
+                            "Smooth requires an open spline first and a line, arc, polyline segment or open spline second.",
+                        );
+                        let command = SmoothConstraintCommand::new();
+                        self.command_line.push_info(&command.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(command));
                         return None;
                     };
                     use crate::command::CmdResult;

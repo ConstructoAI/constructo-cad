@@ -38,10 +38,34 @@ fn constraint_glyph_size(label: &str) -> Size {
     if is_compact_coincident_glyph(label) {
         return Size::new(COINCIDENT_GLYPH_SIZE, COINCIDENT_GLYPH_SIZE);
     }
+    if label == "G²" {
+        let side = CONSTRAINT_GLYPH_SIZE + CONSTRAINT_GLYPH_PAD_Y * 2.0;
+        return Size::new(side, side);
+    }
     let w = label.chars().count() as f32 * CONSTRAINT_GLYPH_SIZE * 0.62
         + CONSTRAINT_GLYPH_PAD_X * 2.0;
     let h = CONSTRAINT_GLYPH_SIZE + CONSTRAINT_GLYPH_PAD_Y * 2.0;
     Size::new(w, h)
+}
+
+fn draw_smooth_constraint_glyph(frame: &mut canvas::Frame, center: Point, color: Color) {
+    let curve = canvas::Path::new(|builder| {
+        for step in 0..=16 {
+            let x = -7.0 + step as f32 * 0.875;
+            let y = 0.012 * x * x * x;
+            let point = Point::new(center.x + x, center.y - y);
+            if step == 0 {
+                builder.move_to(point);
+            } else {
+                builder.line_to(point);
+            }
+        }
+    });
+    frame.stroke(
+        &curve,
+        canvas::Stroke::default().with_color(color).with_width(1.45),
+    );
+    frame.fill(&canvas::Path::circle(center, 1.35), color);
 }
 
 fn draw_tangent_constraint_glyph(
@@ -1905,6 +1929,8 @@ impl canvas::Program<Message> for SelectionCanvas {
                     );
                     if label == "T" {
                         draw_tangent_constraint_glyph(&mut frame, glyph_center, fg);
+                    } else if label == "G²" {
+                        draw_smooth_constraint_glyph(&mut frame, glyph_center, fg);
                     } else {
                         frame.fill_text(canvas::Text {
                             content: label.clone(),

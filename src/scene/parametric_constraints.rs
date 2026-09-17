@@ -687,6 +687,27 @@ pub(crate) fn parametric_curve_ref_for_pick(
 }
 
 impl ConstraintKind {
+    /// Per-kind visibility bit used by CONSTRAINTBARMODE for the standard
+    /// geometric-constraint family. Helper relations which have no standard
+    /// bit stay visible under the normal display policy.
+    pub const fn bar_mode_bit(self) -> Option<i16> {
+        match self {
+            Self::Horizontal => Some(1),
+            Self::Vertical => Some(2),
+            Self::Perpendicular => Some(4),
+            Self::Parallel => Some(8),
+            Self::Tangent => Some(16),
+            Self::Smooth => Some(32),
+            Self::Coincident => Some(64),
+            Self::Concentric => Some(128),
+            Self::Colinear => Some(256),
+            Self::Symmetric => Some(512),
+            Self::Equal => Some(1024),
+            Self::Fixed => Some(2048),
+            _ => None,
+        }
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Coincident => "Coincident",
@@ -1083,10 +1104,15 @@ impl super::Scene {
         &self,
         scope: ParametricScope,
         id: ConstraintId,
+        kind: ConstraintKind,
         related_entity_selected: bool,
         display_mode: i16,
+        bar_mode: i16,
     ) -> bool {
         self.is_parametric_constraint_visible(scope, id)
+            && kind
+                .bar_mode_bit()
+                .is_none_or(|bit| bar_mode & bit != 0)
             && (self.shown_parametric_constraints.contains(&(scope, id))
                 || (display_mode & 2 != 0 && related_entity_selected))
     }
@@ -1437,40 +1463,6 @@ impl super::Scene {
         inferred
     }
 
-    pub fn smooth_constraint_refs(&self, handles: &[Handle]) -> Option<Vec<ParametricRef>> {
-        let [first, second] = handles else {
-            return None;
-        };
-        let first_entity = self.document.get_entity(*first)?;
-        let second_entity = self.document.get_entity(*second)?;
-        let (spline_handle, spline, target_handle, target) = match (first_entity, second_entity) {
-            (acadrust::EntityType::Spline(spline), target) => (*first, spline, *second, target),
-            (target, acadrust::EntityType::Spline(spline)) => (*second, spline, *first, target),
-            _ => return None,
-        };
-        if spline.flags.closed || spline.flags.periodic {
-            return None;
-        }
-        let spline_points =
-            super::dimension_assoc::source_points(&acadrust::EntityType::Spline(spline.clone()));
-        let target_points = super::dimension_assoc::source_points(target);
-        let spline_ends = [*spline_points.first()?, *spline_points.last()?];
-        let target_ends = [*target_points.first()?, *target_points.last()?];
-        let mut best = (f64::INFINITY, 0, 0);
-        for (source_marker, source) in spline_ends.iter().enumerate() {
-            for (target_marker, target) in target_ends.iter().enumerate() {
-                let distance = (*source - *target).length_squared();
-                if distance < best.0 {
-                    best = (distance, source_marker, target_marker);
-                }
-            }
-        }
-        Some(vec![
-            ParametricRef::point(spline_handle, best.1 as i32),
-            ParametricRef::point(target_handle, best.2 as i32),
-        ])
-    }
-
     /// The constraint set for `scope`, if one has been created.
     pub fn parametric_constraint_set(
         &self,
@@ -1521,6 +1513,7 @@ impl super::Scene {
         vp_size: (f32, f32),
         show_values: bool,
         display_mode: i16,
+        bar_mode: i16,
     ) -> Vec<(
         ConstraintId,
         iced::Point,
@@ -1555,7 +1548,14 @@ impl super::Scene {
                     .iter()
                     .any(|reference| self.selected.contains(&reference.entity)
                         || self.preview_hidden.contains(&reference.entity));
-                self.should_display_parametric_constraint(scope, c.id, selected, display_mode)
+                self.should_display_parametric_constraint(
+                    scope,
+                    c.id,
+                    c.kind,
+                    selected,
+                    display_mode,
+                    bar_mode,
+                )
             })
             .flat_map(|c| {
                 let is_conflicting = set.conflicts.iter().any(|(id, _)| *id == c.id);
@@ -1627,6 +1627,7 @@ impl super::Scene {
         vp_size: (f32, f32),
         show_values: bool,
         display_mode: i16,
+        bar_mode: i16,
         p: iced::Point,
     ) -> Option<ConstraintId> {
         let placements = self.constraint_glyph_placements_screen(
@@ -1634,6 +1635,7 @@ impl super::Scene {
             vp_size,
             show_values,
             display_mode,
+            bar_mode,
         );
         let glyphs: Vec<(iced::Point, [f32; 2], String, bool)> = placements
             .iter()
@@ -2213,18 +2215,34 @@ mod tests {
             vec![ParametricRef::whole(h(1))],
             None,
         );
-        assert!(!scene.should_display_parametric_constraint(scope, id, false, 3));
-        assert!(scene.should_display_parametric_constraint(scope, id, true, 2));
-        assert!(!scene.should_display_parametric_constraint(scope, id, true, 1));
+        assert!(!scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, false, 3, 4095
+        ));
+        assert!(scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, true, 2, 4095
+        ));
+        assert!(!scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, true, 1, 4095
+        ));
         scene.note_parametric_constraint_applied(scope, id, 1);
-        assert!(scene.should_display_parametric_constraint(scope, id, false, 0));
+        assert!(scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, false, 0, 4095
+        ));
         scene.set_parametric_constraint_visibility(scope, None, false, false);
-        assert!(!scene.should_display_parametric_constraint(scope, id, true, 3));
+        assert!(!scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, true, 3, 4095
+        ));
         scene.set_parametric_constraint_visibility(scope, None, false, true);
-        assert!(scene.should_display_parametric_constraint(scope, id, false, 0));
+        assert!(scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, false, 0, 4095
+        ));
         scene.note_parametric_constraint_applied(scope, id, 0);
-        assert!(!scene.should_display_parametric_constraint(scope, id, false, 3));
-        assert!(scene.should_display_parametric_constraint(scope, id, true, 2));
+        assert!(!scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, false, 3, 4095
+        ));
+        assert!(scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, true, 2, 4095
+        ));
     }
 
     #[test]
@@ -2238,7 +2256,9 @@ mod tests {
         );
         scene.hidden_parametric_constraints.insert((scope, id));
 
-        assert!(!scene.should_display_parametric_constraint(scope, id, true, 2));
+        assert!(!scene.should_display_parametric_constraint(
+            scope, id, ConstraintKind::Horizontal, true, 2, 4095
+        ));
     }
 
     #[test]

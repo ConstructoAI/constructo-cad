@@ -3141,9 +3141,24 @@ impl OpenCADStudio {
                     &refs,
                     driving_param.as_ref(),
                 ) {
-                    self.tabs[i].active_cmd = None;
+                    let keep_smooth_selection = kind
+                        == crate::scene::parametric_constraints::ConstraintKind::Smooth
+                        && self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .is_some_and(|command| command.name() == "GCSMOOTH");
+                    if !keep_smooth_selection {
+                        self.tabs[i].active_cmd = None;
+                    }
                     self.tabs[i].snap_result = None;
                     self.command_line.push_error(message);
+                    if keep_smooth_selection {
+                        if let Some(prompt) =
+                            self.tabs[i].active_cmd.as_ref().map(|command| command.prompt())
+                        {
+                            self.command_line.push_info(&prompt);
+                        }
+                    }
                     return Task::none();
                 }
                 let scope = self.tabs[i].current_parametric_scope();
