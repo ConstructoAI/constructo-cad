@@ -1339,7 +1339,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "HCONSTRAINT" | "GCHORIZONTAL" => {
+            "GCHORIZONTAL" => {
                 use crate::command::{CmdResult, HorizontalConstraintSelection};
                 use crate::modules::parametric::HorizontalConstraintCommand;
 

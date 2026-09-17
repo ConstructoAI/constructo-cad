@@ -6,7 +6,7 @@ pub mod horizontal {
     use super::*;
     pub fn tool() -> ToolDef {
         ToolDef {
-            id: "HCONSTRAINT",
+            id: "GCHORIZONTAL",
             label: "Horizontal",
             icon: IconKind::Svg(include_bytes!(
                 "../../../assets/icons/constrain/horizontal.svg"
@@ -160,7 +160,6 @@ pub mod symmetric {
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration {
     names: &[
-        "HCONSTRAINT",
         "GCHORIZONTAL",
         "VCONSTRAINT",
         "PCONSTRAINT",

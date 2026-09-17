@@ -15,9 +15,7 @@ enum Step {
     SecondPoint(CoincidentPick),
 }
 
-/// Reference-compatible front end for the Horizontal geometric constraint.
-/// It deliberately uses entity picks rather than the generic selection set so
-/// a polyline segment or one ellipse axis can be addressed unambiguously.
+/// Interactive front end for the Horizontal geometric constraint.
 pub struct HorizontalConstraintCommand {
     step: Step,
     picked_entity: Option<EntityType>,
@@ -55,8 +53,7 @@ impl HorizontalConstraintCommand {
 
     fn invalid_point() -> CmdResult {
         CmdResult::ReportError(
-            "Horizontal: select an endpoint, center, midpoint, or polyline vertex."
-                .to_string(),
+            "Horizontal: select an endpoint, center, midpoint, or polyline vertex.".to_string(),
         )
     }
 
@@ -75,32 +72,44 @@ impl HorizontalConstraintCommand {
     }
 
     fn distance_to_axis(point: DVec3, endpoints: [acadrust::types::Vector3; 2]) -> f64 {
-        let start = DVec3::new(endpoints[0].x, endpoints[0].y, endpoints[0].z);
-        let end = DVec3::new(endpoints[1].x, endpoints[1].y, endpoints[1].z);
-        let direction = end - start;
-        if direction.length_squared() <= 1.0e-24 {
-            return f64::INFINITY;
-        }
-        (point - start).cross(direction.normalize()).length()
+        cadkernel::space::Vec3::from(point.to_array())
+            .distance_to_line(
+                cadkernel::space::Vec3::new(endpoints[0].x, endpoints[0].y, endpoints[0].z),
+                cadkernel::space::Vec3::new(endpoints[1].x, endpoints[1].y, endpoints[1].z),
+            )
+            .unwrap_or(f64::INFINITY)
     }
 
-    fn ellipse_reference(entity: &EntityType, handle: Handle, point: DVec3) -> Option<ParametricRef> {
+    fn ellipse_reference(
+        entity: &EntityType,
+        handle: Handle,
+        point: DVec3,
+    ) -> Option<ParametricRef> {
         let major = ParametricRef::ellipse_major_axis(handle);
         let minor = ParametricRef::ellipse_minor_axis(handle);
         let major_distance =
             Self::distance_to_axis(point, directional_axis_endpoints(entity, major)?);
         let minor_distance =
             Self::distance_to_axis(point, directional_axis_endpoints(entity, minor)?);
-        Some(if minor_distance < major_distance { minor } else { major })
+        Some(if minor_distance < major_distance {
+            minor
+        } else {
+            major
+        })
     }
 
-    fn picked_reference(entity: &EntityType, handle: Handle, point: DVec3) -> Option<ParametricRef> {
+    fn picked_reference(
+        entity: &EntityType,
+        handle: Handle,
+        point: DVec3,
+    ) -> Option<ParametricRef> {
         match entity {
             EntityType::Line(_) | EntityType::Ray(_) | EntityType::XLine(_) => {
                 Some(ParametricRef::whole(handle))
             }
             EntityType::LwPolyline(_) | EntityType::Polyline2D(_) => {
-                let (source, _, _) = crate::scene::centerline::picked_source(entity, handle, point)?;
+                let (source, _, _) =
+                    crate::scene::centerline::picked_source(entity, handle, point)?;
                 let index = usize::try_from(source.segment_index).ok()?;
                 Self::segment_is_straight(entity, index)
                     .then_some(ParametricRef::segment(handle, index))
@@ -276,6 +285,56 @@ impl CadCommand for HorizontalConstraintCommand {
 
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::entities::Line;
+    use acadrust::types::Vector3;
+
+    #[test]
+    fn object_pick_captures_the_working_x_direction() {
+        let handle = Handle::new(7);
+        let mut command = HorizontalConstraintCommand::new();
+        command.set_working_plane(WorkingPlane::new(DVec3::ZERO, DVec3::Y, DVec3::NEG_X));
+        command.inject_picked_entity(EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(2.0, 3.0, 0.0),
+        )));
+
+        let CmdResult::AddHorizontalConstraint {
+            selection: HorizontalConstraintSelection::Reference(reference),
+            direction,
+            ..
+        } = command.on_entity_pick(handle, DVec3::ZERO)
+        else {
+            panic!("object pick must create the constraint");
+        };
+        assert_eq!(reference, ParametricRef::whole(handle));
+        assert!((direction - Vector3::UNIT_Y).length() < 1.0e-12);
+    }
+
+    #[test]
+    fn enter_starts_the_two_point_flow() {
+        let mut command = HorizontalConstraintCommand::new();
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert!(matches!(
+            command.on_point(DVec3::new(1.0, 2.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        let CmdResult::AddHorizontalConstraint {
+            selection: HorizontalConstraintSelection::Points(first, second),
+            direction,
+            ..
+        } = command.on_point(DVec3::new(4.0, 5.0, 0.0))
+        else {
+            panic!("second point must create the constraint");
+        };
+        assert_eq!(first.point, DVec3::new(1.0, 2.0, 0.0));
+        assert_eq!(second.point, DVec3::new(4.0, 5.0, 0.0));
+        assert!((direction - Vector3::UNIT_X).length() < 1.0e-12);
     }
 }
 

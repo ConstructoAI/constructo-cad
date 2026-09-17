@@ -1650,6 +1650,21 @@ fn group_requires_preservation(document: &CadDocument, group: &Assoc2dConstraint
     })
 }
 
+fn work_plane_vector(work_plane: &[Vector3; 3], local: Vector3) -> Option<Vector3> {
+    let [origin, axis_x, axis_y] = *work_plane;
+    let plane = cadkernel::space::Plane::from_axes(
+        [origin.x, origin.y, origin.z],
+        [axis_x.x, axis_x.y, axis_x.z],
+        [axis_y.x, axis_y.y, axis_y.z],
+    );
+    let mut world = cadkernel::space::Vec3::from(plane.vector_at([local.x, local.y]));
+    if local.z != 0.0 {
+        world = world + cadkernel::space::Vec3::from(plane.normal()?) * local.z;
+    }
+    let world = world.normalize()?;
+    Some(Vector3::new(world.x, world.y, world.z))
+}
+
 fn polyline_segment_reference(
     document: &CadDocument,
     entity: Handle,
@@ -2258,17 +2273,10 @@ pub(super) fn native_constraint_set(
                             })
                         })
                     });
-                    if let Some(local) = local_direction {
-                        let [_, axis_x, axis_y] = group.work_plane;
-                        let normal = Vector3::new(
-                            axis_x.y * axis_y.z - axis_x.z * axis_y.y,
-                            axis_x.z * axis_y.x - axis_x.x * axis_y.z,
-                            axis_x.x * axis_y.y - axis_x.y * axis_y.x,
-                        );
-                        let world = axis_x * local.x + axis_y * local.y + normal * local.z;
-                        if world.length_squared() > 1.0e-24 {
-                            constraint.axis_direction = Some(world.normalize());
-                        }
+                    if let Some(world) =
+                        local_direction.and_then(|local| work_plane_vector(&group.work_plane, local))
+                    {
+                        constraint.axis_direction = Some(world);
                     }
                 }
                 if let AssocConstraintNodeData::Distance {
@@ -2901,14 +2909,15 @@ mod tests {
     fn horizontal_and_vertical_constraints_round_trip_through_dwg_and_dxf() {
         for ext in ["dwg", "dxf"] {
             let mut scene = Scene::new();
-            let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
+            let a = line_entity(&mut scene, (0.0, 0.0), (6.0, 8.0));
             let b = line_entity(&mut scene, (10.0, 0.0), (10.0, 5.0));
+            let horizontal_direction = Vector3::new(0.6, 0.8, 0.0);
             scene
                 .parametric_constraint_set_mut(ParametricScope::ModelSpace)
-                .add(
+                .add_axis_constraint(
                     ConstraintKind::Horizontal,
                     vec![ParametricRef::whole(a)],
-                    None,
+                    horizontal_direction,
                 );
             scene
                 .parametric_constraint_set_mut(ParametricScope::ModelSpace)
@@ -2974,6 +2983,20 @@ mod tests {
             assert!(datums.iter().all(|datum| group.nodes.iter().any(|node| {
                 node.node_id == *datum && node.class_name == "AcConstrainedDatumLine"
             })));
+
+            let mut restored = Scene::new();
+            restored.document = reloaded;
+            restored.load_parametric_constraints_from_document();
+            let horizontal = restored
+                .parametric_constraint_set(ParametricScope::ModelSpace)
+                .unwrap()
+                .constraints
+                .iter()
+                .find(|constraint| constraint.kind == ConstraintKind::Horizontal)
+                .unwrap();
+            assert!(
+                (horizontal.axis_direction.unwrap() - horizontal_direction).length() < 1.0e-12
+            );
         }
     }
 

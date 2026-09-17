@@ -1773,6 +1773,7 @@ impl super::Scene {
             ConstraintKind,
             Vec<ParametricRef>,
             Option<DrivingValue>,
+            Option<Vector3>,
         )> = Vec::new();
         for (scope_index, set) in self.parametric_constraints.iter().enumerate() {
             for c in &set.constraints {
@@ -1787,16 +1788,27 @@ impl super::Scene {
                         marker: r.marker,
                     })
                     .collect();
-                to_add.push((scope_index, c.kind, new_refs, c.driving_param.clone()));
+                to_add.push((
+                    scope_index,
+                    c.kind,
+                    new_refs,
+                    c.driving_param.clone(),
+                    c.axis_direction,
+                ));
             }
         }
         if to_add.is_empty() {
             return;
         }
         let mut touched: Vec<Handle> = Vec::new();
-        for (scope_index, kind, refs, driving_param) in to_add {
+        for (scope_index, kind, refs, driving_param, axis_direction) in to_add {
             touched.extend(refs.iter().map(|r| r.entity));
             self.parametric_constraints[scope_index].add(kind, refs, driving_param);
+            self.parametric_constraints[scope_index]
+                .constraints
+                .last_mut()
+                .expect("the copied constraint was just added")
+                .axis_direction = axis_direction;
         }
         touched.sort();
         touched.dedup();
@@ -2434,5 +2446,38 @@ mod tests {
             scene.parametric_connected_handles(ParametricScope::ModelSpace, &[h(1)], false),
             vec![h(1), h(2), h(3)]
         );
+    }
+
+    #[test]
+    fn duplicating_an_axis_constraint_keeps_its_direction() {
+        let mut scene = super::super::Scene::new();
+        let line = |y| {
+            acadrust::EntityType::Line(acadrust::entities::Line::from_points(
+                Vector3::new(0.0, y, 0.0),
+                Vector3::new(4.0, y + 1.0, 0.0),
+            ))
+        };
+        let source = scene.add_entity(line(0.0));
+        let copied = scene.add_entity(line(10.0));
+        let direction = Vector3::new(3.0, 4.0, 0.0);
+        scene
+            .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+            .add_axis_constraint(
+                ConstraintKind::Horizontal,
+                vec![ParametricRef::whole(source)],
+                direction,
+            );
+        let mut handle_map = rustc_hash::FxHashMap::default();
+        handle_map.insert(source, copied);
+
+        scene.duplicate_parametric_constraints_for(&handle_map);
+
+        let constraints = &scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .unwrap()
+            .constraints;
+        assert_eq!(constraints.len(), 2);
+        assert_eq!(constraints[1].refs, vec![ParametricRef::whole(copied)]);
+        assert_eq!(constraints[1].axis_direction, Some(direction.normalize()));
     }
 }

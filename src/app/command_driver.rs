@@ -8725,6 +8725,125 @@ mod parametric_constraint_undo_tests {
         );
     }
 
+    #[test]
+    fn horizontal_initial_solve_uses_the_captured_axis_in_kernel() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let handle = add_line(&mut app, 0.0, 0.0, 5.0, 2.0);
+        let (original_start, original_end, original_length) = match app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(handle)
+        {
+            Some(acadrust::EntityType::Line(line)) => (line.start, line.end, line.length()),
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        let direction = acadrust::types::Vector3::new(3.0, 4.0, 0.0).normalize();
+
+        let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+            selection: crate::command::HorizontalConstraintSelection::Reference(
+                ParametricRef::whole(handle),
+            ),
+            direction,
+            label: "Horizontal constraint",
+        });
+
+        let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(line)) => line,
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        let solved = (line.end - line.start).normalize();
+        assert!(solved.cross(&direction).length() < 1.0e-7);
+        assert!((line.length() - original_length).abs() < 1.0e-7);
+        let constraint = &app.tabs[app.active_tab]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .unwrap()
+            .constraints[0];
+        assert_eq!(constraint.axis_direction, Some(direction));
+
+        app.undo_steps(1);
+        let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(line)) => line,
+            other => panic!("expected a Line after undo, got {other:?}"),
+        };
+        assert_eq!((line.start, line.end), (original_start, original_end));
+        assert_eq!(
+            app.tabs[app.active_tab]
+                .scene
+                .parametric_constraint_set(ParametricScope::ModelSpace)
+                .map(|set| set.constraints.len())
+                .unwrap_or(0),
+            0
+        );
+
+        app.redo_steps(1);
+        let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(line)) => line,
+            other => panic!("expected a Line after redo, got {other:?}"),
+        };
+        assert!((line.end - line.start).normalize().cross(&direction).length() < 1.0e-7);
+    }
+
+    #[test]
+    fn horizontal_two_point_solve_keeps_the_first_point_fixed() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let first = add_line(&mut app, 0.0, 0.0, 0.0, 5.0);
+        let second = add_line(&mut app, 8.0, 3.0, 8.0, 7.0);
+        let pick = |handle, point| crate::command::CoincidentPick {
+            handle: Some(handle),
+            point,
+            whole_curve: false,
+        };
+
+        let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+            selection: crate::command::HorizontalConstraintSelection::Points(
+                pick(first, glam::DVec3::ZERO),
+                pick(second, glam::DVec3::new(8.0, 3.0, 0.0)),
+            ),
+            direction: acadrust::types::Vector3::UNIT_X,
+            label: "Horizontal constraint",
+        });
+
+        let line = |handle| match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(line)) => line,
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        assert_eq!(line(first).start, acadrust::types::Vector3::ZERO);
+        assert!(line(second).start.y.abs() < 1.0e-8);
+    }
+
+    #[test]
+    fn horizontal_minor_axis_rotates_an_ellipse_around_its_center() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let mut ellipse = acadrust::entities::Ellipse::default();
+        ellipse.center = acadrust::types::Vector3::new(3.0, 7.0, 0.0);
+        ellipse.major_axis = acadrust::types::Vector3::new(3.0, 4.0, 0.0);
+        ellipse.minor_axis_ratio = 0.4;
+        let handle = app.tabs[app.active_tab]
+            .scene
+            .add_entity(acadrust::EntityType::Ellipse(ellipse));
+
+        let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+            selection: crate::command::HorizontalConstraintSelection::Reference(
+                ParametricRef::ellipse_minor_axis(handle),
+            ),
+            direction: acadrust::types::Vector3::UNIT_X,
+            label: "Horizontal constraint",
+        });
+
+        let ellipse = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Ellipse(ellipse)) => ellipse,
+            other => panic!("expected an Ellipse, got {other:?}"),
+        };
+        assert!((ellipse.center - acadrust::types::Vector3::new(3.0, 7.0, 0.0)).length() < 1.0e-9);
+        assert!(ellipse.major_axis.x.abs() < 1.0e-7);
+        assert!((ellipse.major_axis.length() - 5.0).abs() < 1.0e-7);
+        assert!((ellipse.minor_axis_ratio - 0.4).abs() < 1.0e-9);
+    }
+
     /// Drawing commands must not create parametric constraints implicitly.
     #[test]
     fn drawing_a_line_onto_an_existing_endpoint_does_not_add_a_constraint() {

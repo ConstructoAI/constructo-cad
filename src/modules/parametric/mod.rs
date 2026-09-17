@@ -176,7 +176,7 @@ mod tests {
             [
                 "AUTOCONSTRAIN", "CCONSTRAINT", "PCONSTRAINT", "TCONSTRAINT",
                 "LCONSTRAINT", "QCONSTRAINT", "GCSMOOTH", "GCCONCENTRIC",
-                "HCONSTRAINT", "SYCONSTRAINT", "FXCONSTRAINT", "VCONSTRAINT",
+                "GCHORIZONTAL", "SYCONSTRAINT", "FXCONSTRAINT", "VCONSTRAINT",
                 "ECONSTRAINT", "GCVISIBILITY", "GCSHOWALL", "GCHIDEALL",
             ]
         );

@@ -2795,7 +2795,7 @@ mod constraint_registry_tests {
             "CPCONSTRAINT",
             "MPCONSTRAINT",
             "OCCONSTRAINT",
-            "HCONSTRAINT",
+            "GCHORIZONTAL",
             "VCONSTRAINT",
             "PCONSTRAINT",
             "QCONSTRAINT",
