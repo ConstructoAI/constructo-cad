@@ -5,8 +5,40 @@
 //! dictionary + objects consistent so the result round-trips through DWG/DXF.
 
 use super::Scene;
-use acadrust::objects::{Dictionary, ObjectType, PlotSettings};
+use acadrust::objects::{Dictionary, Layout, ObjectType, PlotSettings};
 use acadrust::Handle;
+
+/// Give a freshly created paper layout the page setup a new drawing starts
+/// with — ISO A4 landscape on no plotter, plotted 1:1 as a layout — stored the
+/// way the file format expects it: the portrait medium under its canonical
+/// name with the orientation in the rotation code. `plot_style` names the
+/// plot style table to attach, or is empty.
+pub fn apply_default_page_setup(layout: &mut Layout, plot_style: &str) {
+    use acadrust::objects::{PlotPaperUnits, PlotRotation, PlotType, ScaledType};
+    let a4 = crate::io::paper_catalog::default_paper();
+    let (paper_width, paper_height) = a4.portrait_mm();
+    layout.min_limits = (0.0, 0.0);
+    layout.max_limits = (paper_height, paper_width);
+    layout.min_extents = (0.0, 0.0, 0.0);
+    layout.max_extents = (paper_height, paper_width, 0.0);
+    layout.paper_width = paper_width;
+    layout.paper_height = paper_height;
+    layout.plot_rotation = PlotRotation::Degrees90.to_code();
+    layout.plot_paper_units = PlotPaperUnits::Millimeters.to_code();
+    layout.plot_type = PlotType::Layout.to_code();
+    layout.plot_scale_type = ScaledType::OneToOne.to_code();
+    layout.plot_scale_numerator = 1.0;
+    layout.plot_scale_denominator = 1.0;
+    layout.plot_scale_factor = 1.0;
+    layout.plot_flags.use_standard_scale = true;
+    layout.plot_flags.print_lineweights = true;
+    layout.plot_flags.draw_viewports_first = true;
+    layout.plot_flags.plot_plot_styles = !plot_style.is_empty();
+    layout.plot_flags.show_plot_styles = !plot_style.is_empty();
+    layout.plot_style_sheet = plot_style.to_string();
+    layout.paper_size = a4.canonical.to_string();
+    layout.plot_printer_name = crate::io::plot_device::PlotDevice::None.canonical_name();
+}
 
 impl Scene {
     /// Handle of the `ACAD_PLOTSETTINGS` dictionary, located robustly.

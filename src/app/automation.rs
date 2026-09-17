@@ -294,7 +294,7 @@ impl OpenCADStudio {
         match req["op"].as_str().unwrap_or("") {
             "new" => {
                 let i = self.active_tab;
-                self.tabs[i].scene.clear();
+                self.tabs[i].scene.reset_to_new_drawing();
                 self.tabs[i].scene.material_base_dir = None;
                 self.tabs[i].current_path = None;
                 // The headless session starts on the welcome (Start) tab, which
