@@ -187,9 +187,9 @@ fn properties(ell: &Ellipse) -> Vec<PropSection> {
             ro(t!("Start parameter").as_ref(), "start_param", format!("{:.4}", ell.start_parameter)),
             ro(t!("End parameter").as_ref(), "end_param", format!("{:.4}", ell.end_parameter)),
             ro(t!("Length").as_ref(), "length", format!("{:.4}", props.perimeter)),
-            ro(t!("Normal X").as_ref(), "normal_x", format!("{:.4}", ell.normal.x)),
-            ro(t!("Normal Y").as_ref(), "normal_y", format!("{:.4}", ell.normal.y)),
-            ro(t!("Normal Z").as_ref(), "normal_z", format!("{:.4}", ell.normal.z)),
+            edit(t!("Normal X").as_ref(), "normal_x", ell.normal.x),
+            edit(t!("Normal Y").as_ref(), "normal_y", ell.normal.y),
+            edit(t!("Normal Z").as_ref(), "normal_z", ell.normal.z),
         ],
     }]
 }
@@ -220,6 +220,38 @@ fn apply_geom_prop(ell: &mut Ellipse, field: &str, value: &str) {
         "ratio" if v > 0.0 => ell.minor_axis_ratio = v,
         "start_angle" => ell.start_parameter = v.to_radians(),
         "end_angle" => ell.end_parameter = v.to_radians(),
+        "normal_x" | "normal_y" | "normal_z" => {
+            let mut normal = glam::DVec3::new(ell.normal.x, ell.normal.y, ell.normal.z);
+            match field {
+                "normal_x" => normal.x = v,
+                "normal_y" => normal.y = v,
+                "normal_z" => normal.z = v,
+                _ => {}
+            }
+            if let Some(normal) = normal.try_normalize() {
+                let current = glam::DVec3::new(
+                    ell.major_axis.x,
+                    ell.major_axis.y,
+                    ell.major_axis.z,
+                );
+                let length = current.length();
+                let projected = current - normal * current.dot(normal);
+                let major = projected.try_normalize().or_else(|| {
+                    let helper = if normal.x.abs() < 0.8 {
+                        glam::DVec3::X
+                    } else {
+                        glam::DVec3::Y
+                    };
+                    normal.cross(helper).try_normalize()
+                });
+                if let Some(major) = major {
+                    ell.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+                    let major = major * length;
+                    ell.major_axis =
+                        acadrust::types::Vector3::new(major.x, major.y, major.z);
+                }
+            }
+        }
         _ => {}
     }
 }

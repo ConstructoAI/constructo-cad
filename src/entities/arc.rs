@@ -212,9 +212,9 @@ fn properties(arc: &Arc) -> Vec<PropSection> {
             ro(t!("Total angle").as_ref(), "total_angle", format!("{total_angle:.2}")),
             ro(t!("Arc length").as_ref(), "arc_length", format!("{arc_length:.4}")),
             ro(t!("Area").as_ref(), "area", format!("{area:.4}")),
-            ro(t!("Normal X").as_ref(), "normal_x", format!("{:.4}", arc.normal.x)),
-            ro(t!("Normal Y").as_ref(), "normal_y", format!("{:.4}", arc.normal.y)),
-            ro(t!("Normal Z").as_ref(), "normal_z", format!("{:.4}", arc.normal.z)),
+            edit(t!("Normal X").as_ref(), "normal_x", arc.normal.x),
+            edit(t!("Normal Y").as_ref(), "normal_y", arc.normal.y),
+            edit(t!("Normal Z").as_ref(), "normal_z", arc.normal.z),
         ],
     }]
 }
@@ -244,6 +244,24 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
         "radius" if v > 0.0 => arc.radius = v,
         "start_angle" => arc.start_angle = v.to_radians(),
         "end_angle" => arc.end_angle = v.to_radians(),
+        "normal_x" | "normal_y" | "normal_z" => {
+            let center = arc.center_wcs();
+            let mut normal = glam::DVec3::new(arc.normal.x, arc.normal.y, arc.normal.z);
+            match field {
+                "normal_x" => normal.x = v,
+                "normal_y" => normal.y = v,
+                "normal_z" => normal.z = v,
+                _ => {}
+            }
+            if let Some(normal) = normal.try_normalize() {
+                arc.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+                let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
+                    (center.x, center.y, center.z),
+                    (normal.x, normal.y, normal.z),
+                );
+                arc.center = acadrust::types::Vector3::new(x, y, z);
+            }
+        }
         _ => {}
     }
 }

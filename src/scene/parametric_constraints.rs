@@ -14,8 +14,8 @@ use acadrust::types::{Handle, Vector3};
 /// ordered per-entity-type point list when non-negative (0/1 = a line's
 /// start/end, ...), or names a special case when negative (-3 = a
 /// circle/arc's center; -2 = a bounded curve's midpoint). Polyline segment
-/// and segment-midpoint references use private negative ranges so they stay
-/// distinct from vertex markers.
+    /// segment-midpoint, and curved-segment-center references use private
+    /// negative ranges so they stay distinct from vertex markers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ParametricRef {
     pub entity: Handle,
@@ -28,6 +28,7 @@ pub struct ParametricRef {
 
 const POLYLINE_SEGMENT_MARKER_BASE: i32 = -1_000_000;
 const POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE: i32 = -2_000_000;
+const POLYLINE_SEGMENT_CENTER_MARKER_BASE: i32 = -3_000_000;
 const ELLIPSE_MAJOR_AXIS_MARKER: i32 = -4;
 const ELLIPSE_MINOR_AXIS_MARKER: i32 = -5;
 const TEXT_BASELINE_MARKER: i32 = -6;
@@ -88,8 +89,23 @@ impl ParametricRef {
 
     pub fn segment_midpoint_index(self) -> Option<usize> {
         let marker = self.marker?;
-        (marker <= POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE)
+        (marker <= POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE
+            && marker > POLYLINE_SEGMENT_CENTER_MARKER_BASE)
             .then(|| (POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE - marker) as usize)
+    }
+
+    /// Select the center of one curved polyline segment.
+    pub fn segment_center(entity: Handle, index: usize) -> Self {
+        Self {
+            entity,
+            marker: Some(POLYLINE_SEGMENT_CENTER_MARKER_BASE - index as i32),
+        }
+    }
+
+    pub fn segment_center_index(self) -> Option<usize> {
+        let marker = self.marker?;
+        (marker <= POLYLINE_SEGMENT_CENTER_MARKER_BASE)
+            .then(|| (POLYLINE_SEGMENT_CENTER_MARKER_BASE - marker) as usize)
     }
 
     /// Select the displayed baseline of a Text or MText entity.
@@ -503,7 +519,7 @@ impl ParametricConstraintSet {
 /// endpoint's equivalent of `dimension_assoc::resolve_reference`, restricted
 /// to the marker conventions constraint endpoints actually use (whole-entity
 /// `None`, an ordinary `source_points()` index, the `-3` center case, or a
-/// bounded curve/segment midpoint).
+/// bounded curve/segment midpoint, or a curved polyline-segment center).
 ///
 /// Solver-side registration reads raw entity fields directly. This helper is
 /// for UI-side consumers that need the current world-space position.
@@ -524,12 +540,20 @@ pub(crate) fn resolve_point(entity: &acadrust::EntityType, marker: i32) -> Optio
         let point = curve.point_at(0.5);
         return Some(Vector3::new(point[0], point[1], point[2]));
     }
-    let segment = ParametricRef {
+    let reference = ParametricRef {
         entity: Handle::NULL,
         marker: Some(marker),
+    };
+    if let Some(segment) = reference.segment_center_index() {
+        let planar = crate::entities::curve::entity_curve(entity)?;
+        let curve = planar.curve.segments().into_iter().nth(segment)?;
+        let cadkernel::geom2d::Curve::Arc(arc) = curve else {
+            return None;
+        };
+        let point = planar.plane.point_at(arc.centre);
+        return Some(Vector3::new(point[0], point[1], point[2]));
     }
-    .segment_midpoint_index();
-    if let Some(segment) = segment {
+    if let Some(segment) = reference.segment_midpoint_index() {
         let planar = crate::entities::curve::entity_curve(entity)?;
         let curve = planar.curve.segments().into_iter().nth(segment)?;
         let point = planar.plane.point_at(curve.point_at(0.5));
@@ -809,6 +833,18 @@ fn glyph_placement_for_reference(
         let [start, end] = directional_axis_endpoints(entity, r)?;
         let anchor = (start + end) * 0.5;
         return Some((anchor, segment_normal(start, end)));
+    }
+    if let Some(segment) = r.segment_center_index() {
+        let planar = crate::entities::curve::entity_curve(entity)?;
+        let curve = planar.curve.segments().into_iter().nth(segment)?;
+        let cadkernel::geom2d::Curve::Arc(arc) = curve else {
+            return None;
+        };
+        let center = planar.plane.point_at(arc.centre);
+        let on_arc = planar.plane.point_at(arc.point_at(0.5));
+        let center = Vector3::new(center[0], center[1], center[2]);
+        let on_arc = Vector3::new(on_arc[0], on_arc[1], on_arc[2]);
+        return Some((on_arc, on_arc - center));
     }
     if let Some(segment) = r.segment_index() {
         let anchor = resolve_point(

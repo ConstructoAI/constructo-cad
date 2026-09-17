@@ -3,6 +3,7 @@
 //! resulting constraints through the geometry kernel.
 
 mod coincident;
+mod concentric;
 mod equal_distance;
 mod geom_constraint;
 #[path = "perpendicular.rs"]
@@ -13,6 +14,7 @@ mod tangent_command;
 mod tools;
 mod value;
 pub use coincident::{coincident_tool, CoincidentConstraintCommand};
+pub use concentric::ConcentricConstraintCommand;
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
 pub use geom_constraint::GeomConstraintCommand;
 pub use perpendicular_command::{PerpendicularConstraintCommand, PerpendicularPick};
@@ -168,7 +170,7 @@ mod tests {
             groups[0].tools.iter().map(item_id).collect::<Vec<_>>(),
             [
                 "AUTOCONSTRAIN", "CCONSTRAINT", "PCONSTRAINT", "TCONSTRAINT",
-                "LCONSTRAINT", "QCONSTRAINT", "SMOOTHCONSTRAINT", "NCONSTRAINT",
+                "LCONSTRAINT", "QCONSTRAINT", "SMOOTHCONSTRAINT", "GCCONCENTRIC",
                 "HCONSTRAINT", "SYCONSTRAINT", "FXCONSTRAINT", "VCONSTRAINT",
                 "ECONSTRAINT", "GCVISIBILITY", "GCSHOWALL", "GCHIDEALL",
             ]

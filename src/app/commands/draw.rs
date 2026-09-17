@@ -1475,29 +1475,41 @@ impl OpenCADStudio {
                 }
             }
 
-            "NCONSTRAINT" => {
+            "NCONSTRAINT" | "GCCONCENTRIC" => {
+                use crate::command::CmdResult;
+                use crate::modules::parametric::ConcentricConstraintCommand;
+
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
-                    use crate::modules::draw::select::SelectObjectsCommand;
-                    let sel = SelectObjectsCommand::new(cmd);
-                    self.command_line.push_info(&sel.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(sel));
-                } else if handles.len() != 2 {
-                    self.command_line.push_output(
-                        "Select exactly two circles/arcs, then run this constraint again.",
-                    );
+                    let command = ConcentricConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
                 } else {
-                    use crate::command::CmdResult;
-                    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
-                    return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
-                        kind: ConstraintKind::Concentric,
-                        refs: vec![
-                            ParametricRef::center(handles[0]),
-                            ParametricRef::center(handles[1]),
-                        ],
-                        driving_param: None,
-                        label: "Concentric constraint",
-                    }));
+                    let refs = handles
+                        .iter()
+                        .filter_map(|handle| {
+                            let entity = self.tabs[i].scene.document.get_entity(*handle)?;
+                            ConcentricConstraintCommand::preselected_reference(entity, *handle)
+                        })
+                        .collect::<Vec<_>>();
+                    if handles.len() == 2 && refs.len() == 2 && refs[0] != refs[1] {
+                        return Some(self.apply_cmd_result(CmdResult::AddConcentricConstraint {
+                            first: refs[0],
+                            second: refs[1],
+                            label: "Concentric constraint",
+                        }));
+                    }
+                    self.tabs[i].scene.deselect_all();
+                    self.command_line.push_error(
+                        "Invalid selection for Concentric. Select a circle, arc, ellipse or polyline arc segment.",
+                    );
+                    let command = refs
+                        .first()
+                        .copied()
+                        .map(ConcentricConstraintCommand::with_first)
+                        .unwrap_or_else(ConcentricConstraintCommand::new);
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
                 }
             }
 

@@ -88,12 +88,12 @@ pub mod concentric {
     use super::*;
     pub fn tool() -> ToolDef {
         ToolDef {
-            id: "NCONSTRAINT",
+            id: "GCCONCENTRIC",
             label: "Concentric",
             icon: IconKind::Svg(include_bytes!(
                 "../../../assets/icons/constrain/concentric.svg"
             )),
-            event: ModuleEvent::Command("NCONSTRAINT".to_string()),
+            event: ModuleEvent::Command("GCCONCENTRIC".to_string()),
         }
     }
 }
@@ -168,6 +168,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "ECONSTRAINT",
         "TCONSTRAINT",
         "NCONSTRAINT",
+        "GCCONCENTRIC",
         "NRCONSTRAINT",
         "LCONSTRAINT",
         "FXCONSTRAINT",
