@@ -1382,56 +1382,6 @@ impl super::Scene {
                     ),
                 })
                 .collect();
-        if settings
-            .enabled
-            .contains(&crate::app::settings::AutoConstraintKind::Coincident)
-        {
-            for refs in self.inferred_coincident_constraints_with_tolerance(
-                scope,
-                handles,
-                settings.distance_tolerance,
-            ) {
-                let duplicate = mapped.iter().any(|(kind, current)| {
-                    *kind == ConstraintKind::Coincident
-                        && (current == &refs
-                            || (current.len() == 2
-                                && refs.len() == 2
-                                && current[0] == refs[1]
-                                && current[1] == refs[0]))
-                });
-                if !duplicate {
-                    mapped.push((ConstraintKind::Coincident, refs));
-                }
-            }
-            let priority = |kind: ConstraintKind| {
-                let auto_kind = match kind {
-                    ConstraintKind::Coincident => {
-                        crate::app::settings::AutoConstraintKind::Coincident
-                    }
-                    ConstraintKind::Colinear => crate::app::settings::AutoConstraintKind::Collinear,
-                    ConstraintKind::Parallel => crate::app::settings::AutoConstraintKind::Parallel,
-                    ConstraintKind::Perpendicular => {
-                        crate::app::settings::AutoConstraintKind::Perpendicular
-                    }
-                    ConstraintKind::Tangent => crate::app::settings::AutoConstraintKind::Tangent,
-                    ConstraintKind::Concentric => {
-                        crate::app::settings::AutoConstraintKind::Concentric
-                    }
-                    ConstraintKind::Horizontal => {
-                        crate::app::settings::AutoConstraintKind::Horizontal
-                    }
-                    ConstraintKind::Vertical => crate::app::settings::AutoConstraintKind::Vertical,
-                    ConstraintKind::Equal => crate::app::settings::AutoConstraintKind::Equal,
-                    _ => return usize::MAX,
-                };
-                settings
-                    .priority
-                    .iter()
-                    .position(|candidate| *candidate == auto_kind)
-                    .unwrap_or(usize::MAX)
-            };
-            mapped.sort_by_key(|(kind, _)| priority(*kind));
-        }
         if let Some(existing) = self.parametric_constraint_set(scope) {
             mapped.retain(|(kind, refs)| {
                 !existing.constraints.iter().any(|constraint| {
@@ -1460,19 +1410,6 @@ impl super::Scene {
         scope: ParametricScope,
         handles: &[Handle],
     ) -> Vec<Vec<ParametricRef>> {
-        self.inferred_coincident_constraints_with_tolerance(
-            scope,
-            handles,
-            COINCIDENT_EPSILON_SQ.sqrt(),
-        )
-    }
-
-    fn inferred_coincident_constraints_with_tolerance(
-        &self,
-        scope: ParametricScope,
-        handles: &[Handle],
-        distance_tolerance: f64,
-    ) -> Vec<Vec<ParametricRef>> {
         let owner = scope.owner_handle(&self.document);
         let mut sources = Vec::new();
         let mut seen_handles = std::collections::HashSet::new();
@@ -1500,7 +1437,7 @@ impl super::Scene {
             for second in first + 1..sources.len() {
                 if sources[first].0.entity == sources[second].0.entity
                     || (sources[first].1 - sources[second].1).length_squared()
-                        > distance_tolerance.max(0.0).powi(2)
+                        > COINCIDENT_EPSILON_SQ
                 {
                     continue;
                 }
@@ -1524,104 +1461,6 @@ impl super::Scene {
             }
         }
         inferred
-    }
-
-    /// Resolve the target of GCSMOOTH through an existing Coincident
-    /// relation.  The command selects only the spline; the connected endpoint
-    /// identifies both the target entity and the target point.
-    pub(crate) fn smooth_refs_from_connected_spline(
-        &self,
-        scope: ParametricScope,
-        spline_handle: Handle,
-        preferred_marker: Option<i32>,
-    ) -> Option<Vec<ParametricRef>> {
-        let spline = self.document.get_entity(spline_handle)?;
-        let acadrust::EntityType::Spline(spline) = spline else {
-            return None;
-        };
-        if spline.flags.closed || spline.flags.periodic {
-            return None;
-        }
-        let markers: Vec<i32> = match preferred_marker {
-            Some(marker @ (0 | 1)) => vec![marker],
-            _ => vec![0, 1],
-        };
-        let set = self.parametric_constraint_set(scope)?;
-        for marker in markers {
-            let source = ParametricRef::point(spline_handle, marker);
-            for constraint in set.constraints.iter().filter(|constraint| {
-                constraint.enabled
-                    && constraint.kind == ConstraintKind::Coincident
-                    && constraint.refs.len() == 2
-            }) {
-                let target = if constraint.refs[0] == source {
-                    constraint.refs[1]
-                } else if constraint.refs[1] == source {
-                    constraint.refs[0]
-                } else {
-                    continue;
-                };
-                if target.entity == spline_handle || target.marker.is_none() {
-                    continue;
-                }
-                let Some(target_entity) = self.document.get_entity(target.entity) else {
-                    continue;
-                };
-                let target_curve = match target_entity {
-                    acadrust::EntityType::Line(_)
-                    | acadrust::EntityType::Arc(_)
-                    | acadrust::EntityType::Spline(_) => ParametricRef::whole(target.entity),
-                    acadrust::EntityType::LwPolyline(polyline) => {
-                        let Some(vertex) = target.marker.and_then(|marker| usize::try_from(marker).ok())
-                        else {
-                            continue;
-                        };
-                        let count = polyline.vertices.len();
-                        if count < 2 || vertex >= count {
-                            continue;
-                        }
-                        let segment = if vertex == 0 {
-                            0
-                        } else if vertex + 1 == count && !polyline.is_closed {
-                            vertex - 1
-                        } else {
-                            vertex.saturating_sub(1)
-                        };
-                        ParametricRef::segment(target.entity, segment)
-                    }
-                    acadrust::EntityType::Polyline2D(polyline) => {
-                        let Some(vertex) = target.marker.and_then(|marker| usize::try_from(marker).ok())
-                        else {
-                            continue;
-                        };
-                        let count = polyline.vertices.len();
-                        if count < 2 || vertex >= count {
-                            continue;
-                        }
-                        let segment = if vertex == 0 {
-                            0
-                        } else if vertex + 1 == count && !polyline.is_closed() {
-                            vertex - 1
-                        } else {
-                            vertex.saturating_sub(1)
-                        };
-                        ParametricRef::segment(target.entity, segment)
-                    }
-                    _ => continue,
-                };
-                let mut refs = vec![source, target];
-                if target_curve.marker.is_some() {
-                    refs.push(target_curve);
-                }
-                if self
-                    .validate_parametric_constraint(ConstraintKind::Smooth, &refs, None)
-                    .is_ok()
-                {
-                    return Some(refs);
-                }
-            }
-        }
-        None
     }
 
     /// The constraint set for `scope`, if one has been created.

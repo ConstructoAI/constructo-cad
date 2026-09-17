@@ -1213,32 +1213,41 @@ impl OpenCADStudio {
                     let command = SmoothConstraintCommand::new();
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));
+                } else if handles.len() != 2 {
+                    self.tabs[i].scene.deselect_all();
+                    self.command_line.push_error(
+                        "Smooth requires an open spline first and a target curve second.",
+                    );
+                    let command = SmoothConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
                 } else {
-                    let scope = self.tabs[i].current_parametric_scope();
-                    let refs = (handles.len() == 1)
-                        .then(|| {
-                            self.tabs[i]
-                                .scene
-                                .smooth_refs_from_connected_spline(scope, handles[0], None)
-                        })
-                        .flatten();
-                    if let Some(refs) = refs {
-                        use crate::command::CmdResult;
-                        use crate::scene::parametric_constraints::ConstraintKind;
-                        return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
-                            kind: ConstraintKind::Smooth,
-                            refs,
-                            driving_param: None,
-                            label: "Smooth constraint",
-                        }));
-                    } else {
+                    let first = self.tabs[i].scene.document.get_entity(handles[0]);
+                    let second = self.tabs[i].scene.document.get_entity(handles[1]);
+                    let refs = first.zip(second).and_then(|(first, second)| {
+                        SmoothConstraintCommand::preselected_refs(
+                            (first, handles[0]),
+                            (second, handles[1]),
+                        )
+                    });
+                    let Some(refs) = refs else {
                         self.tabs[i].scene.deselect_all();
-                        self.command_line
-                            .push_error("No valid constraint point found.");
+                        self.command_line.push_error(
+                            "Smooth requires an open spline first and a line, arc, polyline segment or open spline second.",
+                        );
                         let command = SmoothConstraintCommand::new();
                         self.command_line.push_info(&command.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(command));
-                    }
+                        return None;
+                    };
+                    use crate::command::CmdResult;
+                    use crate::scene::parametric_constraints::ConstraintKind;
+                    return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
+                        kind: ConstraintKind::Smooth,
+                        refs,
+                        driving_param: None,
+                        label: "Smooth constraint",
+                    }));
                 }
             }
 
