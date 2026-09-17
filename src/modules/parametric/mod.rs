@@ -3,6 +3,7 @@
 //! resulting constraints through the geometry kernel.
 
 mod coincident;
+mod concentric;
 mod equal_distance;
 mod geom_constraint;
 #[path = "perpendicular.rs"]
@@ -14,6 +15,7 @@ mod tangent_command;
 mod tools;
 mod value;
 pub use coincident::{coincident_tool, CoincidentConstraintCommand};
+pub use concentric::ConcentricConstraintCommand;
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
 pub use geom_constraint::GeomConstraintCommand;
 pub use perpendicular_command::{PerpendicularConstraintCommand, PerpendicularPick};
@@ -23,8 +25,8 @@ pub use point_on_entity::{
 pub use smooth::SmoothConstraintCommand;
 pub use tangent_command::TangentConstraintCommand;
 pub use tools::{
-    colinear, concentric, equal, fixed, horizontal, normal, parallel, perpendicular, symmetric,
-    tangent, vertical,
+    colinear, concentric as concentric_tool, equal, fixed, horizontal, normal, parallel,
+    perpendicular, symmetric, tangent, vertical,
 };
 pub use value::{
     angle_tool, dimensional_tools, distance_tool, AngleConstraintCommand,
@@ -67,7 +69,7 @@ impl CadModule for ParametricModule {
                             "GCSMOOTH", "Smooth",
                             include_bytes!("../../../assets/icons/constrain/smooth.svg"),
                         )),
-                        RibbonItem::LargeTool(concentric::tool()),
+                        RibbonItem::LargeTool(concentric_tool::tool()),
                         RibbonItem::LargeTool(horizontal::tool()),
                         RibbonItem::LargeTool(symmetric::tool()),
                         RibbonItem::LargeTool(fixed::tool()),
@@ -170,7 +172,7 @@ mod tests {
             groups[0].tools.iter().map(item_id).collect::<Vec<_>>(),
             [
                 "AUTOCONSTRAIN", "CCONSTRAINT", "PCONSTRAINT", "TCONSTRAINT",
-                "LCONSTRAINT", "QCONSTRAINT", "GCSMOOTH", "NCONSTRAINT",
+                "LCONSTRAINT", "QCONSTRAINT", "GCSMOOTH", "GCCONCENTRIC",
                 "HCONSTRAINT", "SYCONSTRAINT", "FXCONSTRAINT", "VCONSTRAINT",
                 "ECONSTRAINT", "GCVISIBILITY", "GCSHOWALL", "GCHIDEALL",
             ]

@@ -1512,6 +1512,13 @@ pub enum CmdResult {
         second: crate::scene::parametric_constraints::ParametricRef,
         label: &'static str,
     },
+    /// Adds an ordered concentric relation. The first picked center remains
+    /// fixed during the initial solve while the second curve moves rigidly.
+    AddConcentricConstraint {
+        first: crate::scene::parametric_constraints::ParametricRef,
+        second: crate::scene::parametric_constraints::ParametricRef,
+        label: &'static str,
+    },
     /// Opens the Auto Constrain settings dialog from the selection prompt.
     OpenAutoConstrainSettings,
     /// Adds an ordered Coincident relation.  Point/point selections create a
@@ -2778,6 +2785,7 @@ mod constraint_registry_tests {
             "ECONSTRAINT",
             "TCONSTRAINT",
             "NCONSTRAINT",
+            "GCCONCENTRIC",
             "NRCONSTRAINT",
             "LCONSTRAINT",
             "FXCONSTRAINT",

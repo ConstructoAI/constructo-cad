@@ -84,6 +84,16 @@ fn draw_tangent_constraint_glyph(
     frame.stroke(&canvas::Path::line(contact, tangent_end), stroke);
 }
 
+fn draw_concentric_constraint_glyph(
+    frame: &mut canvas::Frame,
+    center: Point,
+    color: Color,
+) {
+    let stroke = canvas::Stroke::default().with_color(color).with_width(1.25);
+    frame.stroke(&canvas::Path::circle(center, 4.7), stroke.clone());
+    frame.stroke(&canvas::Path::circle(center, 2.15), stroke);
+}
+
 fn constraint_glyph_box(
     anchor: Point,
     outward: [f32; 2],
@@ -855,6 +865,7 @@ pub fn selection_overlay<'a>(
     selection_visual: SelectionVisualOptions,
     constraint_glyphs: Vec<(Point, [f32; 2], String, bool, bool, Vec<Point>)>,
     constraint_glyph_tooltip: Option<String>,
+    constraint_cursor_badge: Option<String>,
 ) -> Element<'a, Message> {
     canvas(SelectionCanvas {
         selection,
@@ -880,6 +891,7 @@ pub fn selection_overlay<'a>(
         selection_visual,
         constraint_glyphs,
         constraint_glyph_tooltip,
+        constraint_cursor_badge,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -944,6 +956,9 @@ struct SelectionCanvas {
     constraint_glyphs: Vec<(Point, [f32; 2], String, bool, bool, Vec<Point>)>,
     /// Localized kind name made visible after the app-level hover dwell.
     constraint_glyph_tooltip: Option<String>,
+    /// Symbol shown beside the cursor while it targets an entity that already
+    /// participates in an enabled geometric constraint.
+    constraint_cursor_badge: Option<String>,
 }
 
 fn draw_grip_marker(
@@ -1842,6 +1857,28 @@ impl canvas::Program<Message> for SelectionCanvas {
                     let hole = canvas::Path::circle(Point::new(bx + 6.0, by + 10.5), 1.4);
                     frame.fill(&hole, dark);
                 }
+                if let Some(label) = &self.constraint_cursor_badge {
+                    let center = Point::new(cp.x + sq + if self.hover_locked { 30.0 } else { 12.0 }, cp.y - sq - 7.0);
+                    let blue = Color::from_rgb8(35, 145, 230);
+                    let badge = canvas::Path::circle(center, 8.5);
+                    frame.fill(&badge, blue);
+                    if label == "◎" {
+                        draw_concentric_constraint_glyph(&mut frame, center, Color::WHITE);
+                    } else if label == "T" {
+                        draw_tangent_constraint_glyph(&mut frame, center, Color::WHITE);
+                    } else {
+                        frame.fill_text(canvas::Text {
+                            content: label.clone(),
+                            position: center,
+                            color: Color::WHITE,
+                            size: iced::Pixels(11.0),
+                            align_x: iced::alignment::Horizontal::Center.into(),
+                            align_y: iced::alignment::Vertical::Center,
+                            shaping: iced::advanced::text::Shaping::Advanced,
+                            ..Default::default()
+                        });
+                    }
+                }
             }
         } // end !over_viewcube
 
@@ -1929,8 +1966,8 @@ impl canvas::Program<Message> for SelectionCanvas {
             let hovered = cursor
                 .position_in(bounds)
                 .and_then(|point| constraint_glyph_hit_test(&glyphs_for_offsets, point));
-            let normal_bg = theme.palette().primary.base.color;
-            let normal_fg = theme.palette().primary.base.text;
+            let normal_bg = Color::from_rgb8(103, 109, 118);
+            let normal_fg = Color::WHITE;
             // A redundant or conflicting constraint gets the danger palette
             // instead of the
             // ordinary primary one — same information a resolver panel
@@ -1981,6 +2018,8 @@ impl canvas::Program<Message> for SelectionCanvas {
                         draw_tangent_constraint_glyph(&mut frame, glyph_center, fg);
                     } else if label == "G²" {
                         draw_smooth_constraint_glyph(&mut frame, glyph_center, fg);
+                    } else if label == "◎" {
+                        draw_concentric_constraint_glyph(&mut frame, glyph_center, fg);
                     } else {
                         frame.fill_text(canvas::Text {
                             content: label.clone(),

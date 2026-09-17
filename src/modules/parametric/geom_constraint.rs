@@ -21,7 +21,7 @@ impl GeomConstraintCommand {
             "T" | "TANGENT" => "TCONSTRAINT",
             "SM" | "SMOOTH" => "GCSMOOTH",
             "C" | "COINCIDENT" => "GCCOINCIDENT",
-            "CON" | "CONCENTRIC" => "NCONSTRAINT",
+            "CON" | "CONCENTRIC" => "GCCONCENTRIC",
             "COL" | "COLLINEAR" | "COLINEAR" => "LCONSTRAINT",
             "SY" | "SYMMETRIC" => "SYCONSTRAINT",
             "E" | "EQUAL" => "ECONSTRAINT",

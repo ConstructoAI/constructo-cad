@@ -513,6 +513,12 @@ fn resolve_constraint_point(
     if let Some(point) = geometry.point_for_marker(marker) {
         return Some(point);
     }
+    if let Some(segment) = reference
+        .segment_center_index()
+        .and_then(|index| geometry.arc_segment(index))
+    {
+        return Some(segment.arc.circle.center);
+    }
 
     let midpoint_line = reference
         .segment_midpoint_index()
@@ -792,6 +798,175 @@ fn refs_share_supported_plane(document: &acadrust::CadDocument, refs: &[Parametr
         plane_z = Some(z);
     }
     plane_z.is_some()
+}
+
+fn concentric_reference_geometry(
+    document: &acadrust::CadDocument,
+    reference: ParametricRef,
+) -> Option<(Vector3, cadkernel::space::Plane)> {
+    let marker = reference.marker?;
+    if marker != -3 && reference.segment_center_index().is_none() {
+        return None;
+    }
+    let entity = document.get_entity(reference.entity)?;
+    let center = super::parametric_constraints::resolve_point(entity, marker)?;
+    let plane = crate::entities::curve::entity_curve(entity)?.plane;
+    Some((center, plane))
+}
+
+fn concentric_refs_share_plane(
+    document: &acadrust::CadDocument,
+    refs: &[ParametricRef],
+) -> bool {
+    let [first, second] = refs else {
+        return false;
+    };
+    if first == second {
+        return false;
+    }
+    let Some((first_center, first_plane)) = concentric_reference_geometry(document, *first) else {
+        return false;
+    };
+    let Some((second_center, second_plane)) = concentric_reference_geometry(document, *second)
+    else {
+        return false;
+    };
+    let (Some(first_normal), Some(second_normal)) = (first_plane.normal(), second_plane.normal())
+    else {
+        return false;
+    };
+    let parallel = (first_normal[0] * second_normal[0]
+        + first_normal[1] * second_normal[1]
+        + first_normal[2] * second_normal[2])
+        .abs()
+        >= 1.0 - 1.0e-9;
+    let points = [
+        first_plane.origin,
+        second_plane.origin,
+        [first_center.x, first_center.y, first_center.z],
+        [second_center.x, second_center.y, second_center.z],
+    ];
+    let tolerance = cadkernel::space::coplanarity_tolerance(&points);
+    parallel
+        && first_plane
+            .distance_to(second_plane.origin)
+            .is_some_and(|distance| distance.abs() <= tolerance)
+        && first_plane
+            .distance_to([second_center.x, second_center.y, second_center.z])
+            .is_some_and(|distance| distance.abs() <= tolerance)
+}
+
+fn ref_is_driven(driven: &[ParametricRef], reference: ParametricRef) -> bool {
+    driven.iter().any(|candidate| {
+        candidate.entity == reference.entity
+            && (candidate.marker == reference.marker || candidate.marker.is_none())
+    })
+}
+
+fn apply_spatial_concentric_constraints(
+    document: &acadrust::CadDocument,
+    set: &ParametricConstraintSet,
+    driven_refs: &[ParametricRef],
+    initial_fixed_refs: &[ParametricRef],
+    results: &mut Vec<(Handle, EntityType)>,
+) {
+    let current_entity = |handle: Handle, results: &[(Handle, EntityType)]| {
+        results
+            .iter()
+            .rev()
+            .find(|(candidate, _)| *candidate == handle)
+            .map(|(_, entity)| entity.clone())
+            .or_else(|| document.get_entity(handle).cloned())
+    };
+
+    let mut handles = Vec::<Handle>::new();
+    let mut relations = Vec::new();
+    let mut fixed = Vec::new();
+    let mut points = Vec::new();
+    for constraint in set.constraints.iter().filter(|constraint| {
+        constraint.enabled
+            && constraint.kind == ConstraintKind::Concentric
+            && !refs_share_supported_plane(document, &constraint.refs)
+            && concentric_refs_share_plane(document, &constraint.refs)
+    }) {
+        let [first, second] = constraint.refs.as_slice() else {
+            continue;
+        };
+        if first.entity == second.entity {
+            continue;
+        }
+        let (Some(first_entity), Some(second_entity)) = (
+            current_entity(first.entity, results),
+            current_entity(second.entity, results),
+        ) else {
+            continue;
+        };
+        let (Some(first_marker), Some(second_marker)) = (first.marker, second.marker) else {
+            continue;
+        };
+        let (Some(first_center), Some(second_center)) = (
+            super::parametric_constraints::resolve_point(&first_entity, first_marker),
+            super::parametric_constraints::resolve_point(&second_entity, second_marker),
+        ) else {
+            continue;
+        };
+        let first_index = handles
+            .iter()
+            .position(|handle| *handle == first.entity)
+            .unwrap_or_else(|| {
+                handles.push(first.entity);
+                handles.len() - 1
+            });
+        let second_index = handles
+            .iter()
+            .position(|handle| *handle == second.entity)
+            .unwrap_or_else(|| {
+                handles.push(second.entity);
+                handles.len() - 1
+            });
+        let first_point = [first_center.x, first_center.y, first_center.z];
+        let second_point = [second_center.x, second_center.y, second_center.z];
+        relations.push((first_index, first_point, second_index, second_point));
+        points.extend([first_point, second_point]);
+        if ref_is_driven(driven_refs, *first) || ref_is_driven(initial_fixed_refs, *first) {
+            fixed.push(first_index);
+        }
+        if ref_is_driven(driven_refs, *second) || ref_is_driven(initial_fixed_refs, *second) {
+            fixed.push(second_index);
+        }
+    }
+    if relations.is_empty() {
+        return;
+    }
+    fixed.sort_unstable();
+    fixed.dedup();
+    let tolerance = cadkernel::space::coplanarity_tolerance(&points).max(MOVE_EPS);
+    let Some(translations) = cadkernel::space::solve_rigid_point_coincidence(
+        handles.len(),
+        &relations,
+        &fixed,
+        tolerance,
+    ) else {
+        return;
+    };
+    for (handle, translation) in handles.into_iter().zip(translations) {
+        let translation = glam::DVec3::from_array(translation);
+        if translation.length() <= tolerance {
+            continue;
+        }
+        let Some(mut entity) = current_entity(handle, results) else {
+            continue;
+        };
+        crate::scene::view::dispatch::apply_transform(
+            &mut entity,
+            &crate::command::EntityTransform::Translate(translation),
+        );
+        if let Some((_, current)) = results.iter_mut().find(|(candidate, _)| *candidate == handle) {
+            *current = entity;
+        } else {
+            results.push((handle, entity));
+        }
+    }
 }
 
 fn resolved_target(params: &ParameterTable, constraint: &ParametricConstraint) -> Option<f64> {
@@ -1982,6 +2157,7 @@ fn polyline_ref_order(
     }
     let position = if let Some(index) = reference.segment_index()
         .or_else(|| reference.segment_midpoint_index())
+        .or_else(|| reference.segment_center_index())
     {
         2 * index + 1
     } else {
@@ -2133,7 +2309,13 @@ fn solve_scope(
 
     let has_smooth = constraints.iter()
         .any(|constraint| constraint.enabled && constraint.kind == ConstraintKind::Smooth);
-    if cache.is_empty() && !has_smooth {
+    let has_spatial_concentric = constraints.iter().any(|constraint| {
+        constraint.enabled
+            && constraint.kind == ConstraintKind::Concentric
+            && !refs_share_supported_plane(document, &constraint.refs)
+            && concentric_refs_share_plane(document, &constraint.refs)
+    });
+    if cache.is_empty() && !has_smooth && !has_spatial_concentric {
         return None;
     }
 
@@ -3013,6 +3195,13 @@ fn solve_scope(
         }
     }
     apply_smooth_constraints(document, set, &mut results);
+    apply_spatial_concentric_constraints(
+        document,
+        set,
+        driven_refs,
+        initial_fixed_refs,
+        &mut results,
+    );
     Some((results, dof, conflicts))
 }
 
@@ -3063,6 +3252,21 @@ impl Scene {
                 return Err("The selected spline cannot satisfy curvature continuity.");
             }
             return Ok(());
+        }
+        if kind == ConstraintKind::Concentric {
+            if !concentric_refs_share_plane(&self.document, refs) {
+                return Err(
+                    "Concentric requires two supported circular curves on the same plane.",
+                );
+            }
+            if !refs_share_supported_plane(&self.document, refs) {
+                if refs[0].entity == refs[1].entity {
+                    return Err(
+                        "Concentric cannot move two curved segments of the same object on this plane.",
+                    );
+                }
+                return Ok(());
+            }
         }
         if !refs_share_supported_plane(&self.document, refs) {
             return Err(

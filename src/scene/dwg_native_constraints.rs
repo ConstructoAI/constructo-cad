@@ -454,11 +454,17 @@ impl<'a> GroupBuilder<'a> {
             return Some(*existing);
         }
         let segment_midpoint = ParametricRef::point(handle, marker).segment_midpoint_index();
+        let segment_center = ParametricRef::point(handle, marker).segment_center_index();
         let polyline = matches!(
             self.document.get_entity(handle),
             Some(EntityType::LwPolyline(_) | EntityType::Polyline2D(_))
         );
-        let (curve_id, point_type) = if let Some(segment) = segment_midpoint {
+        let (curve_id, point_type) = if let Some(segment) = segment_center {
+            (
+                self.segment_node(handle, segment)?,
+                implicit_point_type::CENTER,
+            )
+        } else if let Some(segment) = segment_midpoint {
             (
                 self.segment_node(handle, segment)?,
                 implicit_point_type::MID,
@@ -549,6 +555,9 @@ impl<'a> GroupBuilder<'a> {
             return self.directional_axis_node(r);
         }
         if r.segment_midpoint_index().is_some() {
+            return self.point_node(r.entity, r.marker?);
+        }
+        if r.segment_center_index().is_some() {
             return self.point_node(r.entity, r.marker?);
         }
         if let Some(segment) = r.segment_index() {
@@ -2078,6 +2087,9 @@ pub(super) fn native_constraint_set(
                     }
                     implicit_point_type::MID => {
                         ParametricRef::segment_midpoint(curve.entity, segment)
+                    }
+                    implicit_point_type::CENTER => {
+                        ParametricRef::segment_center(curve.entity, segment)
                     }
                     _ => continue,
                 }

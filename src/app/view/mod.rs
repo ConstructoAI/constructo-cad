@@ -834,6 +834,23 @@ bg={bg_ms:.1}ms n={view_count}"
                 .active_cmd
                 .as_ref()
                 .is_some_and(|cmd| !cmd.needs_entity_pick() && !cmd.is_selection_gathering());
+            let constraint_cursor_badge = if is_paper {
+                None
+            } else {
+                tab.scene.hover_highlight.and_then(|handle| {
+                    tab.scene
+                        .parametric_constraint_set(tab.current_parametric_scope())
+                        .and_then(|set| {
+                            set.constraints_touching(handle)
+                                .find(|constraint| {
+                                    constraint.kind
+                                        == crate::scene::parametric_constraints::ConstraintKind::Concentric
+                                })
+                                .or_else(|| set.constraints_touching(handle).next())
+                        })
+                        .map(|constraint| constraint.kind.glyph_symbol().to_string())
+                })
+            };
             let constraint_glyphs: Vec<(
                 iced::Point,
                 [f32; 2],
@@ -912,6 +929,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 constraint_glyphs,
                 self.constraint_glyph_tooltip
                     .map(|kind| crate::t!(kind.label()).into_owned()),
+                constraint_cursor_badge,
             )
         };
 
