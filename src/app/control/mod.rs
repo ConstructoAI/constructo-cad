@@ -221,6 +221,25 @@ fn command_category(name: &str) -> &'static str {
     } else if name.starts_with("DIM") || ["LEADER", "MLEADER", "TOLERANCE"].contains(&name) {
         "annotate"
     } else if [
+        "GEOMCONSTRAINT",
+        "GCCOINCIDENT",
+        "GCCOLLINEAR",
+        "GCPERPENDICULAR",
+        "QCONSTRAINT",
+        "PCONSTRAINT",
+        "HCONSTRAINT",
+        "VCONSTRAINT",
+        "ECONSTRAINT",
+        "TCONSTRAINT",
+        "NCONSTRAINT",
+        "NRCONSTRAINT",
+        "LCONSTRAINT",
+        "DELCONSTRAINT",
+    ]
+    .contains(&name)
+    {
+        "parametric"
+    } else if [
         "BOX",
         "CYLINDER",
         "CONE",

@@ -101,12 +101,13 @@ impl PerpendicularConstraintCommand {
                 } else {
                     polyline.vertices.len().saturating_sub(1)
                 };
-                (segment_count == 1 && polyline.vertices.first()?.bulge.abs() <= 1.0e-12)
-                    .then_some(PerpendicularPick {
-                        reference: ParametricRef::segment(handle, 0),
-                        fixed_reference: ParametricRef::segment(handle, 0),
-                        start_reference: ParametricRef::point(handle, 0),
-                    })
+                let index = (0..segment_count)
+                    .find(|index| polyline.vertices[*index].bulge.abs() <= 1.0e-12)?;
+                Some(PerpendicularPick {
+                    reference: ParametricRef::segment(handle, index),
+                    fixed_reference: ParametricRef::segment(handle, index),
+                    start_reference: ParametricRef::point(handle, index as i32),
+                })
             }
             EntityType::Polyline2D(polyline) => {
                 let segment_count = if polyline.is_closed() {
@@ -114,12 +115,13 @@ impl PerpendicularConstraintCommand {
                 } else {
                     polyline.vertices.len().saturating_sub(1)
                 };
-                (segment_count == 1 && polyline.vertices.first()?.bulge.abs() <= 1.0e-12)
-                    .then_some(PerpendicularPick {
-                        reference: ParametricRef::segment(handle, 0),
-                        fixed_reference: ParametricRef::segment(handle, 0),
-                        start_reference: ParametricRef::point(handle, 0),
-                    })
+                let index = (0..segment_count)
+                    .find(|index| polyline.vertices[*index].bulge.abs() <= 1.0e-12)?;
+                Some(PerpendicularPick {
+                    reference: ParametricRef::segment(handle, index),
+                    fixed_reference: ParametricRef::segment(handle, index),
+                    start_reference: ParametricRef::point(handle, index as i32),
+                })
             }
             _ => None,
         }

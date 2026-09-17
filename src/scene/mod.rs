@@ -3245,6 +3245,23 @@ impl Scene {
         );
     }
 
+    pub fn bump_entities_with_parametric_transform_policy(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        driven_refs: &[parametric_constraints::ParametricRef],
+        transformed_refs: &[parametric_constraints::ParametricRef],
+        retained_originals: &[(Handle, EntityType)],
+    ) {
+        self.bump_entities_with_solve_policy(
+            changes,
+            driven_refs,
+            true,
+            retained_originals,
+            transformed_refs,
+            true,
+        );
+    }
+
     fn bump_entities_with_solve_policy(
         &mut self,
         changes: &[(Handle, ChangeKind)],

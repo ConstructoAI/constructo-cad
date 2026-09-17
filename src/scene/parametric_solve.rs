@@ -2123,7 +2123,7 @@ fn solve_scope(
         for (handle, geom) in &cache {
             if initial_fixed_refs
                 .iter()
-                .any(|reference| reference.entity == *handle)
+                .any(|reference| reference.entity == *handle && reference.marker.is_none())
             {
                 continue;
             }

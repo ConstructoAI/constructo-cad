@@ -186,6 +186,33 @@ pub(crate) fn directional_axis_endpoints(
     }
 }
 
+/// Finite endpoints used to orient a line-like constraint reference.
+pub(crate) fn directional_reference_endpoints(
+    entity: &acadrust::EntityType,
+    reference: ParametricRef,
+) -> Option<[Vector3; 2]> {
+    if reference.directional_axis().is_some() {
+        return directional_axis_endpoints(entity, reference);
+    }
+    match entity {
+        acadrust::EntityType::Line(line) if reference.marker.is_none() => {
+            Some([line.start, line.end])
+        }
+        acadrust::EntityType::LwPolyline(_) | acadrust::EntityType::Polyline2D(_) => {
+            let index = reference.segment_index()?;
+            let points = super::dimension_assoc::source_points(entity);
+            let start = *points.get(index)?;
+            let end = if let Some(end) = points.get(index + 1) {
+                *end
+            } else {
+                *points.first()?
+            };
+            Some([start, end])
+        }
+        _ => None,
+    }
+}
+
 /// Grabbed points are exact kernel inputs; the solver anchors the remaining
 /// endpoint coordinates according to the line's directional constraints.
 pub(crate) fn grip_solve_anchor_refs(
