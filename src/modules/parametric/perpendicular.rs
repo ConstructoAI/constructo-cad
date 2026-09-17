@@ -234,4 +234,26 @@ mod tests {
         assert_eq!(first_fixed, ParametricRef::whole(first));
         assert_eq!(second_start, ParametricRef::point(second, 0));
     }
+
+    #[test]
+    fn preselection_uses_the_first_straight_polyline_segment() {
+        let handle = Handle::new(11);
+        let mut polyline = acadrust::entities::LwPolyline::new();
+        polyline.vertices = vec![
+            acadrust::entities::LwVertex::with_bulge(
+                acadrust::types::Vector2::new(0.0, 0.0),
+                1.0,
+            ),
+            acadrust::entities::LwVertex::from_coords(4.0, 0.0),
+            acadrust::entities::LwVertex::from_coords(8.0, 0.0),
+        ];
+
+        let pick = PerpendicularConstraintCommand::preselected_reference(
+            &EntityType::LwPolyline(polyline),
+            handle,
+        )
+        .expect("straight segment");
+        assert_eq!(pick.reference, ParametricRef::segment(handle, 1));
+        assert_eq!(pick.start_reference, ParametricRef::point(handle, 1));
+    }
 }

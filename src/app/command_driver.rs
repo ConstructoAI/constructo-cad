@@ -3266,62 +3266,6 @@ impl OpenCADStudio {
                 self.tabs[i]
                     .scene
                     .record_undo_parametric_constraints_before(scope, constraints_before);
-                if first.entity != second.entity {
-                    use crate::scene::parametric_constraints::directional_reference_endpoints;
-
-                    let fixed_axis = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(first.entity)
-                        .and_then(|entity| directional_reference_endpoints(entity, first));
-                    let moving_axis = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(second.entity)
-                        .and_then(|entity| directional_reference_endpoints(entity, second));
-                    if let (Some([fixed_start, fixed_end]), Some([moving_start, moving_end])) =
-                        (fixed_axis, moving_axis)
-                    {
-                        let fixed_direction = fixed_end - fixed_start;
-                        let moving_direction = moving_end - moving_start;
-                        if fixed_direction.length_squared() > 1.0e-24
-                            && moving_direction.length_squared() > 1.0e-24
-                        {
-                            let fixed_angle = fixed_direction.y.atan2(fixed_direction.x);
-                            let moving_angle = moving_direction.y.atan2(moving_direction.x);
-                            let normalize = |angle: f64| {
-                                (angle + std::f64::consts::PI)
-                                    .rem_euclid(std::f64::consts::TAU)
-                                    - std::f64::consts::PI
-                            };
-                            let positive = normalize(
-                                fixed_angle + std::f64::consts::FRAC_PI_2 - moving_angle,
-                            );
-                            let negative = normalize(
-                                fixed_angle - std::f64::consts::FRAC_PI_2 - moving_angle,
-                            );
-                            let angle_rad = if positive.abs() <= negative.abs() {
-                                positive
-                            } else {
-                                negative
-                            };
-                            if angle_rad.abs() > 1.0e-12 {
-                                self.tabs[i].scene.transform_entities(
-                                    &[second.entity],
-                                    &crate::command::EntityTransform::Rotate {
-                                        center: glam::DVec3::new(
-                                            moving_start.x,
-                                            moving_start.y,
-                                            moving_start.z,
-                                        ),
-                                        axis: glam::DVec3::Z,
-                                        angle_rad,
-                                    },
-                                );
-                            }
-                        }
-                    }
-                }
                 let id = self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
                     ConstraintKind::Perpendicular,
                     refs,
@@ -3336,7 +3280,7 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                     .collect::<Vec<_>>();
-                self.tabs[i].scene.bump_entities_with_parametric_policy(
+                self.tabs[i].scene.bump_entities_with_initial_parametric_policy(
                     &changes,
                     &[first_fixed, second_start],
                     true,
@@ -8503,6 +8447,40 @@ mod parametric_constraint_undo_tests {
                 .len(),
             1,
             "redo should restore the constraint record"
+        );
+    }
+
+    #[test]
+    fn perpendicular_initial_solve_rotates_parallel_second_line_in_kernel() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let first = add_line(&mut app, 0.0, 0.0, 10.0, 0.0);
+        let second = add_line(&mut app, 20.0, 0.0, 30.0, 0.0);
+
+        let _ = app.apply_cmd_result(CmdResult::AddPerpendicularConstraint {
+            first: ParametricRef::whole(first),
+            second: ParametricRef::whole(second),
+            first_fixed: ParametricRef::whole(first),
+            second_start: ParametricRef::point(second, 0),
+            label: "Perpendicular constraint",
+        });
+
+        let line = |handle| match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(line)) => line.clone(),
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        let fixed = line(first);
+        let moving = line(second);
+        assert_eq!(fixed.start, acadrust::types::Vector3::new(0.0, 0.0, 0.0));
+        assert_eq!(fixed.end, acadrust::types::Vector3::new(10.0, 0.0, 0.0));
+        assert!((moving.start - acadrust::types::Vector3::new(20.0, 0.0, 0.0)).length() < 1.0e-9);
+        assert!((moving.length() - 10.0).abs() < 1.0e-7);
+        assert!(
+            (fixed.end - fixed.start)
+                .dot(&(moving.end - moving.start))
+                .abs()
+                < 1.0e-7,
+            "fixed={fixed:?}, moving={moving:?}"
         );
     }
 
