@@ -1496,7 +1496,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "NCONSTRAINT" | "GCCONCENTRIC" => {
+            "GCCONCENTRIC" => {
                 use crate::command::CmdResult;
                 use crate::modules::parametric::ConcentricConstraintCommand;
 

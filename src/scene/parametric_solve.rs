@@ -3520,6 +3520,17 @@ mod tests {
     use acadrust::entities::EntityType;
     use acadrust::types::Vector3;
 
+    fn spatial_circle(center: Vector3, radius: f64) -> acadrust::entities::Circle {
+        let normal = Vector3::UNIT_Y;
+        let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
+            (center.x, center.y, center.z),
+            (normal.x, normal.y, normal.z),
+        );
+        let mut circle = acadrust::entities::Circle::from_coords(x, y, z, radius);
+        circle.normal = normal;
+        circle
+    }
+
     #[test]
     fn polyline_constraint_order_follows_stored_vertices_for_open_and_closed_polylines() {
         use acadrust::entities::{LwPolyline, LwVertex, Polyline2D, Vertex2D};
@@ -4277,5 +4288,77 @@ mod tests {
             .distance(cadkernel::space::Vec3::new(0.0, 0.0, 1.0))
             < 1.0e-9);
         assert!(jet.tangent[1].abs() < 1.0e-9 && jet.tangent[2].abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn spatial_concentric_initial_solve_keeps_the_first_circle_fixed() {
+        let mut scene = Scene::new();
+        let first = scene.add_entity(EntityType::Circle(spatial_circle(Vector3::ZERO, 2.0)));
+        let second = scene.add_entity(EntityType::Circle(spatial_circle(
+            Vector3::new(5.0, 0.0, 3.0),
+            4.0,
+        )));
+        let first_ref = ParametricRef::center(first);
+        let second_ref = ParametricRef::center(second);
+        scene
+            .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+            .add(
+                ConstraintKind::Concentric,
+                vec![first_ref, second_ref],
+                None,
+            );
+
+        scene.bump_entities_with_initial_parametric_policy(
+            &[
+                (first, super::ChangeKind::Modified),
+                (second, super::ChangeKind::Modified),
+            ],
+            &[first_ref],
+            true,
+        );
+
+        let EntityType::Circle(first_circle) = scene.document.get_entity(first).unwrap() else {
+            panic!("expected circle");
+        };
+        let EntityType::Circle(second_circle) = scene.document.get_entity(second).unwrap() else {
+            panic!("expected circle");
+        };
+        assert!(first_circle.center_wcs().length() < 1.0e-9);
+        assert!(second_circle.center_wcs().length() < 1.0e-9);
+        assert!((second_circle.radius - 4.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn spatial_concentric_chain_follows_the_driven_end() {
+        let mut scene = Scene::new();
+        let handles = [1.0, 2.0, 3.0].map(|radius| {
+            scene.add_entity(EntityType::Circle(spatial_circle(Vector3::ZERO, radius)))
+        });
+        let set = scene.parametric_constraint_set_mut(ParametricScope::ModelSpace);
+        set.add(
+            ConstraintKind::Concentric,
+            vec![ParametricRef::center(handles[0]), ParametricRef::center(handles[1])],
+            None,
+        );
+        set.add(
+            ConstraintKind::Concentric,
+            vec![ParametricRef::center(handles[1]), ParametricRef::center(handles[2])],
+            None,
+        );
+        let driven_center = Vector3::new(8.0, 0.0, -3.0);
+        *scene.document.get_entity_mut(handles[2]).unwrap() =
+            EntityType::Circle(spatial_circle(driven_center, 3.0));
+
+        scene.bump_entities_with_parametric_driven(
+            &[(handles[2], super::ChangeKind::Modified)],
+            &[ParametricRef::whole(handles[2])],
+        );
+
+        for handle in handles {
+            let EntityType::Circle(circle) = scene.document.get_entity(handle).unwrap() else {
+                panic!("expected circle");
+            };
+            assert!((circle.center_wcs() - driven_center).length() < 1.0e-9);
+        }
     }
 }

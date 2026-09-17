@@ -231,7 +231,7 @@ fn command_category(name: &str) -> &'static str {
         "VCONSTRAINT",
         "ECONSTRAINT",
         "TCONSTRAINT",
-        "NCONSTRAINT",
+        "GCCONCENTRIC",
         "NRCONSTRAINT",
         "LCONSTRAINT",
         "DELCONSTRAINT",

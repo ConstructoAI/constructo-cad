@@ -156,3 +156,30 @@ impl CadCommand for ConcentricConstraintCommand {
         CmdResult::Cancel
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn polyline_pick_keeps_the_selected_arc_center() {
+        let handle = Handle::new(13);
+        let mut polyline = acadrust::entities::LwPolyline::new();
+        polyline.vertices = vec![
+            acadrust::entities::LwVertex::from_coords(0.0, 0.0),
+            acadrust::entities::LwVertex::with_bulge(
+                acadrust::types::Vector2::new(5.0, 0.0),
+                1.0,
+            ),
+            acadrust::entities::LwVertex::from_coords(10.0, 0.0),
+        ];
+
+        let reference = ConcentricConstraintCommand::picked_reference(
+            &EntityType::LwPolyline(polyline),
+            handle,
+            DVec3::new(8.0, 2.0, 0.0),
+        )
+        .expect("arc segment");
+        assert_eq!(reference, ParametricRef::segment_center(handle, 1));
+    }
+}

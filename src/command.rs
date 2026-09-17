@@ -2784,7 +2784,6 @@ mod constraint_registry_tests {
             "GCPERPENDICULAR",
             "ECONSTRAINT",
             "TCONSTRAINT",
-            "NCONSTRAINT",
             "GCCONCENTRIC",
             "NRCONSTRAINT",
             "LCONSTRAINT",

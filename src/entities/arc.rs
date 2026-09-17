@@ -246,14 +246,14 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
         "end_angle" => arc.end_angle = v.to_radians(),
         "normal_x" | "normal_y" | "normal_z" => {
             let center = arc.center_wcs();
-            let mut normal = glam::DVec3::new(arc.normal.x, arc.normal.y, arc.normal.z);
+            let mut normal = cadkernel::space::Vec3::new(arc.normal.x, arc.normal.y, arc.normal.z);
             match field {
                 "normal_x" => normal.x = v,
                 "normal_y" => normal.y = v,
                 "normal_z" => normal.z = v,
                 _ => {}
             }
-            if let Some(normal) = normal.try_normalize() {
+            if let Some(normal) = normal.normalize() {
                 arc.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
                 let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
                     (center.x, center.y, center.z),

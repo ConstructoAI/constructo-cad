@@ -221,36 +221,24 @@ fn apply_geom_prop(ell: &mut Ellipse, field: &str, value: &str) {
         "start_angle" => ell.start_parameter = v.to_radians(),
         "end_angle" => ell.end_parameter = v.to_radians(),
         "normal_x" | "normal_y" | "normal_z" => {
-            let mut normal = glam::DVec3::new(ell.normal.x, ell.normal.y, ell.normal.z);
+            let mut normal = [ell.normal.x, ell.normal.y, ell.normal.z];
             match field {
-                "normal_x" => normal.x = v,
-                "normal_y" => normal.y = v,
-                "normal_z" => normal.z = v,
+                "normal_x" => normal[0] = v,
+                "normal_y" => normal[1] = v,
+                "normal_z" => normal[2] = v,
                 _ => {}
             }
-            if let Some(normal) = normal.try_normalize() {
-                let current = glam::DVec3::new(
-                    ell.major_axis.x,
-                    ell.major_axis.y,
-                    ell.major_axis.z,
-                );
-                let length = current.length();
-                let projected = current - normal * current.dot(normal);
-                let major = projected.try_normalize().or_else(|| {
-                    let helper = if normal.x.abs() < 0.8 {
-                        glam::DVec3::X
-                    } else {
-                        glam::DVec3::Y
-                    };
-                    normal.cross(helper).try_normalize()
-                });
-                if let Some(major) = major {
-                    ell.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
-                    let major = major * length;
-                    ell.major_axis =
-                        acadrust::types::Vector3::new(major.x, major.y, major.z);
-                }
-            }
+            let Some(normal) = cadkernel::space::Vec3::from(normal).normalize() else {
+                return;
+            };
+            let Some(major) = cadkernel::space::reorient_axis_to_plane(
+                [ell.major_axis.x, ell.major_axis.y, ell.major_axis.z],
+                normal.to_array(),
+            ) else {
+                return;
+            };
+            ell.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+            ell.major_axis = acadrust::types::Vector3::new(major[0], major[1], major[2]);
         }
         _ => {}
     }
@@ -454,6 +442,19 @@ mod grip_tests {
     }
     fn xy_len(v: &acadrust::entities::Ellipse) -> f64 {
         (v.major_axis.x * v.major_axis.x + v.major_axis.y * v.major_axis.y).sqrt()
+    }
+
+    #[test]
+    fn editing_normal_reorients_major_axis_in_kernel() {
+        let mut e = ell(10.0, 0.5);
+
+        apply_geom_prop(&mut e, "normal_x", "1");
+
+        let normal = DVec3::new(e.normal.x, e.normal.y, e.normal.z);
+        let major = DVec3::new(e.major_axis.x, e.major_axis.y, e.major_axis.z);
+        assert!((normal.length() - 1.0).abs() < 1.0e-12);
+        assert!((major.length() - 10.0).abs() < 1.0e-9);
+        assert!(normal.dot(major).abs() < 1.0e-9);
     }
 
     #[test]
