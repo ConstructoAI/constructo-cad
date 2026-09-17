@@ -1163,7 +1163,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("HYPERLINK ") => {
-                use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+                use acadrust::xdata::XDataValue;
                 let url = cmd.strip_prefix("HYPERLINK").unwrap_or("").trim().to_string();
                 if url.is_empty() {
                     self.command_line.push_info(crate::t!("Usage: HYPERLINK <url>   (select objects first)").as_ref());
@@ -1183,15 +1183,19 @@ impl OpenCADStudio {
                 self.push_undo_snapshot(i, "HYPERLINK");
                 let mut n = 0usize;
                 for h in &handles {
-                    if let Some(e) = self.tabs[i].scene.document.get_entity_mut(*h) {
-                        let xd = &mut e.common_mut().extended_data;
-                        let mut rec = ExtendedDataRecord::new("PE_URL");
-                        rec.add_value(XDataValue::String(url.clone()));
-                        xd.add_record(rec);
+                    if self.tabs[i].scene.document.get_entity(*h).is_some() {
+                        crate::scene::view::dispatch::set_entity_xdata(
+                            &mut self.tabs[i].scene.document,
+                            *h,
+                            "PE_URL",
+                            Some(vec![XDataValue::String(url.clone())]),
+                        );
                         n += 1;
                     }
                 }
+                self.invalidate_property_targets(i, &handles);
                 self.tabs[i].dirty = true;
+                self.refresh_properties();
                 self.command_line
                     .push_output(crate::tf!("HYPERLINK: attached to {n} object(s).").as_ref());
                 return Some(Task::none());

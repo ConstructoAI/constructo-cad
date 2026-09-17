@@ -51,7 +51,7 @@ mod preview;
 mod project;
 mod scene_markers;
 mod selection;
-pub(crate) use selection::pe_url_of;
+pub(crate) use selection::{pe_url_description_of, pe_url_of};
 pub mod parametric_constraints;
 mod parametric_solve;
 
