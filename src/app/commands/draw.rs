@@ -1206,7 +1206,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "GCSMOOTH" | "SMOOTHCONSTRAINT" => {
+            "GCSMOOTH" => {
                 use crate::modules::parametric::SmoothConstraintCommand;
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {

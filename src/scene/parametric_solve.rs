@@ -3977,4 +3977,101 @@ mod tests {
         assert!(jet.tangent[1].abs() < 1e-9, "jet={jet:?}");
         assert!(cadkernel::space::Vec3::from(jet.curvature).length() < 5e-3);
     }
+
+    #[test]
+    fn smooth_constraint_uses_the_selected_polyline_arc_curvature() {
+        let mut scene = Scene::new();
+        let mut target = acadrust::entities::LwPolyline::new();
+        target.vertices = vec![
+            acadrust::entities::LwVertex::with_bulge(
+                acadrust::types::Vector2::new(0.0, 0.0),
+                1.0,
+            ),
+            acadrust::entities::LwVertex::from_coords(10.0, 0.0),
+        ];
+        let target = scene.add_entity(EntityType::LwPolyline(target));
+        let mut spline = acadrust::entities::Spline::new();
+        spline.degree = 3;
+        spline.control_points = vec![
+            Vector3::new(2.0, 1.0, 0.0),
+            Vector3::new(3.0, 2.0, 0.0),
+            Vector3::new(4.0, 3.0, 0.0),
+            Vector3::new(5.0, 3.0, 0.0),
+        ];
+        spline.knots = cadkernel::space::clamped_uniform_knots(3, 4);
+        let spline = scene.add_entity(EntityType::Spline(spline));
+        scene
+            .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+            .add(
+                ConstraintKind::Smooth,
+                vec![
+                    ParametricRef::point(spline, 0),
+                    ParametricRef::point(target, 0),
+                    ParametricRef::segment(target, 0),
+                ],
+                None,
+            );
+
+        scene.bump_entities(&[(target, super::ChangeKind::Modified)]);
+
+        let EntityType::Spline(spline) = scene.document.get_entity(spline).unwrap() else {
+            panic!("expected spline");
+        };
+        let curve = crate::entities::spline::nurbs3(spline).unwrap();
+        let jet =
+            cadkernel::space::CurveJet::from_nurbs(&curve, cadkernel::space::SplineEnd::Start)
+                .unwrap();
+        assert!(cadkernel::space::Vec3::from(jet.point).length() < 1.0e-9);
+        assert!(jet.tangent[0].abs() < 1.0e-9, "jet={jet:?}");
+        assert!(
+            (cadkernel::space::Vec3::from(jet.curvature).length() - 0.2).abs() < 2.0e-4,
+            "jet={jet:?}"
+        );
+    }
+
+    #[test]
+    fn smooth_constraint_accepts_a_stale_normal_on_an_arbitrary_plane() {
+        let mut scene = Scene::new();
+        let target = scene.add_entity(EntityType::Line(
+            acadrust::entities::Line::from_points(
+                Vector3::new(0.0, 0.0, 1.0),
+                Vector3::new(5.0, 0.0, 1.0),
+            ),
+        ));
+        let mut source = acadrust::entities::Spline::new();
+        source.degree = 3;
+        source.normal = Vector3::UNIT_Z;
+        source.control_points = vec![
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(2.0, 0.0, 2.0),
+            Vector3::new(4.0, 0.0, 2.0),
+            Vector3::new(5.0, 0.0, 3.0),
+        ];
+        source.knots = cadkernel::space::clamped_uniform_knots(3, 4);
+        let source = scene.add_entity(EntityType::Spline(source));
+        let refs = vec![
+            ParametricRef::point(source, 0),
+            ParametricRef::point(target, 0),
+        ];
+        assert!(scene
+            .validate_parametric_constraint(ConstraintKind::Smooth, &refs, None)
+            .is_ok());
+        scene
+            .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+            .add(ConstraintKind::Smooth, refs, None);
+
+        scene.bump_entities(&[(target, super::ChangeKind::Modified)]);
+
+        let EntityType::Spline(source) = scene.document.get_entity(source).unwrap() else {
+            panic!("expected spline");
+        };
+        let curve = crate::entities::spline::nurbs3(source).unwrap();
+        let jet =
+            cadkernel::space::CurveJet::from_nurbs(&curve, cadkernel::space::SplineEnd::Start)
+                .unwrap();
+        assert!(cadkernel::space::Vec3::from(jet.point)
+            .distance(cadkernel::space::Vec3::new(0.0, 0.0, 1.0))
+            < 1.0e-9);
+        assert!(jet.tangent[1].abs() < 1.0e-9 && jet.tangent[2].abs() < 1.0e-9);
+    }
 }

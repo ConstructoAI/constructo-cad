@@ -138,7 +138,7 @@ impl CadModule for ParametricModule {
 
 inventory::submit!(crate::command::CommandRegistration {
     names: &[
-        "AUTOCONSTRAIN", "CONSTRAINTSETTINGS", "GCSMOOTH", "SMOOTHCONSTRAINT", "GCSHOW", "GCHIDE", "GCRESET",
+        "AUTOCONSTRAIN", "CONSTRAINTSETTINGS", "GCSMOOTH", "GCSHOW", "GCHIDE", "GCRESET",
         "GCSHOWALL", "GCHIDEALL", "DCSHOW", "DCHIDE", "DCSHOWALL", "DCHIDEALL",
         "DCCONVERT", "DELCONSTRAINT",
     ]

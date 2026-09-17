@@ -1390,4 +1390,30 @@ mod tests {
             acadrust::types::Vector3::new(0.0, 2.5, 0.0)
         );
     }
+
+    #[test]
+    fn showing_derived_fit_points_does_not_change_the_curve() {
+        let mut spline = Spline::default();
+        spline.degree = 3;
+        spline.control_points = vec![
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(1.0, 3.0, 0.0),
+            acadrust::types::Vector3::new(4.0, 3.0, 0.0),
+            acadrust::types::Vector3::new(5.0, 0.0, 0.0),
+        ];
+        spline.knots = cadkernel::space::clamped_uniform_knots(3, 4);
+        let before = nurbs3(&spline).unwrap().point_at(0.37);
+
+        assert!(prepare_fit_point_view(&mut spline));
+        spline.cv_frame_visible = false;
+
+        assert!(shows_fit_points(&spline));
+        assert!(!uses_fit_method(&spline));
+        let after = nurbs3(&spline).unwrap().point_at(0.37);
+        assert!(
+            cadkernel::space::Vec3::from(before)
+                .distance(cadkernel::space::Vec3::from(after))
+                < 1.0e-12
+        );
+    }
 }

@@ -74,8 +74,10 @@ impl SmoothConstraintCommand {
                 })
             }
             EntityType::LwPolyline(_) | EntityType::Polyline2D(_) => {
-                let (source, _, _) = crate::scene::centerline::picked_source(entity, handle, point)?;
-                let segment = usize::try_from(source.segment_index).ok()?;
+                let planar = crate::entities::curve::entity_curve(entity)?;
+                let local = planar.plane.project(point.to_array())?;
+                let segments = planar.curve.segments();
+                let (segment, _) = cadkernel::geom2d::nearest_of(segments.iter(), local)?;
                 let points = crate::scene::dimension_assoc::source_points(entity);
                 let closed = match entity {
                     EntityType::LwPolyline(polyline) => polyline.is_closed,
@@ -227,5 +229,33 @@ impl CadCommand for SmoothConstraintCommand {
 
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn polyline_target_keeps_the_picked_arc_segment_and_endpoint() {
+        let handle = Handle::new(7);
+        let mut polyline = acadrust::entities::LwPolyline::new();
+        polyline.vertices = vec![
+            acadrust::entities::LwVertex::from_coords(0.0, 0.0),
+            acadrust::entities::LwVertex::with_bulge(
+                acadrust::types::Vector2::new(5.0, 0.0),
+                1.0,
+            ),
+            acadrust::entities::LwVertex::from_coords(10.0, 0.0),
+        ];
+
+        let target = SmoothConstraintCommand::target_reference(
+            &EntityType::LwPolyline(polyline),
+            handle,
+            DVec3::new(10.0, 0.0, 0.0),
+        )
+        .expect("arc endpoint");
+        assert_eq!(target.curve, ParametricRef::segment(handle, 1));
+        assert_eq!(target.endpoint, ParametricRef::point(handle, 2));
     }
 }
