@@ -23,8 +23,8 @@ pub use point_on_entity::{
 };
 pub use tangent_command::TangentConstraintCommand;
 pub use tools::{
-    colinear, concentric, equal, fixed, horizontal, normal, parallel, perpendicular, symmetric,
-    tangent, vertical,
+    colinear, concentric as concentric_tool, equal, fixed, horizontal, normal, parallel,
+    perpendicular, symmetric, tangent, vertical,
 };
 pub use value::{
     angle_tool, dimensional_tools, distance_tool, AngleConstraintCommand,
@@ -67,7 +67,7 @@ impl CadModule for ParametricModule {
                             "SMOOTHCONSTRAINT", "Smooth",
                             include_bytes!("../../../assets/icons/constrain/smooth.svg"),
                         )),
-                        RibbonItem::LargeTool(concentric::tool()),
+                        RibbonItem::LargeTool(concentric_tool::tool()),
                         RibbonItem::LargeTool(horizontal::tool()),
                         RibbonItem::LargeTool(symmetric::tool()),
                         RibbonItem::LargeTool(fixed::tool()),

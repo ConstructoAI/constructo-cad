@@ -837,11 +837,11 @@ fn glyph_placement_for_reference(
     if let Some(segment) = r.segment_center_index() {
         let planar = crate::entities::curve::entity_curve(entity)?;
         let curve = planar.curve.segments().into_iter().nth(segment)?;
+        let on_arc = planar.plane.point_at(curve.point_at(0.5));
         let cadkernel::geom2d::Curve::Arc(arc) = curve else {
             return None;
         };
         let center = planar.plane.point_at(arc.centre);
-        let on_arc = planar.plane.point_at(arc.point_at(0.5));
         let center = Vector3::new(center[0], center[1], center[2]);
         let on_arc = Vector3::new(on_arc[0], on_arc[1], on_arc[2]);
         return Some((on_arc, on_arc - center));

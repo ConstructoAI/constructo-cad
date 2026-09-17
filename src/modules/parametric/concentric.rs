@@ -55,8 +55,8 @@ impl ConcentricConstraintCommand {
                 let planar = crate::entities::curve::entity_curve(entity)?;
                 let local = planar.plane.project(point.to_array())?;
                 let segments = planar.curve.segments();
-                let (index, segment) = cadkernel::geom2d::nearest_of(segments.iter(), local)?;
-                matches!(segment, cadkernel::geom2d::Curve::Arc(_))
+                let (index, _) = cadkernel::geom2d::nearest_of(segments.iter(), local)?;
+                matches!(segments.get(index), Some(cadkernel::geom2d::Curve::Arc(_)))
                     .then(|| ParametricRef::segment_center(handle, index))
             }
             _ => None,
