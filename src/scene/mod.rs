@@ -33,7 +33,7 @@ pub(crate) mod centermark;
 pub(crate) mod dimension_assoc;
 pub(crate) mod dimension_assoc_chain;
 pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
-pub use page_setup::apply_default_page_setup;
+pub use page_setup::{apply_default_page_setup, rotated_margins};
 mod dwg_native_constraints;
 mod entity;
 #[cfg(test)]
@@ -4362,13 +4362,8 @@ impl Scene {
             None
         })?;
         // `paper_limits()` already swaps the sheet for a 90°/270° rotation, so the
-        // margins must rotate to the same edges: a margin on a physical side moves
-        // to the displayed side that side rotates onto.
-        let (ml, mb, mr, mt) = match rot {
-            1 | 3 => (bottom, left, top, right),
-            2 => (right, top, left, bottom),
-            _ => (left, bottom, right, top),
-        };
+        // margins must rotate to the same edges.
+        let (ml, mb, mr, mt) = page_setup::rotated_margins((left, bottom, right, top), rot);
         // Plot margins are millimetres like the paper size; scale them into the
         // layout's paper-space units so the inset matches the (already scaled)
         // sheet rect. Without this an inch paper space insets an ~8-inch sheet

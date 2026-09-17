@@ -40,6 +40,25 @@ pub fn apply_default_page_setup(layout: &mut Layout, plot_style: &str) {
     layout.plot_printer_name = crate::io::plot_device::PlotDevice::None.canonical_name();
 }
 
+/// The unprintable margins of a sheet as they appear on the rotated layout,
+/// `(left, bottom, right, top)`. Stored margins belong to the medium's own
+/// edges; a plot rotated by a quarter turn (`rotation` is the file's 0–3
+/// code) shows the medium turned on the layout, so each margin moves to the
+/// edge its side lands on — verified against limits written by the
+/// commercial application: at 90° the medium's top margin is the layout's
+/// left one and its left margin the layout's bottom one.
+pub fn rotated_margins(
+    (left, bottom, right, top): (f64, f64, f64, f64),
+    rotation: i16,
+) -> (f64, f64, f64, f64) {
+    match rotation {
+        1 => (top, left, bottom, right),
+        2 => (right, top, left, bottom),
+        3 => (bottom, right, top, left),
+        _ => (left, bottom, right, top),
+    }
+}
+
 impl Scene {
     /// Handle of the `ACAD_PLOTSETTINGS` dictionary, located robustly.
     ///

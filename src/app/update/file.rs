@@ -152,20 +152,48 @@ fn paper_name_for_settings(
     }
 }
 
-/// The stored rotation for the dialog's sheet. Media are stored portrait, so
-/// a landscape sheet is the portrait medium turned a quarter, and
-/// "upside-down" adds a half turn on top (180° portrait, 270° landscape) —
-/// the form every other reader of the file expects.
+/// The stored rotation for the dialog's sheet on a medium that is itself
+/// `natural`-oriented: a quarter turn when the requested orientation differs
+/// from the medium's own, and "upside-down" adds a half turn on top. This is
+/// how the commercial application writes it — a system printer's portrait
+/// `A3` plotted landscape carries 90°, while its PDF driver's landscape
+/// `ISO_A4_(297.00_x_210.00_MM)` medium plotted landscape carries 0°.
 fn plot_dialog_rotation(
     d: &crate::ui::window::plot::PlotDialogState,
+    natural: crate::io::paper_catalog::Orientation,
 ) -> acadrust::objects::PlotRotation {
-    use crate::io::paper_catalog::Orientation;
     use acadrust::objects::PlotRotation;
-    match (plot_dialog_orientation(d), d.upside_down) {
-        (Orientation::Portrait, false) => PlotRotation::None,
-        (Orientation::Landscape, false) => PlotRotation::Degrees90,
-        (Orientation::Portrait, true) => PlotRotation::Degrees180,
-        (Orientation::Landscape, true) => PlotRotation::Degrees270,
+    match (plot_dialog_orientation(d) != natural, d.upside_down) {
+        (false, false) => PlotRotation::None,
+        (true, false) => PlotRotation::Degrees90,
+        (false, true) => PlotRotation::Degrees180,
+        (true, true) => PlotRotation::Degrees270,
+    }
+}
+
+/// Millimetres in the paper unit a page setup counts in.
+fn plot_paper_unit_mm(units: acadrust::objects::PlotPaperUnits) -> f64 {
+    match units {
+        acadrust::objects::PlotPaperUnits::Inches => 25.4,
+        _ => 1.0,
+    }
+}
+
+/// The factor the commercial application stores next to the scale (DXF 147)
+/// is the `paper : drawing` ratio times 25.4 on millimetre page setups and
+/// the plain ratio on inch ones — observed in its files, whatever the
+/// published description says. Both directions of that convention live here.
+fn stored_scale_factor(ratio: f64, units: acadrust::objects::PlotPaperUnits) -> f64 {
+    match units {
+        acadrust::objects::PlotPaperUnits::Millimeters => ratio * 25.4,
+        _ => ratio,
+    }
+}
+
+fn ratio_from_stored_scale_factor(factor: f64, units: acadrust::objects::PlotPaperUnits) -> f64 {
+    match units {
+        acadrust::objects::PlotPaperUnits::Millimeters => factor / 25.4,
+        _ => factor,
     }
 }
 
@@ -3093,9 +3121,8 @@ impl OpenCADStudio {
         &self,
         mut ps: acadrust::objects::PlotSettings,
     ) -> acadrust::objects::PlotSettings {
-        use acadrust::objects::{
-            PlotPaperUnits, PlotType, ScaledType, ShadePlotMode, ShadePlotResolutionLevel,
-        };
+        use crate::io::paper_catalog::Orientation;
+        use acadrust::objects::{PlotType, ScaledType, ShadePlotMode, ShadePlotResolutionLevel};
         let d = &self.plot_dialog;
         let scene = &self.tabs[self.active_tab].scene;
         // Names and margins are decided against the stored settings before
@@ -3103,13 +3130,28 @@ impl OpenCADStudio {
         let paper_size = paper_name_for_settings(d, &ps);
         let printer_name = device_name_for_settings(d, &ps);
         let margins = margins_for_settings(d, &ps);
+        let same_medium = paper_unchanged(d, &ps) && ps.paper_width > 0.0 && ps.paper_height > 0.0;
         ps.paper_size = paper_size;
         ps.printer_name = printer_name;
         ps.margins = margins;
-        let (width, height) = plot_dialog_paper(d).portrait_mm();
-        ps.paper_width = width.max(1.0);
-        ps.paper_height = height.max(1.0);
-        ps.rotation = plot_dialog_rotation(d);
+        // An unchanged sheet keeps the medium exactly as the drawing stores
+        // it — its driver's precise dimensions in the orientation the driver
+        // defines it (a PDF driver lists landscape media of its own) — and
+        // only the rotation says how the sheet is plotted on it. A new
+        // selection is written as the catalogue's portrait medium.
+        let natural = if same_medium {
+            if ps.paper_width > ps.paper_height {
+                Orientation::Landscape
+            } else {
+                Orientation::Portrait
+            }
+        } else {
+            let (width, height) = plot_dialog_paper(d).portrait_mm();
+            ps.paper_width = width.max(1.0);
+            ps.paper_height = height.max(1.0);
+            Orientation::Portrait
+        };
+        ps.rotation = plot_dialog_rotation(d, natural);
         let layout_area = d.area == "Layout";
         ps.plot_type = match d.area.as_str() {
             "Window" => PlotType::Window,
@@ -3136,58 +3178,58 @@ impl OpenCADStudio {
         } else {
             d.offset_y.parse::<f64>().unwrap_or(0.0)
         };
-        if layout_area {
-            ps.set_standard_scale(ScaledType::OneToOne);
-            ps.scale_numerator = 1.0;
-            ps.scale_denominator = 1.0;
-            ps.standard_scale_factor = 1.0;
-        } else if d.fit_to_paper {
+        if d.fit_to_paper && !layout_area {
             ps.set_scale_to_fit();
+            // The commercial application marks fitted plots with the
+            // "standard scale" bit and leaves the ratio it computed.
+            ps.flags.use_standard_scale = true;
         } else {
             // The dialog's factor is per the drawing's scale-family unit
-            // (inches for an imperial drawing, else millimetres); the file
-            // stores it per the layout's paper unit. A named ratio is kept
-            // as written when no unit conversion hides inside the factor —
-            // a metre drawing plotting "1:100" really plots 10 mm per unit,
-            // which is what the file must say.
+            // (inches for an imperial drawing, else millimetres) and already
+            // includes the drawing-unit factor; the file stores it per the
+            // layout's paper unit. A named ratio is kept as written when no
+            // drawing-unit factor hides inside it — a metre drawing plotting
+            // "1:100" really plots 10 mm per unit, which is what the file
+            // must say — and its standard code is kept even across a
+            // paper-unit conversion, the way the commercial application
+            // writes "1:1" on an inch page setup over a millimetre paper
+            // space as `1 in = 25.4 units`. A layout plot goes through the
+            // same path: the dialog holds it at 1:1, which the conversion
+            // turns into whatever keeps the paper space's unit intact.
             let factor = plot_dialog_scale_factor(d);
-            let page_unit_mm = match ps.paper_units {
-                PlotPaperUnits::Inches => 25.4,
-                _ => 1.0,
-            };
-            let conversion = scene.scale_family_unit_mm() / page_unit_mm;
+            let conversion = scene.scale_family_unit_mm() / plot_paper_unit_mm(ps.paper_units);
             let named = scene.scale_ratio(&d.scale).filter(|(paper, drawing)| {
                 (paper / drawing - factor).abs() <= 1e-9 * factor.abs().max(1.0)
             });
-            let (numerator, denominator, standard) = match named {
-                Some((paper, drawing)) if (conversion - 1.0).abs() <= 1e-12 => {
-                    (paper, drawing, standard_scale_for_ratio(paper, drawing))
-                }
+            let standard =
+                named.and_then(|(paper, drawing)| standard_scale_for_ratio(paper, drawing));
+            let (numerator, denominator) = match named {
+                Some((paper, drawing)) if (conversion - 1.0).abs() <= 1e-12 => (paper, drawing),
                 _ => {
                     let per_unit = (factor * conversion).max(1e-9);
                     if per_unit >= 1.0 {
-                        (per_unit, 1.0, None)
+                        (per_unit, 1.0)
                     } else {
-                        (1.0, 1.0 / per_unit, None)
+                        (1.0, 1.0 / per_unit)
                     }
                 }
             };
-            match standard {
-                Some(scale) => ps.set_standard_scale(scale),
-                None => {
-                    ps.set_custom_scale(numerator, denominator);
-                    ps.flags.use_standard_scale = false;
-                }
-            }
+            // The commercial application leaves the "standard scale" bit
+            // clear even for a standard code and keeps the ratio in the
+            // numerator/denominator pair; readers that trust the bit would
+            // otherwise take the stored factor as the ratio itself.
+            ps.scale_type = standard.unwrap_or(ScaledType::CustomScale);
+            ps.flags.use_standard_scale = false;
             ps.scale_numerator = numerator;
             ps.scale_denominator = denominator;
-            ps.standard_scale_factor = numerator / denominator;
+            ps.standard_scale_factor =
+                stored_scale_factor(numerator / denominator, ps.paper_units);
         }
         ps.current_style_sheet = d.style_name.clone();
         ps.flags.scale_lineweights = d.scale_lw;
         ps.flags.print_lineweights = d.lineweights;
-        ps.flags.plot_plot_styles = d.apply_plot_styles && !d.style_name.is_empty();
-        ps.flags.show_plot_styles = d.show_plot_styles && !d.style_name.is_empty();
+        ps.flags.plot_plot_styles = d.apply_plot_styles;
+        ps.flags.show_plot_styles = d.show_plot_styles;
         ps.flags.draw_viewports_first = d.paperspace_last;
         ps.flags.plot_hidden = d.shade == "Hidden Line";
         ps.shade_plot_mode = match d.shade.as_str() {
@@ -3222,17 +3264,25 @@ impl OpenCADStudio {
         self.tabs[i]
             .scene
             .set_layout_plot_settings(&layout_name, &ps);
-        // Layout limits and extents are the sheet in paper-space units, which
-        // the settings just written define (an inch layout counts in inches).
+        // Layout limits are the sheet in paper-space units, which the
+        // settings just written define, placed the way the commercial
+        // application places it: the printable area's corner is the paper
+        // space origin, so the sheet starts at minus its displayed margins.
         let units_per_mm = self.tabs[i].scene.paper_space_unit_factor().max(1e-9);
+        let m = ps.margins;
+        let (left, bottom, ..) = crate::scene::rotated_margins(
+            (m.left, m.bottom, m.right, m.top),
+            ps.rotation.to_code(),
+        );
+        let (x0, y0) = (-left * units_per_mm, -bottom * units_per_mm);
         let (lw, lh) = (w * units_per_mm, h * units_per_mm);
         for obj in self.tabs[i].scene.document.objects.values_mut() {
             if let acadrust::objects::ObjectType::Layout(layout) = obj {
                 if layout.name == layout_name {
-                    layout.min_limits = (0.0, 0.0);
-                    layout.max_limits = (lw, lh);
-                    layout.min_extents = (0.0, 0.0, 0.0);
-                    layout.max_extents = (lw, lh, 0.0);
+                    layout.min_limits = (x0, y0);
+                    layout.max_limits = (x0 + lw, y0 + lh);
+                    layout.min_extents = (x0, y0, 0.0);
+                    layout.max_extents = (x0 + lw, y0 + lh, 0.0);
                     break;
                 }
             }
@@ -4773,31 +4823,25 @@ impl OpenCADStudio {
         }
         d.upside_down = matches!(deg, 180 | 270);
         d.fit_to_paper = d.area != "Layout" && ps.is_scale_to_fit();
-        let stored_factor = if d.area == "Layout" {
-            1.0
-        } else if ps.flags.use_standard_scale {
-            if ps.standard_scale_factor.is_finite() && ps.standard_scale_factor > 0.0 {
-                ps.standard_scale_factor
-            } else {
-                ps.scale_type.scale_factor()
-            }
-        } else if ps.scale_denominator.abs() > 1e-9 {
-            ps.scale_numerator / ps.scale_denominator
+        let ratio = ps.scale_numerator / ps.scale_denominator;
+        let stored_factor = if ratio.is_finite() && ratio > 0.0 {
+            ratio
+        } else if ps.flags.use_standard_scale
+            && ps.standard_scale_factor.is_finite()
+            && ps.standard_scale_factor > 0.0
+        {
+            ratio_from_stored_scale_factor(ps.standard_scale_factor, ps.paper_units)
         } else {
-            1.0
+            ps.scale_type.scale_factor()
         };
         // The file's factor is per the layout's paper unit; the picker's are
         // per the drawing's scale-family unit (see `plot_settings_from_dialog`).
-        let page_unit_mm = match ps.paper_units {
-            acadrust::objects::PlotPaperUnits::Inches => 25.4,
-            _ => 1.0,
-        };
         let target_factor = if stored_factor.is_finite() && stored_factor > 0.0 {
-            stored_factor * page_unit_mm / family_unit_mm
+            stored_factor * plot_paper_unit_mm(ps.paper_units) / family_unit_mm
         } else {
             1.0
         };
-        if !d.fit_to_paper || !d.scales.iter().any(|(name, _)| name == &d.scale) {
+        if !d.fit_to_paper {
             d.scale = scale_name_for_factor(&d.scales, target_factor).unwrap_or_else(|| {
                 // A scale the drawing has no name for stays what it is rather
                 // than snapping to 1:1; the ratio entry disappears again with
@@ -4808,6 +4852,12 @@ impl OpenCADStudio {
                     .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
                 name
             });
+        } else if !d.scales.iter().any(|(name, _)| name == &d.scale) {
+            // A fitted plot's stored ratio is what the fit computed, not a
+            // choice; the picker just needs a valid entry behind it.
+            d.scale = scale_name_for_factor(&d.scales, 1.0)
+                .or_else(|| d.scales.first().map(|(name, _)| name.clone()))
+                .unwrap_or_else(|| "1:1".into());
         }
         d.scale_lw = ps.flags.scale_lineweights && !d.fit_to_paper;
         d.lineweights = ps.flags.print_lineweights;
@@ -5347,34 +5397,50 @@ mod plot_paper_tests {
     }
 
     #[test]
-    fn orientation_is_stored_as_the_rotation_of_the_portrait_medium() {
+    fn orientation_is_stored_as_a_rotation_of_the_medium() {
         use acadrust::objects::PlotRotation as R;
         use crate::ui::window::plot::PlotFlag;
-        let cases = [
+        // A newly picked sheet is the catalogue's portrait medium…
+        let portrait_medium = [
             ("Portrait", false, R::None),
             ("Landscape", false, R::Degrees90),
             ("Portrait", true, R::Degrees180),
             ("Landscape", true, R::Degrees270),
         ];
-        for (orientation, upside_down, rotation) in cases {
-            let mut app = app_with_printer_named_sheet();
-            let _ = app.on_plot_dialog_open();
-            let _ = app.on_plot_dlg(PlotDlgMsg::Orientation(orientation.into()));
-            if upside_down {
-                let _ = app.on_plot_dlg(PlotDlgMsg::Flag(PlotFlag::UpsideDown));
+        // …while the drawing's own landscape `A4` medium is kept, so the
+        // same choices rotate relative to it.
+        let landscape_medium = [
+            ("Landscape", false, R::None),
+            ("Portrait", false, R::Degrees90),
+            ("Landscape", true, R::Degrees180),
+            ("Portrait", true, R::Degrees270),
+        ];
+        for (pick_a3, cases) in [(true, portrait_medium), (false, landscape_medium)] {
+            for (orientation, upside_down, rotation) in cases {
+                let mut app = app_with_printer_named_sheet();
+                let _ = app.on_plot_dialog_open();
+                if pick_a3 {
+                    let a3 = "ISO_A3_(297.00_x_420.00_MM)";
+                    let _ = app.on_plot_dlg(PlotDlgMsg::Paper(a3.into()));
+                }
+                let _ = app.on_plot_dlg(PlotDlgMsg::Orientation(orientation.into()));
+                if upside_down {
+                    let _ = app.on_plot_dlg(PlotDlgMsg::Flag(PlotFlag::UpsideDown));
+                }
+                let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+                let ps = layout_settings(&app);
+                let medium = if pick_a3 { (297.0, 420.0) } else { (297.0, 210.0) };
+                assert_eq!((ps.paper_width, ps.paper_height), medium, "{orientation}");
+                assert_eq!(ps.rotation, rotation, "{orientation} upside-down={upside_down}");
+                // The next dialog reads the same choices back out of the rotation.
+                let _ = app.on_plot_dialog_open();
+                assert_eq!(app.plot_dialog.orientation, orientation);
+                assert_eq!(app.plot_dialog.upside_down, upside_down);
+                let sheet = super::plot_dialog_sheet_mm(&app.plot_dialog);
+                let long_side = medium.0.max(medium.1);
+                assert_eq!(sheet.0 > sheet.1, orientation == "Landscape", "{sheet:?}");
+                assert_eq!(sheet.0.max(sheet.1), long_side);
             }
-            let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
-            let ps = layout_settings(&app);
-            assert_eq!((ps.paper_width, ps.paper_height), (210.0, 297.0), "{orientation}");
-            assert_eq!(ps.rotation, rotation, "{orientation} upside-down={upside_down}");
-            // The next dialog reads the same orientation back out of the rotation.
-            let _ = app.on_plot_dialog_open();
-            assert_eq!(app.plot_dialog.orientation, orientation);
-            assert_eq!(app.plot_dialog.upside_down, upside_down);
-            assert_eq!(
-                super::plot_dialog_sheet_mm(&app.plot_dialog),
-                if orientation == "Portrait" { (210.0, 297.0) } else { (297.0, 210.0) }
-            );
         }
     }
 
@@ -5390,9 +5456,13 @@ mod plot_paper_tests {
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = layout_settings(&app);
         assert_eq!(ps.scale_type, ScaledType::OneToHundred);
-        assert!(ps.flags.use_standard_scale);
+        assert!(
+            !ps.flags.use_standard_scale,
+            "the bit stays clear, as the source application writes it"
+        );
         assert_eq!((ps.scale_numerator, ps.scale_denominator), (1.0, 100.0));
-        assert!((ps.standard_scale_factor - 0.01).abs() < 1e-12);
+        // The stored factor follows the millimetre convention: ratio × 25.4.
+        assert!((ps.standard_scale_factor - 0.254).abs() < 1e-12);
         let _ = app.on_plot_dialog_open();
         assert_eq!(app.plot_dialog.scale, "1:100");
         // A ratio the format has no code for is a custom scale, spelled as the ratio.
@@ -5406,15 +5476,20 @@ mod plot_paper_tests {
         let _ = app.on_plot_dialog_open();
         assert_eq!(app.plot_dialog.scale, "1:3");
         assert!((super::plot_dialog_scale_factor(&app.plot_dialog) - 1.0 / 3.0).abs() < 1e-12);
-        // Fit to paper is its own scale type; a Layout plot is always 1:1.
+        // Fit to paper is its own scale type and carries the bit; a Layout
+        // plot goes back to the 1:1 the dialog holds it at.
         let _ = app.on_plot_dlg(PlotDlgMsg::Flag(crate::ui::window::plot::PlotFlag::FitToPaper));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
-        assert_eq!(layout_settings(&app).scale_type, ScaledType::ScaleToFit);
+        let ps = layout_settings(&app);
+        assert_eq!(ps.scale_type, ScaledType::ScaleToFit);
+        assert!(ps.flags.use_standard_scale);
         let _ = app.on_plot_dlg(PlotDlgMsg::Area("Layout".into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = layout_settings(&app);
         assert_eq!(ps.scale_type, ScaledType::OneToOne);
+        assert!(!ps.flags.use_standard_scale);
         assert_eq!((ps.scale_numerator, ps.scale_denominator), (1.0, 1.0));
+        assert!((ps.standard_scale_factor - 25.4).abs() < 1e-12);
     }
 
     #[test]
@@ -5432,6 +5507,7 @@ mod plot_paper_tests {
         let ps = layout_settings(&app);
         assert_eq!(ps.scale_type, ScaledType::CustomScale, "not the format's 1:100");
         assert_eq!((ps.scale_numerator, ps.scale_denominator), (10.0, 1.0));
+        assert!((ps.standard_scale_factor - 254.0).abs() < 1e-9);
         let _ = app.on_plot_dialog_open();
         assert_eq!(app.plot_dialog.scale, "1:100");
     }
@@ -5452,11 +5528,21 @@ mod plot_paper_tests {
             PlotPaperUnits::Inches,
             "the layout's unit is not ours to change"
         );
-        // 1 mm = 100 units is 1 inch = 2540 units on an inch page setup.
-        assert_eq!(ps.scale_type, ScaledType::CustomScale);
+        // 1 mm = 100 units is 1 inch = 2540 units on an inch page setup; the
+        // standard code still names the choice, as the source application does.
+        assert_eq!(ps.scale_type, ScaledType::OneToHundred);
         assert_eq!((ps.scale_numerator, ps.scale_denominator), (1.0, 2540.0));
+        assert!((ps.standard_scale_factor - 1.0 / 2540.0).abs() < 1e-15);
         let _ = app.on_plot_dialog_open();
         assert_eq!(app.plot_dialog.scale, "1:100");
+        // A layout plot keeps the paper space in millimetres: "1:1" is
+        // `1 in = 25.4 units`.
+        let _ = app.on_plot_dlg(PlotDlgMsg::Area("Layout".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        let ps = layout_settings(&app);
+        assert_eq!(ps.scale_type, ScaledType::OneToOne);
+        assert_eq!((ps.scale_numerator, ps.scale_denominator), (1.0, 25.4));
+        assert!((ps.standard_scale_factor - 1.0 / 25.4).abs() < 1e-15);
     }
 
     #[test]
@@ -5515,6 +5601,118 @@ mod plot_paper_tests {
         assert_eq!(ps.paper_image_origin_x, 3.5);
     }
 
+    /// Open the metric page-setup fixture written by the commercial
+    /// application (see `tests/fixtures/plot/README.md`).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn app_with_fixture() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/plot/page-setups-metric.dxf"
+        );
+        let reply = app.automation_op(&format!(r#"{{"op":"open","path":"{path}"}}"#));
+        assert_eq!(reply["ok"], true, "{reply}");
+        app
+    }
+
+    /// The page-setup fields the file format stores, minus handles.
+    fn stored_fields(ps: &acadrust::objects::PlotSettings) -> String {
+        format!(
+            "{} | {} | {:?} | {:.6} {:.6} | {:.6} {:.6} {:.6} {:.6} | {:.6} {:.6} | {} {} \
+             | {:.6} / {:.6} | {:.9} | {:?} | {:?} | {:?} {:?} {}",
+            ps.printer_name,
+            ps.paper_size,
+            ps.paper_units,
+            ps.paper_width,
+            ps.paper_height,
+            ps.margins.left,
+            ps.margins.bottom,
+            ps.margins.right,
+            ps.margins.top,
+            ps.origin_x,
+            ps.origin_y,
+            ps.rotation.to_code(),
+            ps.plot_type.to_code(),
+            ps.scale_numerator,
+            ps.scale_denominator,
+            ps.standard_scale_factor,
+            ps.scale_type,
+            ps.flags,
+            ps.shade_plot_mode,
+            ps.shade_plot_resolution,
+            ps.shade_plot_dpi
+        )
+    }
+
+    /// Every layout of the fixture survives "open the dialog, apply" without
+    /// a single stored field changing — the dialog reads the source
+    /// application's conventions and writes them back the same way.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn fixture_page_setups_round_trip_through_the_dialog_unchanged() {
+        use acadrust::objects::{PlotRotation, ScaledType};
+        let mut app = app_with_fixture();
+        let a3_medium = (297.0106506347656, 419.9889831542968);
+        let arch_d_medium = (914.4000244140626, 609.5999755859375);
+        let expectations = [
+            ("A4 1-100", PlotRotation::None, (297.0, 210.0), true),
+            ("A3 - plotter", PlotRotation::Degrees90, a3_medium, false),
+            ("ARCH D - PLOTTER", PlotRotation::None, arch_d_medium, true),
+        ];
+        for (layout, rotation, medium, pdf) in expectations {
+            let orientation = "Landscape";
+            let _ = app.update(Message::LayoutSwitch(layout.into()));
+            let i = app.active_tab;
+            let before = app.tabs[i].scene.plot_settings_for(layout).unwrap();
+            assert_eq!(before.rotation, rotation, "{layout}");
+            assert_eq!((before.paper_width, before.paper_height), medium, "{layout}");
+            assert_eq!(before.scale_type, ScaledType::OneToOne, "{layout}");
+            let _ = app.on_plot_dialog_open();
+            let d = &app.plot_dialog;
+            assert_eq!(d.orientation, orientation, "{layout}");
+            assert!(!d.upside_down);
+            assert_eq!(d.area, "Layout");
+            assert_eq!(d.scale, "1:1", "{layout}: a 1:1 plot in either paper unit");
+            assert_eq!(d.to_file, pdf, "{layout}");
+            assert_eq!(super::plot_dialog_sheet_mm(d).0 > super::plot_dialog_sheet_mm(d).1, true);
+            assert!(d.lineweights && d.apply_plot_styles && d.paperspace_last, "{layout}");
+            let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+            let after = app.tabs[i].scene.plot_settings_for(layout).unwrap();
+            assert_eq!(stored_fields(&after), stored_fields(&before), "{layout}");
+        }
+        // The system printer's sheet keeps its driver's margins and lands on
+        // the layout the way the source application places it: the medium's
+        // top margin on the left, its left margin at the bottom.
+        let _ = app.update(Message::LayoutSwitch("A3 - plotter".into()));
+        let ((x0, y0), (x1, y1)) = app.tabs[app.active_tab].scene.paper_limits().unwrap();
+        assert!((x0 + 20.02365112304687).abs() < 1e-9 && (y0 + 4.995333194732666).abs() < 1e-9);
+        assert!((x1 - 399.96533203125).abs() < 1e-6 && (y1 - 292.015317440033).abs() < 1e-6);
+    }
+
+    /// Picking a new sheet on the fixture's PDF layout writes our canonical
+    /// portrait medium with the orientation in the rotation and the PDF
+    /// driver's margins for that medium.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn fixture_pdf_layout_takes_a_new_sheet_in_canonical_form() {
+        use acadrust::objects::{PaperMargin, PlotRotation};
+        let mut app = app_with_fixture();
+        let _ = app.update(Message::LayoutSwitch("A4 1-100".into()));
+        let _ = app.on_plot_dialog_open();
+        let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_A3_(297.00_x_420.00_MM)".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        let ps = app.tabs[app.active_tab].scene.plot_settings_for("A4 1-100").unwrap();
+        assert_eq!(ps.printer_name, "DWG To PDF.pc3");
+        assert_eq!(ps.paper_size, "ISO_A3_(297.00_x_420.00_MM)");
+        assert_eq!((ps.paper_width, ps.paper_height), (297.0, 420.0));
+        assert_eq!(ps.rotation, PlotRotation::Degrees90);
+        assert_eq!(ps.margins, PaperMargin::new(5.0, 17.0, 6.0, 18.0));
+        // The sheet sits at minus its displayed margins: top on the left,
+        // left at the bottom.
+        let ((x0, y0), _) = app.tabs[app.active_tab].scene.paper_limits().unwrap();
+        assert!((x0 + 18.0).abs() < 1e-9 && (y0 + 5.0).abs() < 1e-9, "{x0} {y0}");
+    }
+
     #[test]
     fn scale_names_parse_to_their_ratios() {
         use crate::scene::Scene;
@@ -5547,9 +5745,9 @@ mod plot_paper_tests {
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let (name, w, h) = layout_paper(&app);
         assert_eq!(name, "A4", "the driver's own spelling must survive the dialog");
-        // The landscape sheet is stored as the portrait medium turned 90°.
-        assert_eq!((w, h), (210.0, 297.0));
-        assert_eq!(layout_rotation(&app), acadrust::objects::PlotRotation::Degrees90);
+        // …and so must the driver's landscape medium: unrotated, as stored.
+        assert_eq!((w, h), (297.0, 210.0));
+        assert_eq!(layout_rotation(&app), acadrust::objects::PlotRotation::None);
     }
 
     #[test]
@@ -5793,9 +5991,9 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let (name, w, h) = layout_paper(&app);
         assert_eq!(name, "Roll_24_(609.60_x_1500.00_MM)");
-        // Written back in canonical form: the portrait medium, turned.
-        assert_eq!((w, h), (609.6, 1500.0));
-        assert_eq!(layout_rotation(&app), acadrust::objects::PlotRotation::Degrees90);
+        // The drawing's own landscape medium stays as it was stored.
+        assert_eq!((w, h), (1500.0, 609.6));
+        assert_eq!(layout_rotation(&app), acadrust::objects::PlotRotation::None);
     }
 }
 
