@@ -56,8 +56,6 @@ struct GroupBuilder<'a> {
     /// Real entity handles that ended up with a geometry node — what
     /// `AssocGeomDependency` objects get created for, in first-touch order.
     referenced_entities: Vec<Handle>,
-    horizontal_datum: Option<i32>,
-    vertical_datum: Option<i32>,
 }
 
 impl<'a> GroupBuilder<'a> {
@@ -68,8 +66,6 @@ impl<'a> GroupBuilder<'a> {
             next_node_id: FIRST_NODE_ID,
             entities: FxHashMap::default(),
             referenced_entities: Vec::new(),
-            horizontal_datum: None,
-            vertical_datum: None,
         }
     }
 
@@ -662,15 +658,7 @@ impl<'a> GroupBuilder<'a> {
         Some(node_id)
     }
 
-    fn datum_line(&mut self, horizontal: bool) -> i32 {
-        let cached = if horizontal {
-            self.horizontal_datum
-        } else {
-            self.vertical_datum
-        };
-        if let Some(node_id) = cached {
-            return node_id;
-        }
+    fn datum_line(&mut self, direction: Vector3) -> i32 {
         let node_id = self.alloc_node_id();
         self.push_node(
             node_id,
@@ -679,18 +667,13 @@ impl<'a> GroupBuilder<'a> {
                 geometry_dependency: Handle::NULL,
                 geometry_node_id: node_id,
                 point: Vector3::ZERO,
-                direction: if horizontal {
-                    Vector3::UNIT_X
+                direction: if direction.length_squared() > 1.0e-24 {
+                    direction.normalize()
                 } else {
-                    Vector3::UNIT_Y
+                    Vector3::UNIT_X
                 },
             },
         );
-        if horizontal {
-            self.horizontal_datum = Some(node_id);
-        } else {
-            self.vertical_datum = Some(node_id);
-        }
         node_id
     }
 
@@ -932,7 +915,12 @@ fn constraint_node(
                 .map(|reference| builder.ref_node(*reference))
                 .collect::<Option<_>>()?;
             let horizontal = constraint.kind == ConstraintKind::Horizontal;
-            let datum = builder.datum_line(horizontal);
+            let fallback = if horizontal {
+                Vector3::UNIT_X
+            } else {
+                Vector3::UNIT_Y
+            };
+            let datum = builder.datum_line(constraint.axis_direction.unwrap_or(fallback));
             let node_id = builder.alloc_node_id();
             builder.push_node(
                 node_id,
@@ -2251,6 +2239,38 @@ pub(super) fn native_constraint_set(
             if let Some(constraint) = set.constraints.last_mut() {
                 constraint.enabled = enabled;
                 constraint.rigid_points = rigid_points;
+                if matches!(kind, ConstraintKind::Horizontal | ConstraintKind::Vertical) {
+                    let datum_id = match &node.data {
+                        AssocConstraintNodeData::Parallel {
+                            datum_line_index, ..
+                        } => *datum_line_index,
+                        _ => None,
+                    };
+                    let local_direction = datum_id.and_then(|datum_id| {
+                        group.nodes.iter().find_map(|datum| {
+                            (datum.node_id == datum_id).then_some(&datum.data).and_then(|data| {
+                                match data {
+                                    AssocConstraintNodeData::Line { direction, .. } => {
+                                        Some(*direction)
+                                    }
+                                    _ => None,
+                                }
+                            })
+                        })
+                    });
+                    if let Some(local) = local_direction {
+                        let [_, axis_x, axis_y] = group.work_plane;
+                        let normal = Vector3::new(
+                            axis_x.y * axis_y.z - axis_x.z * axis_y.y,
+                            axis_x.z * axis_y.x - axis_x.x * axis_y.z,
+                            axis_x.x * axis_y.y - axis_x.y * axis_y.x,
+                        );
+                        let world = axis_x * local.x + axis_y * local.y + normal * local.z;
+                        if world.length_squared() > 1.0e-24 {
+                            constraint.axis_direction = Some(world.normalize());
+                        }
+                    }
+                }
                 if let AssocConstraintNodeData::Distance {
                     direction_type,
                     distance,

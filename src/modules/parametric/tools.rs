@@ -11,7 +11,7 @@ pub mod horizontal {
             icon: IconKind::Svg(include_bytes!(
                 "../../../assets/icons/constrain/horizontal.svg"
             )),
-            event: ModuleEvent::Command("HCONSTRAINT".to_string()),
+            event: ModuleEvent::Command("GCHORIZONTAL".to_string()),
         }
     }
 }
@@ -161,6 +161,7 @@ pub mod symmetric {
 inventory::submit!(crate::command::CommandRegistration {
     names: &[
         "HCONSTRAINT",
+        "GCHORIZONTAL",
         "VCONSTRAINT",
         "PCONSTRAINT",
         "QCONSTRAINT",

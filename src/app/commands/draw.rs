@@ -1339,7 +1339,50 @@ impl OpenCADStudio {
                 }
             }
 
-            "HCONSTRAINT" | "VCONSTRAINT" | "FXCONSTRAINT" => {
+            "HCONSTRAINT" | "GCHORIZONTAL" => {
+                use crate::command::{CmdResult, HorizontalConstraintSelection};
+                use crate::modules::parametric::HorizontalConstraintCommand;
+
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    let command = HorizontalConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                } else if handles.len() != 1 {
+                    self.command_line
+                        .push_error("Horizontal: select exactly one compatible object.");
+                } else {
+                    let handle = handles[0];
+                    let reference = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(handle)
+                        .and_then(|entity| {
+                            HorizontalConstraintCommand::preselected_reference(entity, handle)
+                        });
+                    if let Some(reference) = reference {
+                        let direction = self.tabs[i].ucs_xform().working_plane().x;
+                        return Some(self.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+                            selection: HorizontalConstraintSelection::Reference(reference),
+                            direction: acadrust::types::Vector3::new(
+                                direction.x,
+                                direction.y,
+                                direction.z,
+                            ),
+                            label: "Horizontal constraint",
+                        }));
+                    }
+                    self.tabs[i].scene.deselect_all();
+                    self.command_line.push_error(
+                        "Horizontal: select a line, straight polyline segment, text, MText, or an ellipse axis.",
+                    );
+                    let command = HorizontalConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                }
+            }
+
+            "VCONSTRAINT" | "FXCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1352,10 +1395,10 @@ impl OpenCADStudio {
                 } else {
                     use crate::command::CmdResult;
                     use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
-                    let (kind, label) = match cmd {
-                        "HCONSTRAINT" => (ConstraintKind::Horizontal, "Horizontal constraint"),
-                        "VCONSTRAINT" => (ConstraintKind::Vertical, "Vertical constraint"),
-                        _ => (ConstraintKind::Fixed, "Fixed constraint"),
+                    let (kind, label) = if cmd == "VCONSTRAINT" {
+                        (ConstraintKind::Vertical, "Vertical constraint")
+                    } else {
+                        (ConstraintKind::Fixed, "Fixed constraint")
                     };
                     return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
                         kind,

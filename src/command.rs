@@ -1248,6 +1248,16 @@ pub struct CoincidentPick {
     pub whole_curve: bool,
 }
 
+/// The two input forms accepted by the Horizontal geometric constraint.
+/// Object picks are resolved while the entity snapshot is available; point
+/// picks are resolved by the host against the live document so two points on
+/// the same entity remain distinguishable.
+#[derive(Clone, Copy, Debug)]
+pub enum HorizontalConstraintSelection {
+    Reference(crate::scene::parametric_constraints::ParametricRef),
+    Points(CoincidentPick, CoincidentPick),
+}
+
 /// Construction options shared by SWEEP creation and its live preview.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SweepOptions {
@@ -1492,6 +1502,14 @@ pub enum CmdResult {
         /// geometric kind.
         driving_param: Option<crate::scene::named_parameters::DrivingValue>,
         /// Undo-history label, e.g. `"Horizontal constraint"`.
+        label: &'static str,
+    },
+    /// Adds a Horizontal relation against the UCS X direction captured when
+    /// the command starts. The direction is persisted with the constraint so
+    /// later edits and save/reopen do not silently fall back to world X.
+    AddHorizontalConstraint {
+        selection: HorizontalConstraintSelection,
+        direction: acadrust::types::Vector3,
         label: &'static str,
     },
     /// Adds an ordered perpendicular relation. The first picked direction and

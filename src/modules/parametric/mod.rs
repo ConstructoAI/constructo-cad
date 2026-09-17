@@ -6,6 +6,8 @@ mod coincident;
 mod concentric;
 mod equal_distance;
 mod geom_constraint;
+#[path = "horizontal.rs"]
+mod horizontal_command;
 #[path = "perpendicular.rs"]
 mod perpendicular_command;
 mod point_on_entity;
@@ -18,6 +20,7 @@ pub use coincident::{coincident_tool, CoincidentConstraintCommand};
 pub use concentric::ConcentricConstraintCommand;
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
 pub use geom_constraint::GeomConstraintCommand;
+pub use horizontal_command::HorizontalConstraintCommand;
 pub use perpendicular_command::{PerpendicularConstraintCommand, PerpendicularPick};
 pub use point_on_entity::{
     center_point_tool, midpoint_tool, point_on_curve_tool, PointOnEntityConstraintCommand,
