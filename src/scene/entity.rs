@@ -2709,4 +2709,25 @@ impl Scene {
         self.named_parameters = crate::scene::named_parameters::ParameterTable::new();
         self.bump_geometry();
     }
+
+    /// Reset to the drawing File → New produces. Every path that starts a
+    /// fresh drawing (the New tab, CLEAR, the automation `new` op) goes
+    /// through here so they all agree on what a blank drawing contains.
+    pub fn reset_to_new_drawing(&mut self) {
+        self.clear();
+        self.populate_new_drawing_defaults();
+    }
+
+    /// What a blank document gets on top of the codec's defaults: the
+    /// standard linetypes and a compatible page setup on every paper layout.
+    pub fn populate_new_drawing_defaults(&mut self) {
+        crate::io::linetypes::populate_document(&mut self.document);
+        for obj in self.document.objects.values_mut() {
+            if let acadrust::objects::ObjectType::Layout(l) = obj {
+                if l.name != "Model" {
+                    crate::scene::apply_default_page_setup(l, "");
+                }
+            }
+        }
+    }
 }

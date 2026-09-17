@@ -1508,8 +1508,7 @@ impl OpenCADStudio {
             Message::ClearScene => {
                 let i = self.active_tab;
                 self.push_undo_snapshot(i, "CLEAR");
-                self.tabs[i].scene.clear();
-                crate::io::linetypes::populate_document(&mut self.tabs[i].scene.document);
+                self.tabs[i].scene.reset_to_new_drawing();
                 self.tabs[i].properties = PropertiesPanel::empty();
                 let doc_layers = self.tabs[i].scene.document.layers.clone();
                 let vp_info = self.tabs[i].scene.viewport_list();
