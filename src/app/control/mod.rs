@@ -866,8 +866,17 @@ impl OpenCADStudio {
                     .main_window
                     .ok_or_else(|| failure("gui_required", "Capture requires a GUI window"))?;
                 let path = string(req, "path")?.to_owned();
-                iced::window::screenshot(window)
-                    .map(move |s| Message::ControlScreenshot(path.clone(), Some(s)))
+                // A minimized window has a 0x0 surface and the renderer
+                // panics reading it back, so report instead of capturing.
+                iced::window::size(window).then(move |size| {
+                    let path = path.clone();
+                    if size.width <= 0.0 || size.height <= 0.0 {
+                        Task::done(Message::ControlScreenshot(path, None))
+                    } else {
+                        iced::window::screenshot(window)
+                            .map(move |s| Message::ControlScreenshot(path.clone(), Some(s)))
+                    }
+                })
             }
             "stop" => {
                 self.control.enabled = false;
@@ -1062,7 +1071,8 @@ impl OpenCADStudio {
         screenshot: Option<iced::window::Screenshot>,
     ) {
         let result = (|| -> Result<Value, String> {
-            let s = screenshot.ok_or("Renderer did not return an image")?;
+            let s = screenshot
+                .ok_or("The window is minimized or has no size; restore it and capture again")?;
             let requested_scope = self
                 .control
                 .pending
