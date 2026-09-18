@@ -3319,22 +3319,30 @@ impl OpenCADStudio {
                 };
             }
             CmdResult::AddHorizontalConstraint {
+                kind,
                 selection,
                 direction,
                 label,
             } => {
-                use crate::command::HorizontalConstraintSelection;
+                use crate::command::{EntityTransform, HorizontalConstraintSelection};
+                use crate::modules::parametric::HorizontalConstraintCommand;
                 use crate::scene::parametric_constraints::{
-                    nearest_parametric_point, nearest_parametric_point_on_entity, ConstraintKind,
-                    DirectionalAxis, ParametricRef,
+                    nearest_parametric_point, nearest_parametric_point_on_entity, resolve_point,
+                    ConstraintKind, DirectionalAxis, ParametricRef,
                 };
 
+                let vertical = kind == ConstraintKind::Vertical;
+                let axis = if vertical { "Vertical" } else { "Horizontal" };
                 let scope = self.tabs[i].current_parametric_scope();
                 let to_world = |point: glam::DVec3| {
                     acadrust::types::Vector3::new(point.x, point.y, point.z)
                 };
                 let (refs, initial_fixed) = match selection {
                     HorizontalConstraintSelection::Reference(reference) => {
+                        // The reference turns the object about its first
+                        // vertex: a line's start, the picked polyline
+                        // segment's first vertex, a text's insertion point,
+                        // an ellipse's center.
                         let initial_fixed = match reference.directional_axis() {
                             Some(DirectionalAxis::EllipseMajor | DirectionalAxis::EllipseMinor) => {
                                 vec![ParametricRef::center(reference.entity)]
@@ -3342,7 +3350,10 @@ impl OpenCADStudio {
                             Some(DirectionalAxis::TextBaseline) => {
                                 vec![ParametricRef::point(reference.entity, 0)]
                             }
-                            None => Vec::new(),
+                            None => vec![ParametricRef::point(
+                                reference.entity,
+                                reference.segment_index().map_or(0, |index| index as i32),
+                            )],
                         };
                         (vec![reference], initial_fixed)
                     }
@@ -3364,26 +3375,42 @@ impl OpenCADStudio {
                                 )
                             }
                         };
-                        let (Some(first_ref), Some(second_ref)) =
-                            (resolve(first), resolve(second))
-                        else {
-                            self.command_line.push_error(
-                                "Horizontal: select supported endpoints, centers, midpoints, or vertices.",
-                            );
-                            return Task::none();
+                        // A miss asks for that point again, keeping a good
+                        // first pick; the same point twice asks for another
+                        // second point — the reference's own re-prompts.
+                        let (first_ref, second_ref) = match (resolve(first), resolve(second)) {
+                            (Some(first_ref), Some(second_ref)) if first_ref != second_ref => {
+                                (first_ref, second_ref)
+                            }
+                            (first_ref, second_ref) => {
+                                let (message, keep_first) = if first_ref.is_none() {
+                                    ("No valid constraint point found.", None)
+                                } else if second_ref.is_none() {
+                                    ("No valid constraint point found.", Some(first))
+                                } else {
+                                    (
+                                        "The object or point is already selected. Select a different object or constraint point.",
+                                        Some(first),
+                                    )
+                                };
+                                let command = HorizontalConstraintCommand::resume(kind, keep_first);
+                                self.command_line.push_error(message);
+                                self.command_line
+                                    .push_info(&crate::command::CadCommand::prompt(&command));
+                                self.tabs[i].active_cmd = Some(Box::new(command));
+                                self.tabs[i].snap_result = None;
+                                return Task::none();
+                            }
                         };
-                        if first_ref == second_ref {
-                            self.command_line
-                                .push_error("Horizontal: select two different points.");
-                            return Task::none();
-                        }
                         (vec![first_ref, second_ref], vec![first_ref])
                     }
                 };
                 let axis_length = direction.x.hypot(direction.y);
                 if axis_length <= 1.0e-12 {
-                    self.command_line
-                        .push_error("Horizontal: the current UCS X axis is not supported.");
+                    self.command_line.push_error(&format!(
+                        "{axis}: the current UCS {} axis is not supported.",
+                        if vertical { "Y" } else { "X" }
+                    ));
                     return Task::none();
                 }
                 let direction = acadrust::types::Vector3::new(
@@ -3391,11 +3418,9 @@ impl OpenCADStudio {
                     direction.y / axis_length,
                     0.0,
                 );
-                if let Err(message) = self.tabs[i].scene.validate_parametric_constraint(
-                    ConstraintKind::Horizontal,
-                    &refs,
-                    None,
-                ) {
+                if let Err(message) =
+                    self.tabs[i].scene.validate_parametric_constraint(kind, &refs, None)
+                {
                     self.command_line.push_error(message);
                     return Task::none();
                 }
@@ -3403,18 +3428,12 @@ impl OpenCADStudio {
                     .tabs[i]
                     .scene
                     .parametric_constraint_set(scope)
-                    .is_some_and(|set| {
-                        set.contains_axis_constraint(
-                            ConstraintKind::Horizontal,
-                            &refs,
-                            direction,
-                        )
-                    })
+                    .is_some_and(|set| set.contains_axis_constraint(kind, &refs, direction))
                 {
                     self.tabs[i].active_cmd = None;
                     self.tabs[i].snap_result = None;
                     self.command_line
-                        .push_error("Horizontal constraint is already applied.");
+                        .push_error("The constraint already exists on the selected objects.");
                     return Task::none();
                 }
                 let constraints_before = self.tabs[i]
@@ -3434,10 +3453,43 @@ impl OpenCADStudio {
                 self.tabs[i]
                     .scene
                     .record_undo_parametric_constraints_before(scope, constraints_before);
+                // Two points on different objects: the reference slides the
+                // second object rigidly onto the axis through the first
+                // point instead of re-solving its shape, so move it first
+                // and let the constraint then hold what already fits.
+                if let [first_ref, second_ref] = refs.as_slice() {
+                    if first_ref.entity != second_ref.entity {
+                        let position = |reference: &ParametricRef| {
+                            self.tabs[i]
+                                .scene
+                                .document
+                                .get_entity(reference.entity)
+                                .zip(reference.marker)
+                                .and_then(|(entity, marker)| resolve_point(entity, marker))
+                        };
+                        if let (Some(first_point), Some(second_point)) =
+                            (position(first_ref), position(second_ref))
+                        {
+                            let normal = (-direction.y, direction.x);
+                            let offset = (second_point.x - first_point.x) * normal.0
+                                + (second_point.y - first_point.y) * normal.1;
+                            if offset.abs() > 1.0e-9 {
+                                self.tabs[i].scene.transform_entities(
+                                    &[second_ref.entity],
+                                    &EntityTransform::Translate(glam::DVec3::new(
+                                        -offset * normal.0,
+                                        -offset * normal.1,
+                                        0.0,
+                                    )),
+                                );
+                            }
+                        }
+                    }
+                }
                 let id = self.tabs[i]
                     .scene
                     .parametric_constraint_set_mut(scope)
-                    .add_axis_constraint(ConstraintKind::Horizontal, refs, direction);
+                    .add_axis_constraint(kind, refs, direction);
                 self.tabs[i].scene.note_parametric_constraint_applied(
                     scope,
                     id,
@@ -3456,7 +3508,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.command_line
-                    .push_output("Horizontal constraint applied.");
+                    .push_output(&format!("{axis} constraint applied."));
                 self.refresh_properties();
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
@@ -8941,6 +8993,7 @@ mod parametric_constraint_undo_tests {
         let direction = acadrust::types::Vector3::new(3.0, 4.0, 0.0).normalize();
 
         let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+            kind: crate::scene::parametric_constraints::ConstraintKind::Horizontal,
             selection: crate::command::HorizontalConstraintSelection::Reference(
                 ParametricRef::whole(handle),
             ),
@@ -8998,6 +9051,7 @@ mod parametric_constraint_undo_tests {
         };
 
         let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+            kind: crate::scene::parametric_constraints::ConstraintKind::Horizontal,
             selection: crate::command::HorizontalConstraintSelection::Points(
                 pick(first, glam::DVec3::ZERO),
                 pick(second, glam::DVec3::new(8.0, 3.0, 0.0)),
@@ -9027,6 +9081,7 @@ mod parametric_constraint_undo_tests {
             .add_entity(acadrust::EntityType::Ellipse(ellipse));
 
         let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+            kind: crate::scene::parametric_constraints::ConstraintKind::Horizontal,
             selection: crate::command::HorizontalConstraintSelection::Reference(
                 ParametricRef::ellipse_minor_axis(handle),
             ),
