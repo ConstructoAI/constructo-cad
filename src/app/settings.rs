@@ -653,8 +653,10 @@ impl Default for UserSettings {
             literal_spaces: false,
             command_history_height: crate::ui::command_line::HISTORY_HEIGHT_DEFAULT,
             // Snapper::default(): END|MID|CEN|NODE|QUAD|INT|NEA (575), master
-            // off (suppress bit 16384).
-            osmode: 575 | OSMODE_SUPPRESS,
+            // on. Object snap is a drafting aid users expect to be live from
+            // the first click; the suppress bit (16384) is left for the user
+            // to set via the status-bar pill or OSNAP.
+            osmode: 575,
             texteditmode: false,
             quick_dimension_snap_priority: 0,
             dimension_continue_mode: 1,
@@ -692,6 +694,39 @@ impl Default for UserSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Object snap ships live. The modes were always pre-selected; only the
+    /// master switch was off, so a new user got a configured snap set that
+    /// did nothing until they found the status-bar pill.
+    ///
+    /// This is asserted rather than checked by eye because the default is
+    /// only observable in a fresh profile: the app persists settings on
+    /// change, so an existing settings.json keeps whatever osmode it already
+    /// holds and never reveals what a new install would do.
+    #[test]
+    fn snapping_is_enabled_in_a_fresh_profile() {
+        let settings = UserSettings::default();
+        assert_eq!(
+            settings.osmode & OSMODE_SUPPRESS,
+            0,
+            "the suppress bit is set, so snapping ships off"
+        );
+
+        let (modes, master_on) = snaps_from_osmode(settings.osmode);
+        assert!(master_on, "decoding the default must report snapping on");
+        for expected in [
+            SnapType::Endpoint,
+            SnapType::Midpoint,
+            SnapType::Center,
+            SnapType::Intersection,
+        ] {
+            assert!(modes.contains(&expected), "{expected:?} is not in the default set");
+        }
+
+        // The Snapper and the persisted default have to agree, or the running
+        // state and the saved state disagree the moment anything is written.
+        assert_eq!(crate::snap::Snapper::default().snap_enabled, master_on);
+    }
 
     #[test]
     fn osmode_encodes_bits_and_suppress() {

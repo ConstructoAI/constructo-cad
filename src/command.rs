@@ -347,6 +347,62 @@ impl CadCommand for ValuePromptCommand {
     }
 }
 
+/// Interactive front-end for `UCS FACE` — Fusion's "create sketch on a face".
+///
+/// Picks one face of a solid and hands the resulting plane to the inline
+/// `UCS FACE <handle> <x,y,z>` handler via [`CmdResult::Dispatch`], so the
+/// plane construction lives in exactly one place whether the user clicked a
+/// face or typed the arguments. `entity_pick_uses_surface_point` is what
+/// makes the click land *on the solid's surface* rather than on the current
+/// drawing plane, which is the whole point: the pick coordinate is the face.
+pub struct UcsFaceCommand;
+
+impl CadCommand for UcsFaceCommand {
+    fn name(&self) -> &'static str {
+        "UCS"
+    }
+
+    fn prompt(&self) -> String {
+        crate::t!("UCS FACE  Select a face to draw on:").into_owned()
+    }
+
+    fn needs_entity_pick(&self) -> bool {
+        true
+    }
+
+    fn entity_pick_uses_surface_point(&self) -> bool {
+        true
+    }
+
+    fn entity_pick_highlights_hover(&self) -> bool {
+        true
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
+        // Hex handle and comma-separated coordinates are what the inline
+        // parser reads back. Full `{}` precision, not a rounded format: the
+        // point has to stay on the face for the planar-face lookup.
+        CmdResult::Dispatch(format!(
+            "UCS FACE {:X} {},{},{}",
+            handle.value(),
+            pt.x,
+            pt.y,
+            pt.z
+        ))
+    }
+
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+}
+
 /// Interactive front-end for RENAME. Prompts for the object type (as clickable
 /// buttons), then the current name, then the new name, and delegates to the
 /// inline `RENAME <type> <old> <new>` handler via [`CmdResult::Dispatch`] — the

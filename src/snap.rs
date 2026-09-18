@@ -278,7 +278,7 @@ impl Default for Snapper {
         // would catch nearly every cursor position, masking the discrete
         // vertex/edge/face snaps. Opt in via the 3D Object Snap tab.
         Self {
-            snap_enabled: false,
+            snap_enabled: true,
             enabled,
             snap3d_enabled: true,
             enabled3d,

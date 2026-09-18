@@ -146,6 +146,43 @@ impl<T> fmt::Display for Labelled<T> {
     }
 }
 
+/// A background swatch that opens the colour wheel when clicked.
+///
+/// The wheel sits alongside the hex field rather than replacing it: typing
+/// `#1E1E1E` stays the fastest way to reproduce an exact colour, while the
+/// wheel is for choosing one by eye.
+fn bg_swatch_picker<'a>(
+    target: crate::app::BgTarget,
+    rgb: [u8; 3],
+    open: Option<crate::app::BgTarget>,
+) -> Element<'a, Message> {
+    let colour = iced::Color::from_rgb8(rgb[0], rgb[1], rgb[2]);
+    let swatch = container(Space::new())
+        .width(28)
+        .height(22)
+        .style(move |theme: &Theme| container::Style {
+            background: Some(Background::Color(colour)),
+            border: Border {
+                color: theme.palette().background.strong.color,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+    let underlay = button(swatch)
+        .on_press(Message::BgPickerOpen(target))
+        .padding(0)
+        .style(button::text);
+    iced_aw::ColorPicker::new(
+        open == Some(target),
+        colour,
+        underlay,
+        Message::BgPickerCancel,
+        Message::BgPickerSubmit,
+    )
+    .into()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn view_window<'a>(
     default_save_format: &'a str,
@@ -172,6 +209,7 @@ pub fn view_window<'a>(
     model_bg_input: &'a str,
     paper_bg_input: &'a str,
     desk_bg_input: &'a str,
+    bg_picker: Option<crate::app::BgTarget>,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
     let selected_format = crate::io::SAVE_FORMAT_OPTIONS
@@ -179,7 +217,7 @@ pub fn view_window<'a>(
         .copied()
         .find(|candidate| *candidate == default_save_format);
 
-    let theme_options = Theme::ALL
+    let theme_options = crate::app::config::all_themes()
         .iter()
         .map(ToString::to_string)
         .chain(std::iter::once("Custom".to_string()))
@@ -455,58 +493,10 @@ pub fn view_window<'a>(
         });
 
     let model_bg_rgb = model_space.custom_bg.unwrap_or(crate::app::config::CLASSIC_CAD_DARK_BG);
-    let model_bg_swatch = container(Space::new())
-        .width(28)
-        .height(22)
-        .style(move |theme: &Theme| container::Style {
-            background: Some(Background::Color(iced::Color::from_rgb8(
-                model_bg_rgb[0],
-                model_bg_rgb[1],
-                model_bg_rgb[2],
-            ))),
-            border: Border {
-                color: theme.palette().background.strong.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
 
     let paper_bg_rgb = model_space.custom_paper_bg.unwrap_or(crate::app::config::DEFAULT_PAPER_BG);
-    let paper_bg_swatch = container(Space::new())
-        .width(28)
-        .height(22)
-        .style(move |theme: &Theme| container::Style {
-            background: Some(Background::Color(iced::Color::from_rgb8(
-                paper_bg_rgb[0],
-                paper_bg_rgb[1],
-                paper_bg_rgb[2],
-            ))),
-            border: Border {
-                color: theme.palette().background.strong.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
 
     let desk_bg_rgb = model_space.custom_desk_bg.unwrap_or(crate::app::config::DEFAULT_DESK_BG);
-    let desk_bg_swatch = container(Space::new())
-        .width(28)
-        .height(22)
-        .style(move |theme: &Theme| container::Style {
-            background: Some(Background::Color(iced::Color::from_rgb8(
-                desk_bg_rgb[0],
-                desk_bg_rgb[1],
-                desk_bg_rgb[2],
-            ))),
-            border: Border {
-                color: theme.palette().background.strong.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
 
     let mode_options = crate::app::config::ModelSpaceMode::ALL
         .into_iter()
@@ -641,7 +631,7 @@ pub fn view_window<'a>(
         display = display.push(Space::new().height(10)).push(
             row![
                 text(crate::t!("Model background")).size(12).width(140),
-                model_bg_swatch,
+                bg_swatch_picker(crate::app::BgTarget::Model, model_bg_rgb, bg_picker),
                 text_input("#RRGGBB", model_bg_input)
                     .on_input(Message::ModelSpaceBgChanged)
                     .width(150),
@@ -654,7 +644,7 @@ pub fn view_window<'a>(
     display = display.push(Space::new().height(10)).push(
         row![
             text(crate::t!("Paper background")).size(12).width(140),
-            paper_bg_swatch,
+            bg_swatch_picker(crate::app::BgTarget::Paper, paper_bg_rgb, bg_picker),
             text_input("#RRGGBB", paper_bg_input)
                 .on_input(Message::PaperSpaceBgChanged)
                 .width(150),
@@ -666,7 +656,7 @@ pub fn view_window<'a>(
     display = display.push(Space::new().height(10)).push(
         row![
             text(crate::t!("Desk surround")).size(12).width(140),
-            desk_bg_swatch,
+            bg_swatch_picker(crate::app::BgTarget::Desk, desk_bg_rgb, bg_picker),
             text_input("#RRGGBB", desk_bg_input)
                 .on_input(Message::DeskSpaceBgChanged)
                 .width(150),

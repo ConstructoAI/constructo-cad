@@ -7067,6 +7067,39 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::BgPickerOpen(target) => {
+                self.bg_picker = Some(target);
+                Task::none()
+            }
+
+            Message::BgPickerCancel => {
+                self.bg_picker = None;
+                Task::none()
+            }
+
+            Message::BgPickerSubmit(color) => {
+                // Hand the result to the same handler the typed hex field
+                // uses, so the wheel and the field cannot drift apart on
+                // validation, persistence or the MatchTheme fallback.
+                let hex = crate::app::config::rgb_to_hex([
+                    (color.r * 255.0).round() as u8,
+                    (color.g * 255.0).round() as u8,
+                    (color.b * 255.0).round() as u8,
+                ]);
+                match self.bg_picker.take() {
+                    Some(crate::app::BgTarget::Model) => {
+                        Task::done(Message::ModelSpaceBgChanged(hex))
+                    }
+                    Some(crate::app::BgTarget::Paper) => {
+                        Task::done(Message::PaperSpaceBgChanged(hex))
+                    }
+                    Some(crate::app::BgTarget::Desk) => {
+                        Task::done(Message::DeskSpaceBgChanged(hex))
+                    }
+                    None => Task::none(),
+                }
+            }
+
             Message::ModelSpaceBgChanged(hex) => {
                 self.model_bg_input = hex.clone();
                 if hex.trim().is_empty() {
