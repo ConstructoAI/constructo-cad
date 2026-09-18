@@ -3265,6 +3265,126 @@ impl OpenCADStudio {
                     self.commit_undo_delta(i, pd);
                 }
             }
+            CmdResult::AddEqualConstraint {
+                first,
+                others,
+                label,
+            } => {
+                use crate::modules::parametric::EqualConstraintCommand;
+                use crate::scene::parametric_constraints::{
+                    equal_size_follower, ConstraintKind, ParametricRef,
+                };
+
+                let scope = self.tabs[i].current_parametric_scope();
+                let mut followers: Vec<ParametricRef> = Vec::new();
+                for other in others {
+                    // A Multiple set arrives as whole objects.
+                    let resolved = if other.marker.is_none() {
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(other.entity)
+                            .and_then(|entity| {
+                                EqualConstraintCommand::whole_reference(entity, other.entity)
+                            })
+                    } else {
+                        Some(other)
+                    };
+                    let Some(other) = resolved.filter(|other| *other != first) else {
+                        self.command_line
+                            .push_error(EqualConstraintCommand::INVALID_OBJECT);
+                        continue;
+                    };
+                    let refs = [first, other];
+                    if self
+                        .tabs[i]
+                        .scene
+                        .validate_parametric_constraint(ConstraintKind::Equal, &refs, None)
+                        .is_err()
+                        || equal_size_follower(&self.tabs[i].scene.document, first, other)
+                            .is_none()
+                    {
+                        self.command_line
+                            .push_error(EqualConstraintCommand::INVALID_OBJECT);
+                        continue;
+                    }
+                    let exists = self.tabs[i]
+                        .scene
+                        .parametric_constraint_set(scope)
+                        .is_some_and(|set| {
+                            set.constraints.iter().any(|existing| {
+                                existing.enabled
+                                    && existing.kind == ConstraintKind::Equal
+                                    && (existing.refs == refs || existing.refs == [other, first])
+                            })
+                        });
+                    if exists {
+                        self.command_line
+                            .push_error("The constraint already exists on the selected objects.");
+                        continue;
+                    }
+                    if !followers.contains(&other) {
+                        followers.push(other);
+                    }
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                if followers.is_empty() {
+                    return Task::none();
+                }
+                let constraints_before = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::scene::parametric_constraints::ParametricConstraintSet::new(scope)
+                    });
+                let mut touched = vec![first.entity];
+                for follower in &followers {
+                    if !touched.contains(&follower.entity) {
+                        touched.push(follower.entity);
+                    }
+                }
+                let pending = self.begin_undo(i, label, touched.len(), true);
+                self.tabs[i]
+                    .scene
+                    .record_undo_parametric_constraints_before(scope, constraints_before);
+                // The reference resizes the follower in place — its start (a
+                // circle its center) and direction stay, only its length or
+                // radius takes the first object's — so do that first and let
+                // the relation then hold what already fits.
+                for follower in &followers {
+                    if let Some(resized) =
+                        equal_size_follower(&self.tabs[i].scene.document, first, *follower)
+                    {
+                        self.tabs[i].scene.update_entity(resized);
+                    }
+                    let id = self.tabs[i]
+                        .scene
+                        .parametric_constraint_set_mut(scope)
+                        .add(ConstraintKind::Equal, vec![first, *follower], None);
+                    self.tabs[i].scene.note_parametric_constraint_applied(
+                        scope,
+                        id,
+                        self.constraint_bar_display,
+                    );
+                }
+                let changes = touched
+                    .into_iter()
+                    .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+                    .collect::<Vec<_>>();
+                self.tabs[i].scene.bump_entities_with_parametric_policy(
+                    &changes,
+                    &[],
+                    self.constraint_solve_mode,
+                );
+                self.tabs[i].dirty = true;
+                self.command_line.push_output("Equal constraint applied.");
+                self.refresh_properties();
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
+                }
+            }
             CmdResult::AddFixedConstraint(pick) => {
                 use crate::modules::parametric::FixConstraintCommand;
                 use crate::scene::parametric_constraints::{

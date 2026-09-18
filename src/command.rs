@@ -1592,6 +1592,14 @@ pub enum CmdResult {
         direction: acadrust::types::Vector3,
         label: &'static str,
     },
+    /// Adds an Equal relation from `first` to each of `others` (the second
+    /// object, or a Multiple set). The host resizes every follower to the
+    /// first object's length or radius before the relation holds it there.
+    AddEqualConstraint {
+        first: crate::scene::parametric_constraints::ParametricRef,
+        others: Vec<crate::scene::parametric_constraints::ParametricRef>,
+        label: &'static str,
+    },
     /// Adds a point or object symmetry relation around a picked line. The
     /// first reference and axis remain fixed during initial placement.
     AddSymmetricConstraint {
@@ -2894,6 +2902,7 @@ mod constraint_registry_tests {
             "QCONSTRAINT",
             "GCPERPENDICULAR",
             "ECONSTRAINT",
+            "GCEQUAL",
             "TCONSTRAINT",
             "GCCONCENTRIC",
             "NRCONSTRAINT",
