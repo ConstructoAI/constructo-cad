@@ -83,6 +83,12 @@ pub fn vseparator<'a>(height: Length) -> Element<'a, Message> {
         .into()
 }
 
+/// Alias kept for call sites that historically used `vsep`.
+/// Same implementation as [`vseparator`].
+pub fn vsep<'a>(height: Length) -> Element<'a, Message> {
+    vseparator(height)
+}
+
 /// Muted section heading.
 pub fn section_label<'a>(label: Cow<'static, str>) -> Element<'a, Message> {
     text(label).size(11).style(muted_style).into()

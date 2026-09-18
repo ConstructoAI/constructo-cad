@@ -9,6 +9,7 @@ use crate::io::paper_catalog::{self, CustomPaper, Margins, PaperSize, PaperUnits
 use crate::io::plot_device::PrinterCapabilities;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form;
+use crate::ui::style::form::{hdivider, vseparator as vsep};
 use iced::widget::{
     button, checkbox, column, container, mouse_area, row, scrollable, text, text_input,
     Space,
@@ -543,16 +544,8 @@ fn btn(accent: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     form::button_style(accent)
 }
 
-fn hdivider<'a>(width: Length) -> Element<'a, Message> {
-    form::hdivider(width)
-}
-
 fn section_label<'a>(s: Cow<'static, str>) -> Element<'a, Message> {
     form::section_label(s)
-}
-
-fn vsep<'a>(height: Length) -> Element<'a, Message> {
-    form::vseparator(height)
 }
 
 fn setup_row<'a>(
