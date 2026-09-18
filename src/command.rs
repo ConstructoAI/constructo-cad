@@ -1592,6 +1592,13 @@ pub enum CmdResult {
         direction: acadrust::types::Vector3,
         label: &'static str,
     },
+    /// Resolves the first 2Points pick of a Horizontal or Vertical constraint
+    /// against the live document so a miss is reported at once, before the
+    /// second point is asked for.
+    CheckHorizontalPoint {
+        kind: crate::scene::parametric_constraints::ConstraintKind,
+        pick: CoincidentPick,
+    },
     /// Adds a point or object symmetry relation around a picked line. The
     /// first reference and axis remain fixed during initial placement.
     AddSymmetricConstraint {

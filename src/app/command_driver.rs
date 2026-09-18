@@ -3318,6 +3318,31 @@ impl OpenCADStudio {
                     }
                 };
             }
+            CmdResult::CheckHorizontalPoint { kind, pick } => {
+                use crate::modules::parametric::HorizontalConstraintCommand;
+                use crate::scene::parametric_constraints::nearest_parametric_point;
+
+                // The reference rejects a missed first point right away and
+                // asks for it again; a hit moves on to the second point.
+                let scope = self.tabs[i].current_parametric_scope();
+                let found = nearest_parametric_point(
+                    &self.tabs[i].scene.document,
+                    scope,
+                    acadrust::types::Vector3::new(pick.point.x, pick.point.y, pick.point.z),
+                    None,
+                )
+                .is_some();
+                if !found {
+                    self.command_line
+                        .push_error("No valid constraint point found.");
+                }
+                let command = HorizontalConstraintCommand::resume(kind, found.then_some(pick));
+                self.command_line
+                    .push_info(&crate::command::CadCommand::prompt(&command));
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                self.tabs[i].snap_result = None;
+                return Task::none();
+            }
             CmdResult::AddHorizontalConstraint {
                 kind,
                 selection,
