@@ -143,6 +143,47 @@ pub fn printer_report() -> Vec<String> {
     lines
 }
 
+/// What `printer` reports about its sheets, one line per sheet plus the
+/// default and the margins — `PRINTERS <name>`. Asks the driver (and caches
+/// the answer like the plot dialog does).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn printer_media_report(printer: &str) -> Vec<String> {
+    let Some(caps) = crate::io::plot_device::printer_capabilities(printer) else {
+        return vec![crate::tf!(
+            "{printer}: the printer reports no sheets; the paper catalogue is used."
+        )
+        .into_owned()];
+    };
+    let mut lines = Vec::new();
+    let count = caps.media.len();
+    lines.push(crate::tf!("{printer}: {count} sheet(s) reported").into_owned());
+    for media in &caps.media {
+        let m = media.margins;
+        let borderless = if media.borderless { " (borderless available)" } else { "" };
+        lines.push(format!(
+            "  {} — margins L {:.1} B {:.1} R {:.1} T {:.1} mm{borderless}",
+            media.paper.display(),
+            m.left,
+            m.bottom,
+            m.right,
+            m.top
+        ));
+    }
+    match &caps.default_paper {
+        Some(paper) => {
+            let sheet = paper.display();
+            lines.push(crate::tf!("Default sheet: {sheet}").into_owned());
+        }
+        None => lines.push(crate::t!("Default sheet: not reported").into_owned()),
+    }
+    lines
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn printer_media_report(_printer: &str) -> Vec<String> {
+    vec![crate::t!("Printing is not available in the web version.").into_owned()]
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn printer_report() -> Vec<String> {
     vec![crate::t!("Printing is not available in the web version.").into_owned()]
@@ -564,17 +605,17 @@ fn rotate_rgba90(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
     rotated
 }
 
-/// Fetch the printer driver's DEVMODE and flip its orientation to match the
-/// plot's aspect (`landscape` = image wider than tall). The merged DEVMODE is
-/// returned as raw bytes (drivers append private data after the struct).
-/// `None` when the driver could not be queried — CreateDC then falls back to
-/// the driver default.
+/// Open `device`, fetch the driver's default DEVMODE (public struct plus the
+/// driver's private data behind it) and let `edit` change it while the
+/// printer is still open — a change has to be reconciled by the driver
+/// through `DocumentPropertiesW` with that handle. `edit` returns `false`
+/// to reject the buffer. `None` when the driver could not be queried.
 #[cfg(target_os = "windows")]
-fn oriented_printer_devmode(device_wide: &[u16], landscape: bool) -> Option<Vec<u8>> {
-    use windows_sys::Win32::Graphics::Gdi::{
-        DEVMODEW, DM_IN_BUFFER, DM_ORIENTATION, DM_OUT_BUFFER, DMORIENT_LANDSCAPE,
-        DMORIENT_PORTRAIT,
-    };
+fn with_printer_devmode(
+    device_wide: &[u16],
+    edit: impl FnOnce(windows_sys::Win32::Graphics::Printing::PRINTER_HANDLE, &mut Vec<u8>) -> bool,
+) -> Option<Vec<u8>> {
+    use windows_sys::Win32::Graphics::Gdi::{DEVMODEW, DM_OUT_BUFFER};
     use windows_sys::Win32::Graphics::Printing::{
         ClosePrinter, DocumentPropertiesW, OpenPrinterW, PRINTER_HANDLE,
     };
@@ -614,30 +655,236 @@ fn oriented_printer_devmode(device_wide: &[u16], landscape: bool) -> Option<Vec<
             if (*dm).dmSize == 0 {
                 (*dm).dmSize = std::mem::size_of::<DEVMODEW>() as u16;
             }
+            edit(handle, &mut buf).then_some(buf)
+        })();
+        ClosePrinter(handle);
+        result
+    }
+}
+
+/// The sheet a print job asks the driver for: one of the driver's own
+/// sheets by id, or a user-defined size in tenths of a millimetre.
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DevmodeSheet {
+    Id(u16),
+    UserMm { width_tenths: i16, length_tenths: i16 },
+}
+
+/// Fetch the printer driver's DEVMODE, flip its orientation to match the
+/// plot's aspect (`landscape` = image wider than tall) and, when a sheet is
+/// given, select it. The merged DEVMODE is returned as raw bytes (drivers
+/// append private data after the struct). A driver that rejects the sheet
+/// is asked again for the orientation alone; `None` when the driver could
+/// not be queried — CreateDC then falls back to the driver default.
+#[cfg(target_os = "windows")]
+fn oriented_printer_devmode(
+    device_wide: &[u16],
+    landscape: bool,
+    sheet: Option<DevmodeSheet>,
+) -> Option<Vec<u8>> {
+    use windows_sys::Win32::Graphics::Gdi::{
+        DEVMODEW, DM_IN_BUFFER, DM_ORIENTATION, DM_OUT_BUFFER, DM_PAPERLENGTH, DM_PAPERSIZE,
+        DM_PAPERWIDTH, DMORIENT_LANDSCAPE, DMORIENT_PORTRAIT,
+    };
+    use windows_sys::Win32::Graphics::Printing::DocumentPropertiesW;
+    let attempt = |sheet: Option<DevmodeSheet>| {
+        with_printer_devmode(device_wide, |handle, buf| unsafe {
+            let dm = buf.as_mut_ptr() as *mut DEVMODEW;
             (*dm).dmFields |= DM_ORIENTATION;
             (*dm).Anonymous1.Anonymous1.dmOrientation = if landscape {
                 DMORIENT_LANDSCAPE as i16
             } else {
                 DMORIENT_PORTRAIT as i16
             };
-            // Let the driver reconcile fields that depend on orientation
-            // (paper dimensions, imageable area) before we print with it.
-            if DocumentPropertiesW(
+            match sheet {
+                Some(DevmodeSheet::Id(id)) => {
+                    (*dm).dmFields |= DM_PAPERSIZE;
+                    (*dm).dmFields &= !(DM_PAPERWIDTH | DM_PAPERLENGTH);
+                    (*dm).Anonymous1.Anonymous1.dmPaperSize = id as i16;
+                }
+                Some(DevmodeSheet::UserMm { width_tenths, length_tenths }) => {
+                    (*dm).dmFields |= DM_PAPERSIZE | DM_PAPERWIDTH | DM_PAPERLENGTH;
+                    (*dm).Anonymous1.Anonymous1.dmPaperSize =
+                        crate::io::windows_media::DMPAPER_USER as i16;
+                    (*dm).Anonymous1.Anonymous1.dmPaperWidth = width_tenths;
+                    (*dm).Anonymous1.Anonymous1.dmPaperLength = length_tenths;
+                }
+                None => {}
+            }
+            // Let the driver reconcile fields that depend on orientation and
+            // sheet (paper dimensions, imageable area) before we print with it.
+            DocumentPropertiesW(
                 std::ptr::null_mut(),
                 handle,
                 device_wide.as_ptr(),
                 dm,
                 dm,
                 DM_IN_BUFFER | DM_OUT_BUFFER,
-            ) <= 0
-            {
-                return None;
-            }
-            Some(buf)
-        })();
-        ClosePrinter(handle);
-        result
+            ) > 0
+        })
+    };
+    match sheet {
+        Some(sheet) => attempt(Some(sheet)).or_else(|| attempt(None)),
+        None => attempt(None),
     }
+}
+
+/// The DEVMODE sheet for a plot of `width_mm` × `height_mm`: the driver's
+/// own id when it lists that size, else a user-defined size (which the
+/// driver may still refuse — the caller then prints on the default sheet).
+#[cfg(target_os = "windows")]
+fn devmode_sheet_for(printer: &str, width_mm: f64, height_mm: f64) -> Option<DevmodeSheet> {
+    let tenths = |mm: f64| -> Option<i16> { i16::try_from((mm * 10.0).round() as i64).ok() };
+    match windows_printer_media(printer) {
+        Some(raw) => {
+            let listed = crate::io::windows_media::paper_id_for_sheet(&raw, width_mm, height_mm);
+            if let Some(id) = listed {
+                return Some(DevmodeSheet::Id(id));
+            }
+            // A driver that lists sheets but not this one gets it as a
+            // user-defined size, portrait (the orientation flag turns it).
+            let (w, h) = if width_mm <= height_mm {
+                (width_mm, height_mm)
+            } else {
+                (height_mm, width_mm)
+            };
+            Some(DevmodeSheet::UserMm {
+                width_tenths: tenths(w)?,
+                length_tenths: tenths(h)?,
+            })
+        }
+        None => None,
+    }
+}
+
+/// What the driver of `printer` says about its sheets: the three parallel
+/// `DeviceCapabilities` tables, the default DEVMODE's sheet and the margins
+/// of a portrait printer DC. `None` when the driver lists no sheet (a fax or
+/// virtual queue) or cannot be asked at all — the dialog keeps the catalogue.
+/// Slow for an offline network queue (the spooler may fetch the driver), so
+/// it is only ever called from a background task.
+#[cfg(target_os = "windows")]
+pub(crate) fn windows_printer_media(
+    printer: &str,
+) -> Option<crate::io::windows_media::RawPrinterMedia> {
+    use crate::io::windows_media::{DeviceCapsSample, RawPrinterMedia, PAPER_NAME_CHARS};
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        CreateDCW, DeleteDC, GetDeviceCaps, DEVMODEW, DM_PAPERLENGTH, DM_PAPERSIZE,
+        DM_PAPERWIDTH, HORZRES, LOGPIXELSX, LOGPIXELSY, PHYSICALHEIGHT, PHYSICALOFFSETX,
+        PHYSICALOFFSETY, PHYSICALWIDTH, VERTRES,
+    };
+    use windows_sys::Win32::Storage::Xps::{
+        DeviceCapabilitiesW, DC_PAPERNAMES, DC_PAPERS, DC_PAPERSIZE,
+    };
+
+    let wide =
+        |s: &str| -> Vec<u16> { std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect() };
+    let device_wide = wide(printer.trim());
+    // SAFETY: the device name is NUL-terminated; a null output buffer asks
+    // for the count only.
+    let count = |capability: u16| -> Option<usize> {
+        let n = unsafe {
+            DeviceCapabilitiesW(
+                device_wide.as_ptr(),
+                std::ptr::null(),
+                capability,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        };
+        (n > 0).then_some(n as usize)
+    };
+    // The three tables are parallel; a driver that disagrees on their
+    // lengths is read up to the shortest.
+    let count = count(DC_PAPERS)?
+        .min(count(DC_PAPERSIZE)?)
+        .min(count(DC_PAPERNAMES)?);
+    let mut ids = vec![0u16; count];
+    let mut sizes = vec![POINT { x: 0, y: 0 }; count];
+    let mut names = vec![0u16; count * PAPER_NAME_CHARS];
+    // SAFETY: each buffer holds `count` entries of the type the capability
+    // writes (WORD, POINT, 64 WCHARs); the calls fill at most that many.
+    let filled = unsafe {
+        DeviceCapabilitiesW(
+            device_wide.as_ptr(),
+            std::ptr::null(),
+            DC_PAPERS,
+            ids.as_mut_ptr(),
+            std::ptr::null(),
+        ) > 0
+            && DeviceCapabilitiesW(
+                device_wide.as_ptr(),
+                std::ptr::null(),
+                DC_PAPERSIZE,
+                sizes.as_mut_ptr().cast::<u16>(),
+                std::ptr::null(),
+            ) > 0
+            && DeviceCapabilitiesW(
+                device_wide.as_ptr(),
+                std::ptr::null(),
+                DC_PAPERNAMES,
+                names.as_mut_ptr(),
+                std::ptr::null(),
+            ) > 0
+    };
+    if !filled {
+        return None;
+    }
+
+    // The driver's default sheet, from its default DEVMODE — which also
+    // makes the margin DC start portrait and on that sheet.
+    let devmode = with_printer_devmode(&device_wide, |_, _| true);
+    let (default_id, default_tenths_mm) = devmode
+        .as_ref()
+        .map(|buf| {
+            // SAFETY: the buffer holds at least a public DEVMODEW.
+            let dm = unsafe { &*(buf.as_ptr() as *const DEVMODEW) };
+            let fields = dm.dmFields;
+            let paper = unsafe { dm.Anonymous1.Anonymous1 };
+            let id = (fields & DM_PAPERSIZE != 0).then_some(paper.dmPaperSize as u16);
+            let size = (fields & DM_PAPERWIDTH != 0 && fields & DM_PAPERLENGTH != 0)
+                .then_some((i32::from(paper.dmPaperWidth), i32::from(paper.dmPaperLength)));
+            (id, size)
+        })
+        .unwrap_or((None, None));
+
+    let winspool = wide("WINSPOOL");
+    let init = devmode
+        .as_ref()
+        .map(|b| b.as_ptr().cast::<DEVMODEW>())
+        .unwrap_or(std::ptr::null());
+    // SAFETY: the strings are NUL-terminated and `devmode` outlives the DC.
+    let hdc = unsafe { CreateDCW(winspool.as_ptr(), device_wide.as_ptr(), std::ptr::null(), init) };
+    let margins = if hdc.is_null() {
+        None
+    } else {
+        // SAFETY: hdc is a valid printer DC; each index is documented.
+        let caps = |index: u32| unsafe { GetDeviceCaps(hdc, index as i32) };
+        let sample = DeviceCapsSample {
+            physical_width: caps(PHYSICALWIDTH),
+            physical_height: caps(PHYSICALHEIGHT),
+            offset_x: caps(PHYSICALOFFSETX),
+            offset_y: caps(PHYSICALOFFSETY),
+            horz_res: caps(HORZRES),
+            vert_res: caps(VERTRES),
+            dpi_x: caps(LOGPIXELSX),
+            dpi_y: caps(LOGPIXELSY),
+        };
+        unsafe { DeleteDC(hdc) };
+        crate::io::windows_media::device_margins_mm(&sample)
+    };
+
+    Some(RawPrinterMedia {
+        ids,
+        sizes_tenths_mm: sizes.into_iter().map(|p| (p.x, p.y)).collect(),
+        names_utf16: names,
+        default_id,
+        default_tenths_mm,
+        margins,
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -678,11 +925,14 @@ fn gdi_raster_print(
 
     let winspool = wide("WINSPOOL");
     let device_wide = wide(&device);
-    // The dialog's Landscape/Portrait choice rides in through the DEVMODE:
-    // the sheet in the raster decides, and the driver's default must not
-    // override it (a landscape plot into a portrait page used to shrink and
-    // misorient the output).
-    let dm_buf = oriented_printer_devmode(&device_wide, page.width > page.height);
+    // The dialog's sheet and Landscape/Portrait choice ride in through the
+    // DEVMODE: the raster's size decides both, and the driver's default must
+    // not override them (a landscape A3 plot into the driver's portrait A4
+    // used to shrink and misorient the output).
+    let sheet_w_mm = f64::from(page.width) / f64::from(GDI_PRINT_DPI) * 25.4;
+    let sheet_h_mm = f64::from(page.height) / f64::from(GDI_PRINT_DPI) * 25.4;
+    let sheet = devmode_sheet_for(&device, sheet_w_mm, sheet_h_mm);
+    let dm_buf = oriented_printer_devmode(&device_wide, page.width > page.height, sheet);
     let init = dm_buf
         .as_ref()
         .map(|b| b.as_ptr().cast::<DEVMODEW>())
