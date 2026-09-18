@@ -8,6 +8,8 @@ pub mod command;
 pub mod config;
 pub mod discussions;
 pub mod entities;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpu_backend;
 pub mod i18n;
 pub(crate) mod input;
 pub mod io;

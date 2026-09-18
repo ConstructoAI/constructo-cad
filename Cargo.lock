@@ -45,6 +45,7 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "ocs_plugin_api",
  "open",
+ "pollster",
  "printpdf",
  "rayon",
  "resvg",
