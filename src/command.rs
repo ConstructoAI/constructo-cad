@@ -1655,6 +1655,11 @@ pub enum CmdResult {
         kind: crate::scene::parametric_constraints::ConstraintKind,
         label: &'static str,
     },
+    /// Add a persistent `Fixed` constraint (`crate::modules::parametric::fixed`)
+    /// at one picked constraint point (`whole_curve == false`, resolved by the
+    /// host like `AddPointOnEntityConstraint`'s point) or on the whole curve /
+    /// polyline segment under the pick (`whole_curve == true`).
+    AddFixedConstraint(CoincidentPick),
     /// Add a persistent `EqualDistance` constraint
     /// (`crate::modules::parametric::equal_distance`): the distance
     /// between `points[0]`/`points[1]` equals the distance between
@@ -2891,6 +2896,7 @@ mod constraint_registry_tests {
             "NRCONSTRAINT",
             "LCONSTRAINT",
             "FXCONSTRAINT",
+            "GCFIX",
             "SYCONSTRAINT",
             "DCONSTRAINT",
             "ACONSTRAINT",
