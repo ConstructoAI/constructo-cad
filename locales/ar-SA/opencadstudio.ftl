@@ -5111,6 +5111,15 @@ plot =
     .system-default-printer = طابعة النظام الافتراضية
     .what-to-plot = ما المراد طباعته
     .x-mm = X (مم)
+    .default-printer-name = الطابعة الافتراضية: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = الطابعة الافتراضية: لم يبلّغ النظام عن أي طابعة
+    .printers-none-listed-by-the-system = الطابعات: لم يسرد النظام أي طابعة
+    .printers-count = الطابعات (__ocs_fmt_0__):
+    .could-not-list-printers-error = تعذّر سرد الطابعات: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = تمر المخططات عبر تطبيق PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = تذهب المخططات مباشرة إلى الطابعة (لا يسجل أي تطبيق PDF أمر طباعة).
+    .via-the-pdf-application = عبر تطبيق PDF
+    .direct-print = طباعة مباشرة
     .y-mm = Y (مم)
 
 manage =

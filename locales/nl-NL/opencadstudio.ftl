@@ -5097,6 +5097,15 @@ plot =
     .system-default-printer = Standaardprinter van het systeem
     .what-to-plot = Wat te plannen
     .x-mm = X (mm)
+    .default-printer-name = Standaardprinter: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Standaardprinter: geen gemeld door het systeem
+    .printers-none-listed-by-the-system = Printers: geen vermeld door het systeem
+    .printers-count = Printers (__ocs_fmt_0__):
+    .could-not-list-printers-error = Kon printers niet weergeven: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Plots gaan via de PDF-toepassing: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Plots gaan rechtstreeks naar de printer (geen PDF-toepassing registreert een afdrukopdracht).
+    .via-the-pdf-application = via de PDF-toepassing
+    .direct-print = rechtstreeks afdrukken
     .y-mm = Y (mm)
 
 manage =

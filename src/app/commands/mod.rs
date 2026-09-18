@@ -712,6 +712,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "PERF",
         "PERSP",
         "PLOT",
+        "PRINTERS",
         "PLOTSTYLE",
         "PLOTSTYLEEDITOR",
         "PLOTSTYLEPANEL",

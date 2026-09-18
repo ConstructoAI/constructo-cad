@@ -5099,6 +5099,15 @@ plot =
     .system-default-printer = Impressora padrão do sistema
     .what-to-plot = O que plotar
     .x-mm = X (mm)
+    .default-printer-name = Impressora padrão: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Impressora padrão: nenhuma informada pelo sistema
+    .printers-none-listed-by-the-system = Impressoras: nenhuma listada pelo sistema
+    .printers-count = Impressoras (__ocs_fmt_0__):
+    .could-not-list-printers-error = Não foi possível listar as impressoras: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = As plotagens passam pelo aplicativo de PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = As plotagens vão direto para a impressora (nenhum aplicativo de PDF registra um comando de impressão).
+    .via-the-pdf-application = pelo aplicativo de PDF
+    .direct-print = impressão direta
     .y-mm = Y (mm)
 
 manage =

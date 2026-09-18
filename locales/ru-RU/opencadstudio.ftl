@@ -5100,6 +5100,15 @@ plot =
     .system-default-printer = Системный принтер по умолчанию
     .what-to-plot = Что спланировать
     .x-mm = X (мм)
+    .default-printer-name = Принтер по умолчанию: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Принтер по умолчанию: система не сообщает ни об одном
+    .printers-none-listed-by-the-system = Принтеры: система не перечисляет ни одного
+    .printers-count = Принтеры (__ocs_fmt_0__):
+    .could-not-list-printers-error = Не удалось получить список принтеров: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Печать идёт через приложение PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Печать идёт напрямую на принтер (ни одно приложение PDF не регистрирует команду печати).
+    .via-the-pdf-application = через приложение PDF
+    .direct-print = прямая печать
     .y-mm = Y (мм)
 
 manage =

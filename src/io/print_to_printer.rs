@@ -80,30 +80,230 @@ pub fn print_existing_pdf(_path: &std::path::Path, _opts: &PrintOptions) -> Resu
 
 /// Enumerate installed printers. Linux/macOS query CUPS via `lpstat -e`;
 /// Windows queries the spooler's cached local and connected printer list.
+/// An error is the system's own explanation (a stopped spooler, a failing
+/// RPC); a desktop without CUPS at all is not an error but an empty list.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn list_printers() -> Vec<String> {
+pub fn list_printers() -> Result<Vec<String>, String> {
     #[cfg(not(target_os = "windows"))]
     {
-        std::process::Command::new("lpstat")
-            .arg("-e")
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| {
-                String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .map(|l| l.trim().to_string())
-                    .filter(|l| !l.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default()
+        let output = match std::process::Command::new("lpstat").arg("-e").output() {
+            Ok(output) => output,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.to_string()),
+        };
+        // `lpstat -e` exits non-zero with "No destinations added" when CUPS
+        // runs but knows no queue — an empty list, not a failure.
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect())
     }
     #[cfg(target_os = "windows")]
     {
-        windows_printers().unwrap_or_else(|error| {
-            eprintln!("Could not enumerate printers: {error}");
-            Vec::new()
-        })
+        windows_printers().map_err(|error| error.to_string())
+    }
+}
+
+/// The printing situation as the system reports it, one line per fact:
+/// the default printer, the printers listed (or the reason none were), and
+/// on Windows the route a plot takes. Shown by the `PRINTERS` command.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn printer_report() -> Vec<String> {
+    let mut lines = Vec::new();
+    match crate::io::plot_device::default_printer_name() {
+        Some(name) => lines.push(crate::tf!("Default printer: {name}").into_owned()),
+        None => lines.push(crate::t!("Default printer: none reported by the system").into_owned()),
+    }
+    match list_printers() {
+        Ok(printers) if printers.is_empty() => {
+            lines.push(crate::t!("Printers: none listed by the system").into_owned());
+        }
+        Ok(printers) => {
+            let count = printers.len();
+            lines.push(crate::tf!("Printers ({count}):").into_owned());
+            lines.extend(printers.into_iter().map(|name| format!("  {name}")));
+        }
+        Err(error) => lines.push(crate::tf!("Could not list printers: {error}").into_owned()),
+    }
+    #[cfg(target_os = "windows")]
+    {
+        match pdf_printto_command() {
+            Some(command) => lines.push(
+                crate::tf!("Plots go through the PDF application: {command}").into_owned(),
+            ),
+            None => lines.push(
+                crate::t!(
+                    "Plots go straight to the printer (no PDF application registers a print verb)."
+                )
+                .into_owned(),
+            ),
+        }
+    }
+    lines
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn printer_report() -> Vec<String> {
+    vec![crate::t!("Printing is not available in the web version.").into_owned()]
+}
+
+/// The Windows default printer, as the spooler names it.
+#[cfg(target_os = "windows")]
+pub(crate) fn windows_default_printer() -> std::io::Result<String> {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_FILE_NOT_FOUND};
+    use windows_sys::Win32::Graphics::Printing::GetDefaultPrinterW;
+
+    let mut needed = 0u32;
+    // SAFETY: the first call only asks for the size; the second writes into
+    // a buffer of exactly that size.
+    unsafe { GetDefaultPrinterW(std::ptr::null_mut(), &mut needed) };
+    if needed == 0 {
+        // Windows answers ERROR_FILE_NOT_FOUND when no printer is the default.
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "No default printer is configured on Windows.",
+        ));
+    }
+    let mut buf = vec![0u16; needed as usize];
+    if unsafe { GetDefaultPrinterW(buf.as_mut_ptr(), &mut needed) } == 0 {
+        let code = unsafe { GetLastError() };
+        if code == ERROR_FILE_NOT_FOUND {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "No default printer is configured on Windows.",
+            ));
+        }
+        return Err(std::io::Error::from_raw_os_error(code as i32));
+    }
+    let end = buf.iter().position(|&u| u == 0).unwrap_or(0);
+    Ok(String::from_utf16_lossy(&buf[..end]))
+}
+
+/// The command Windows runs for the `printto` verb on `.pdf` files — the
+/// registered PDF application's "print to a named printer" entry — or
+/// `None` when no application registered one (Edge and store readers only
+/// register `open`), in which case a plot goes straight to the spooler.
+#[cfg(target_os = "windows")]
+pub(crate) fn pdf_printto_command() -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::{AssocQueryStringW, ASSOCF_NOTRUNCATE, ASSOCSTR_COMMAND};
+
+    let wide =
+        |s: &str| -> Vec<u16> { std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect() };
+    let extension = wide(".pdf");
+    let verb = wide("printto");
+    let mut len = 0u32;
+    // SAFETY: strings are NUL-terminated; a null buffer asks for the size,
+    // which the call reports with S_FALSE rather than S_OK.
+    let sized = unsafe {
+        AssocQueryStringW(
+            ASSOCF_NOTRUNCATE,
+            ASSOCSTR_COMMAND,
+            extension.as_ptr(),
+            verb.as_ptr(),
+            std::ptr::null_mut(),
+            &mut len,
+        )
+    };
+    if sized < 0 || len == 0 {
+        return None;
+    }
+    let mut buf = vec![0u16; len as usize];
+    let filled = unsafe {
+        AssocQueryStringW(
+            ASSOCF_NOTRUNCATE,
+            ASSOCSTR_COMMAND,
+            extension.as_ptr(),
+            verb.as_ptr(),
+            buf.as_mut_ptr(),
+            &mut len,
+        )
+    };
+    if filled < 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&u| u == 0).unwrap_or(buf.len());
+    let command = String::from_utf16_lossy(&buf[..end]);
+    (!command.trim().is_empty()).then_some(command)
+}
+
+/// Where a Windows plot goes and how. The route is decided before any
+/// system call so the decision itself can be tested anywhere.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) enum PrintRoute {
+    /// Hand the PDF to the registered PDF application's `printto` verb,
+    /// naming the printer explicitly.
+    PdfApplication { printer: String },
+    /// Rasterise in-process and draw to the printer through the spooler.
+    Direct { printer: String },
+}
+
+impl PrintRoute {
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn printer(&self) -> &str {
+        match self {
+            PrintRoute::PdfApplication { printer } | PrintRoute::Direct { printer } => printer,
+        }
+    }
+}
+
+/// Resolve the dialog's choice to a route. "Default" (no name) becomes the
+/// system default printer *by name*, so the job can never drift to whatever
+/// the PDF application considers its default; the PDF application is used
+/// only when it registered a `printto` verb.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn plan_print_route(
+    requested: Option<&str>,
+    default_printer: Option<&str>,
+    printto_registered: bool,
+) -> Result<PrintRoute, String> {
+    let requested = requested.map(str::trim).filter(|name| !name.is_empty());
+    let printer = match requested.or(default_printer.map(str::trim).filter(|n| !n.is_empty())) {
+        Some(name) => name.to_string(),
+        None => return Err("No default printer is configured on Windows.".into()),
+    };
+    Ok(if printto_registered {
+        PrintRoute::PdfApplication { printer }
+    } else {
+        PrintRoute::Direct { printer }
+    })
+}
+
+#[cfg(test)]
+mod print_route_tests {
+    use super::{plan_print_route, PrintRoute};
+
+    #[test]
+    fn a_named_printer_is_kept_and_blank_means_the_default() {
+        assert_eq!(
+            plan_print_route(Some("Office Laser"), Some("Home Inkjet"), false),
+            Ok(PrintRoute::Direct { printer: "Office Laser".into() })
+        );
+        assert_eq!(
+            plan_print_route(Some("  "), Some("Home Inkjet"), false),
+            Ok(PrintRoute::Direct { printer: "Home Inkjet".into() })
+        );
+        assert_eq!(
+            plan_print_route(None, Some(" Home Inkjet "), true),
+            Ok(PrintRoute::PdfApplication { printer: "Home Inkjet".into() })
+        );
+    }
+
+    #[test]
+    fn no_printer_at_all_is_an_error_not_a_guess() {
+        assert!(plan_print_route(None, None, true).is_err());
+        assert!(plan_print_route(Some(""), Some(""), false).is_err());
+    }
+
+    #[test]
+    fn the_pdf_application_is_used_only_with_a_printto_verb() {
+        let direct = plan_print_route(Some("X"), None, false).unwrap();
+        let via_app = plan_print_route(Some("X"), None, true).unwrap();
+        assert!(matches!(direct, PrintRoute::Direct { .. }));
+        assert!(matches!(via_app, PrintRoute::PdfApplication { .. }));
+        assert_eq!(direct.printer(), "X");
     }
 }
 
@@ -408,7 +608,12 @@ fn oriented_printer_devmode(device_wide: &[u16], landscape: bool) -> Option<Vec<
             {
                 return None;
             }
-            (*dm).dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+            // The driver's own dmSize locates its private data
+            // (dmDriverExtra) behind the public struct; only a driver that
+            // left it zero gets the public size.
+            if (*dm).dmSize == 0 {
+                (*dm).dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+            }
             (*dm).dmFields |= DM_ORIENTATION;
             (*dm).Anonymous1.Anonymous1.dmOrientation = if landscape {
                 DMORIENT_LANDSCAPE as i16
@@ -438,7 +643,7 @@ fn oriented_printer_devmode(device_wide: &[u16], landscape: bool) -> Option<Vec<
 #[cfg(target_os = "windows")]
 fn gdi_raster_print(
     path: &std::path::Path,
-    printer: Option<&str>,
+    printer: &str,
     copies: u32,
     output_file: Option<&std::path::Path>,
 ) -> Result<(), String> {
@@ -450,34 +655,21 @@ fn gdi_raster_print(
     };
     // windows-sys 0.61 groups the spooler-document calls (StartDoc/StartPage/
     // EndPage/EndDoc/DOCINFOW) under Storage::Xps, not Graphics::Gdi.
-    use windows_sys::Win32::Graphics::Printing::GetDefaultPrinterW;
     use windows_sys::Win32::Storage::Xps::{EndDoc, EndPage, StartDocW, StartPage, DOCINFOW};
 
     let wide = |s: &str| -> Vec<u16> { std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect() };
 
-    // Resolve the target device: the named printer or the Windows default.
-    let device = match printer.map(str::trim).filter(|p| !p.is_empty()) {
-        Some(name) => name.to_string(),
-        None => {
-            let mut needed = 0u32;
-            // SAFETY: first call queries the size, second writes into a
-            // buffer of exactly that size.
-            unsafe { GetDefaultPrinterW(std::ptr::null_mut(), &mut needed) };
-            if needed == 0 {
-                return Err("No default printer is configured on Windows.".into());
-            }
-            let mut buf = vec![0u16; needed as usize];
-            if unsafe { GetDefaultPrinterW(buf.as_mut_ptr(), &mut needed) } == 0 {
-                return Err(format!(
-                    "Could not query the default printer (code {}).",
-                    unsafe { windows_sys::Win32::Foundation::GetLastError() }
-                ));
-            }
-            String::from_utf16_lossy(&buf[..buf.iter().position(|&u| u == 0).unwrap_or(0)])
-        }
-    };
+    // The device is resolved by the caller (`plan_print_route`): a name the
+    // dialog chose or the system default looked up by name.
+    let device = printer.trim();
+    if device.is_empty() {
+        return Err("No printer was chosen for direct printing.".into());
+    }
+    let device = device.to_string();
 
-    let page = crate::scene::model::pdf_raster::rasterize_page_at_dpi(
+    // A plot is printed once; the on-screen memo of PDF pages must not keep
+    // a 300 DPI raster of every job for the rest of the session.
+    let page = crate::scene::model::pdf_raster::rasterize_page_at_dpi_uncached(
         &path.to_string_lossy(),
         "1",
         GDI_PRINT_DPI,
@@ -657,6 +849,50 @@ pub fn open_in_viewer(path: &std::path::Path) -> Result<(), String> {
         .map_err(|e| format!("Could not open preview: {e}"))
 }
 
+/// Ask the registered PDF application to print `path` on `printer` through
+/// its `printto` verb, once per copy. The printer name is quoted: some
+/// `printto` command templates do not quote their `%2`.
+#[cfg(target_os = "windows")]
+fn shell_print_to(path: &std::path::Path, printer: &str, copies: u32) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_NO_ASSOCIATION};
+    use windows_sys::Win32::UI::Shell::{
+        ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SE_ERR_NOASSOC,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
+
+    let wide = |s: &str| -> Vec<u16> { OsStr::new(s).encode_wide().chain(Some(0)).collect() };
+    let path_wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let verb = wide("printto");
+    let params = wide(&format!("\"{printer}\""));
+    for _ in 0..copies.max(1) {
+        let mut info = SHELLEXECUTEINFOW {
+            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC,
+            lpVerb: verb.as_ptr(),
+            lpFile: path_wide.as_ptr(),
+            lpParameters: params.as_ptr(),
+            nShow: SW_HIDE,
+            ..Default::default()
+        };
+        // SAFETY: every pointer in `info` outlives the call.
+        if unsafe { ShellExecuteExW(&mut info) } == 0 {
+            let shell_code = info.hInstApp as usize;
+            let code = if (1..=32).contains(&shell_code) {
+                shell_code as u32
+            } else {
+                unsafe { GetLastError() }
+            };
+            if code == SE_ERR_NOASSOC || code == ERROR_NO_ASSOCIATION {
+                return Err("Windows has no PDF application registered with Print support.".into());
+            }
+            return Err(format!("Windows print dispatch failed (code {code})"));
+        }
+    }
+    Ok(())
+}
+
 /// Dispatch a PDF to a specific printer with [`PrintOptions`].
 #[cfg(not(target_arch = "wasm32"))]
 fn dispatch_to_printer_opts(
@@ -665,67 +901,43 @@ fn dispatch_to_printer_opts(
 ) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
-        use std::ffi::OsStr;
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::Foundation::{GetLastError, ERROR_NO_ASSOCIATION};
-        use windows_sys::Win32::UI::Shell::{
-            ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC,
-            SE_ERR_NOASSOC,
-        };
-        use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
-
-        let wide = |s: &str| -> Vec<u16> { OsStr::new(s).encode_wide().chain(Some(0)).collect() };
-        let path_wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-        let (verb, params, label) = match opts.printer.as_deref() {
-            Some(p) if !p.is_empty() => (wide("printto"), Some(wide(p)), p.to_string()),
-            _ => (wide("print"), None, "default printer".to_string()),
-        };
-        let params_ptr = params.as_ref().map(|v| v.as_ptr()).unwrap_or(std::ptr::null());
-        let shell = (|| -> Result<String, String> {
-            for _ in 0..opts.copies.max(1) {
-                let mut info = SHELLEXECUTEINFOW {
-                    cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-                    fMask: SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC,
-                    lpVerb: verb.as_ptr(),
-                    lpFile: path_wide.as_ptr(),
-                    lpParameters: params_ptr,
-                    nShow: SW_HIDE,
-                    ..Default::default()
-                };
-                if unsafe { ShellExecuteExW(&mut info) } == 0 {
-                    let shell_code = info.hInstApp as usize;
-                    let code = if (1..=32).contains(&shell_code) {
-                        shell_code as u32
-                    } else {
-                        unsafe { GetLastError() }
-                    };
-                    if code == SE_ERR_NOASSOC || code == ERROR_NO_ASSOCIATION {
-                        return Err(
-                            "Windows has no PDF application registered with Print support.".into(),
-                        );
+        let default_printer = windows_default_printer().ok();
+        let route = plan_print_route(
+            opts.printer.as_deref(),
+            default_printer.as_deref(),
+            pdf_printto_command().is_some(),
+        )?;
+        let printer = route.printer().to_string();
+        let via_application = match &route {
+            PrintRoute::PdfApplication { .. } => {
+                match shell_print_to(path, &printer, opts.copies) {
+                    Ok(()) => true,
+                    // The PDF application refused the job: the spooler route
+                    // still prints it, and the report says so.
+                    Err(_) => {
+                        gdi_raster_print(path, &printer, opts.copies, None)?;
+                        false
                     }
-                    return Err(format!("Windows print dispatch failed (code {code})"));
                 }
             }
-            Ok(label)
-        })();
-        if let Ok(sent) = shell {
-            return Ok(sent);
+            PrintRoute::Direct { .. } => {
+                gdi_raster_print(path, &printer, opts.copies, None)?;
+                false
+            }
+        };
+        // A direct job is fully spooled when the calls return; the temporary
+        // PDF behind it has no reader left. The PDF application reads its
+        // file after ShellExecute returns, so that copy is left to the
+        // temp folder.
+        if !via_application && path.starts_with(std::env::temp_dir()) {
+            let _ = std::fs::remove_file(path);
         }
-        // Fallback: hand the page straight to the spooler through GDI, with no
-        // PDF application involved. Modern PDF readers (Edge, store apps)
-        // register only an `open` verb, which used to leave every plot
-        // failing with "no PDF application registered".
-        gdi_raster_print(path, opts.printer.as_deref(), opts.copies, None).map_err(|gdi| {
-            format!(
-                "{}; direct print fallback failed: {gdi}",
-                shell.err().unwrap_or_default()
-            )
-        })?;
-        Ok(opts
-            .printer
-            .clone()
-            .unwrap_or_else(|| "default printer".to_string()))
+        let how = if via_application {
+            crate::t!("via the PDF application")
+        } else {
+            crate::t!("direct print")
+        };
+        Ok(format!("{printer} ({how})"))
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -907,12 +1119,7 @@ mod printer_properties_tests {
         let printed = std::env::temp_dir().join("ocs_gdi_ink_output.pdf");
         let _ = std::fs::remove_file(&printed);
 
-        let result = super::gdi_raster_print(
-            &plot,
-            Some("Microsoft Print to PDF"),
-            1,
-            Some(&printed),
-        );
+        let result = super::gdi_raster_print(&plot, "Microsoft Print to PDF", 1, Some(&printed));
         assert!(result.is_ok(), "GDI print failed: {result:?}");
 
         // The spooled PDF must contain the black block: rasterise it and
@@ -971,7 +1178,7 @@ mod printer_properties_tests {
         let printed = std::env::temp_dir().join("ocs_gdi_orientation_output.pdf");
         let _ = std::fs::remove_file(&printed);
 
-        let result = super::gdi_raster_print(&plot, Some("Microsoft Print to PDF"), 1, Some(&printed));
+        let result = super::gdi_raster_print(&plot, "Microsoft Print to PDF", 1, Some(&printed));
         assert!(result.is_ok(), "GDI print failed: {result:?}");
 
         let page = crate::scene::model::pdf_raster::rasterize_page(

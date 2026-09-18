@@ -5094,6 +5094,15 @@ plot =
     .system-default-printer = 系統預設印表機
     .what-to-plot = 列印內容
     .x-mm = X (毫米)
+    .default-printer-name = 預設印表機：__ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = 預設印表機：系統未回報
+    .printers-none-listed-by-the-system = 印表機：系統未列出任何印表機
+    .printers-count = 印表機（__ocs_fmt_0__）：
+    .could-not-list-printers-error = 無法列出印表機：__ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = 列印透過 PDF 應用程式進行：__ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = 列印直接送到印表機（沒有 PDF 應用程式註冊列印命令）。
+    .via-the-pdf-application = 透過 PDF 應用程式
+    .direct-print = 直接列印
     .y-mm = Y (毫米)
 
 manage =

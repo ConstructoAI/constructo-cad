@@ -5098,6 +5098,15 @@ plot =
     .system-default-printer = Rendszer alapértelmezett nyomtató
     .what-to-plot = Mit kell kitalálni
     .x-mm = X (mm)
+    .default-printer-name = Alapértelmezett nyomtató: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Alapértelmezett nyomtató: a rendszer nem jelez egyet sem
+    .printers-none-listed-by-the-system = Nyomtatók: a rendszer nem sorol fel egyet sem
+    .printers-count = Nyomtatók (__ocs_fmt_0__):
+    .could-not-list-printers-error = A nyomtatók nem listázhatók: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = A nyomtatás a PDF-alkalmazáson keresztül megy: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = A nyomtatás közvetlenül a nyomtatóra megy (egy PDF-alkalmazás sem regisztrál nyomtatási parancsot).
+    .via-the-pdf-application = a PDF-alkalmazáson keresztül
+    .direct-print = közvetlen nyomtatás
     .y-mm = Y (mm)
 
 manage =

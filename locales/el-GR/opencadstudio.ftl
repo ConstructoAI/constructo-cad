@@ -5099,6 +5099,15 @@ plot =
     .system-default-printer = Προεπιλεγμένος εκτυπωτής συστήματος
     .what-to-plot = Τι θα εκτυπωθεί
     .x-mm = X (mm)
+    .default-printer-name = Προεπιλεγμένος εκτυπωτής: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Προεπιλεγμένος εκτυπωτής: το σύστημα δεν αναφέρει κανέναν
+    .printers-none-listed-by-the-system = Εκτυπωτές: το σύστημα δεν αναφέρει κανέναν
+    .printers-count = Εκτυπωτές (__ocs_fmt_0__):
+    .could-not-list-printers-error = Δεν ήταν δυνατή η λίστα εκτυπωτών: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Οι εκτυπώσεις περνούν από την εφαρμογή PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Οι εκτυπώσεις πάνε απευθείας στον εκτυπωτή (καμία εφαρμογή PDF δεν δηλώνει εντολή εκτύπωσης).
+    .via-the-pdf-application = μέσω της εφαρμογής PDF
+    .direct-print = απευθείας εκτύπωση
     .y-mm = Y (mm)
 
 manage =

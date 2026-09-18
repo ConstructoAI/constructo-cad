@@ -5100,6 +5100,15 @@ plot =
     .system-default-printer = System default printer
     .what-to-plot = What to plot
     .x-mm = X (mm)
+    .default-printer-name = Default printer: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Default printer: none reported by the system
+    .printers-none-listed-by-the-system = Printers: none listed by the system
+    .printers-count = Printers (__ocs_fmt_0__):
+    .could-not-list-printers-error = Could not list printers: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Plots go through the PDF application: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Plots go straight to the printer (no PDF application registers a print verb).
+    .via-the-pdf-application = via the PDF application
+    .direct-print = direct print
     .y-mm = Y (mm)
 
 manage =

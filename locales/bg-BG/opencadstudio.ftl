@@ -5099,6 +5099,15 @@ plot =
     .system-default-printer = Системен принтер по подразбиране
     .what-to-plot = Какво да се плотира
     .x-mm = X (мм)
+    .default-printer-name = Принтер по подразбиране: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Принтер по подразбиране: системата не съобщава за такъв
+    .printers-none-listed-by-the-system = Принтери: системата не изброява нито един
+    .printers-count = Принтери (__ocs_fmt_0__):
+    .could-not-list-printers-error = Принтерите не могат да бъдат изброени: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Печатът минава през PDF приложението: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Печатът отива директно към принтера (никое PDF приложение не регистрира команда за печат).
+    .via-the-pdf-application = чрез PDF приложението
+    .direct-print = директен печат
     .y-mm = Y (мм)
 
 manage =

@@ -5098,6 +5098,15 @@ plot =
     .system-default-printer = 시스템 기본 프린터
     .what-to-plot = 무엇을 플롯할 것인가
     .x-mm = X (mm)
+    .default-printer-name = 기본 프린터: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = 기본 프린터: 시스템이 보고하지 않음
+    .printers-none-listed-by-the-system = 프린터: 시스템에 나열된 항목 없음
+    .printers-count = 프린터 (__ocs_fmt_0__):
+    .could-not-list-printers-error = 프린터 목록을 가져올 수 없습니다: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = 출력은 PDF 응용 프로그램을 거칩니다: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = 출력이 프린터로 직접 전송됩니다 (인쇄 명령을 등록한 PDF 응용 프로그램이 없음).
+    .via-the-pdf-application = PDF 응용 프로그램 경유
+    .direct-print = 직접 인쇄
     .y-mm = Y (mm)
 
 manage =

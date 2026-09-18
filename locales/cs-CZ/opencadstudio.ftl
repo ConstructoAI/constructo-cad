@@ -5096,6 +5096,15 @@ plot =
     .system-default-printer = Výchozí tiskárna systému
     .what-to-plot = Co fabulovat
     .x-mm = X (mm)
+    .default-printer-name = Výchozí tiskárna: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Výchozí tiskárna: systém žádnou nehlásí
+    .printers-none-listed-by-the-system = Tiskárny: systém žádné neuvádí
+    .printers-count = Tiskárny (__ocs_fmt_0__):
+    .could-not-list-printers-error = Nelze vypsat tiskárny: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Tisk prochází aplikací PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Tisk jde přímo na tiskárnu (žádná aplikace PDF neregistruje příkaz tisku).
+    .via-the-pdf-application = přes aplikaci PDF
+    .direct-print = přímý tisk
     .y-mm = Y (mm)
 
 manage =

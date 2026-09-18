@@ -5087,6 +5087,15 @@ plot =
     .system-default-printer = システムの既定プリンター
     .what-to-plot = 印刷対象
     .x-mm = X（mm）
+    .default-printer-name = 既定のプリンター: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = 既定のプリンター: システムから報告なし
+    .printers-none-listed-by-the-system = プリンター: システムに一覧なし
+    .printers-count = プリンター（__ocs_fmt_0__）:
+    .could-not-list-printers-error = プリンターを一覧できませんでした: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = 印刷は PDF アプリケーション経由です: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = 印刷はプリンターへ直接送られます（印刷コマンドを登録した PDF アプリケーションがありません）。
+    .via-the-pdf-application = PDF アプリケーション経由
+    .direct-print = 直接印刷
     .y-mm = Y（mm）
 
 manage =

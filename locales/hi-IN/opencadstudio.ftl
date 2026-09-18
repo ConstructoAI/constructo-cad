@@ -5087,6 +5087,15 @@ plot =
     .system-default-printer = सिस्टम डिफ़ॉल्ट प्रिंटर
     .what-to-plot = क्या प्लॉट करना है
     .x-mm = एक्स (मिमी)
+    .default-printer-name = डिफ़ॉल्ट प्रिंटर: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = डिफ़ॉल्ट प्रिंटर: सिस्टम ने कोई नहीं बताया
+    .printers-none-listed-by-the-system = प्रिंटर: सिस्टम ने कोई सूचीबद्ध नहीं किया
+    .printers-count = प्रिंटर (__ocs_fmt_0__):
+    .could-not-list-printers-error = प्रिंटर सूचीबद्ध नहीं किए जा सके: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = प्लॉट PDF एप्लिकेशन के माध्यम से जाते हैं: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = प्लॉट सीधे प्रिंटर पर जाते हैं (कोई PDF एप्लिकेशन प्रिंट कमांड पंजीकृत नहीं करता)।
+    .via-the-pdf-application = PDF एप्लिकेशन के माध्यम से
+    .direct-print = सीधी प्रिंटिंग
     .y-mm = Y (मिमी)
 
 manage =

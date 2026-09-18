@@ -5039,6 +5039,15 @@ plot =
     .system-default-printer = Varsayılan sistem yazıcısı
     .what-to-plot = Yazdırılacak Alan
     .x-mm = X (mm)
+    .default-printer-name = Varsayılan yazıcı: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Varsayılan yazıcı: sistem hiçbirini bildirmiyor
+    .printers-none-listed-by-the-system = Yazıcılar: sistem hiçbirini listelemiyor
+    .printers-count = Yazıcılar (__ocs_fmt_0__):
+    .could-not-list-printers-error = Yazıcılar listelenemedi: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Çizimler PDF uygulaması üzerinden gider: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Çizimler doğrudan yazıcıya gider (hiçbir PDF uygulaması yazdırma komutu kaydetmiyor).
+    .via-the-pdf-application = PDF uygulaması üzerinden
+    .direct-print = doğrudan yazdırma
     .y-mm = Y (mm)
 
 manage =

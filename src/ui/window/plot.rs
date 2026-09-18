@@ -365,6 +365,11 @@ pub struct PlotDialogState {
     /// sentinels.
     #[serde(skip)]
     pub printers: Vec<String>,
+    /// Why the system gave no printer list (a stopped spooler, a failing
+    /// print service), shown under the printer row so an empty list is
+    /// never mistaken for "no printers".
+    #[serde(skip)]
+    pub printers_error: Option<String>,
     /// Name of the system default printer, shown next to the default entry.
     #[serde(skip)]
     pub default_printer: Option<String>,
@@ -452,6 +457,7 @@ impl Default for PlotDialogState {
     fn default() -> Self {
         Self {
             printers: Vec::new(),
+            printers_error: None,
             default_printer: None,
             printer_media: None,
             custom_papers: Vec::new(),
@@ -1090,6 +1096,13 @@ pub fn view_window(
     // editor itself unfolds there when Properties… is pressed.
     let printer_note: Element<'_, Message> = match (&s.printer_editor, &s.printer) {
         (Some(draft), _) => printer_options_editor(draft, width),
+        (None, _) if s.printers_error.is_some() => {
+            let error = s.printers_error.clone().unwrap_or_default();
+            text(crate::tf!("Could not list printers: {error}"))
+                .size(10)
+                .style(muted_style)
+                .into()
+        }
         (None, Some(printer)) if s.driver_options.get(printer).is_some_and(|o| !o.is_empty()) => {
             let count = s.driver_options[printer].len();
             text(crate::tf!("{count} driver option(s) set for this printer."))

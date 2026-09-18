@@ -5098,6 +5098,15 @@ plot =
     .system-default-printer = Järjestelmän oletustulostin
     .what-to-plot = Mitä piirtää
     .x-mm = X (mm)
+    .default-printer-name = Oletustulostin: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Oletustulostin: järjestelmä ei ilmoita yhtään
+    .printers-none-listed-by-the-system = Tulostimet: järjestelmä ei luettele yhtään
+    .printers-count = Tulostimet (__ocs_fmt_0__):
+    .could-not-list-printers-error = Tulostimia ei voitu luetella: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Tulosteet kulkevat PDF-sovelluksen kautta: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Tulosteet menevät suoraan tulostimelle (mikään PDF-sovellus ei rekisteröi tulostuskomentoa).
+    .via-the-pdf-application = PDF-sovelluksen kautta
+    .direct-print = suoratulostus
     .y-mm = Y (mm)
 
 manage =

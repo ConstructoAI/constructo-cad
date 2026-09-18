@@ -5082,6 +5082,15 @@ plot =
     .system-default-printer = 系统默认打印机
     .what-to-plot = 打印内容
     .x-mm = X (毫米)
+    .default-printer-name = 默认打印机：__ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = 默认打印机：系统未报告
+    .printers-none-listed-by-the-system = 打印机：系统未列出任何打印机
+    .printers-count = 打印机（__ocs_fmt_0__）：
+    .could-not-list-printers-error = 无法列出打印机：__ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = 打印通过 PDF 应用程序进行：__ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = 打印直接发送到打印机（没有 PDF 应用程序注册打印命令）。
+    .via-the-pdf-application = 通过 PDF 应用程序
+    .direct-print = 直接打印
     .y-mm = Y (毫米)
 
 manage =

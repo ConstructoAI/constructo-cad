@@ -5098,6 +5098,15 @@ plot =
     .system-default-printer = Stampante predefinita del sistema
     .what-to-plot = Cosa tracciare
     .x-mm = X (mm)
+    .default-printer-name = Stampante predefinita: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Stampante predefinita: nessuna segnalata dal sistema
+    .printers-none-listed-by-the-system = Stampanti: nessuna elencata dal sistema
+    .printers-count = Stampanti (__ocs_fmt_0__):
+    .could-not-list-printers-error = Impossibile elencare le stampanti: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Le stampe passano dall'applicazione PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Le stampe vanno direttamente alla stampante (nessuna applicazione PDF registra un comando di stampa).
+    .via-the-pdf-application = tramite l'applicazione PDF
+    .direct-print = stampa diretta
     .y-mm = Y (mm)
 
 manage =
