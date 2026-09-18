@@ -13,8 +13,10 @@ use std::path::{Path, PathBuf};
 use acadrust::CadDocument;
 
 /// The community folder's GitHub contents API (lists name + download URL).
+#[cfg(not(target_arch = "wasm32"))]
 const REPO_API_URL: &str =
     "https://api.github.com/repos/HakanSeven12/OpenCADStudio/contents/fonts";
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_FONT_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Local store for fonts downloaded from the community repository. Text
@@ -104,6 +106,7 @@ pub fn local_font_file(name: &str) -> Option<PathBuf> {
 }
 
 /// List the community folder through the GitHub contents API.
+#[cfg(not(target_arch = "wasm32"))]
 fn fetch_repo_fonts() -> Result<Vec<RepoFont>, String> {
     let agent = crate::network::agent(std::time::Duration::from_secs(15));
     let mut response = agent
@@ -121,6 +124,7 @@ fn fetch_repo_fonts() -> Result<Vec<RepoFont>, String> {
 
 /// Parse the GitHub contents-API response:
 /// `[{"name":"romans.shx","download_url":"https://…"}, …]`.
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_contents(body: &str) -> Result<Vec<RepoFont>, String> {
     let value: serde_json::Value =
         serde_json::from_str(body).map_err(|e| format!("Unexpected font listing: {e}"))?;
@@ -143,6 +147,7 @@ fn parse_contents(body: &str) -> Result<Vec<RepoFont>, String> {
 /// Download every `missing` font that exists in the community folder into the
 /// local fonts directory. Returns the (requested, saved-path) pairs that were
 /// actually fetched; names absent from the repository are skipped.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn download_fonts(
     missing: &[String],
     source: &FontSource,
@@ -201,8 +206,21 @@ pub fn download_fonts(
     Ok(downloaded)
 }
 
+/// The web build has no network client, and no fonts folder to save into.
+#[cfg(target_arch = "wasm32")]
+pub fn download_fonts(
+    missing: &[String],
+    _source: &FontSource,
+) -> Result<Vec<(String, PathBuf)>, String> {
+    if missing.is_empty() {
+        return Ok(Vec::new());
+    }
+    Err("Downloading fonts is not available in the web app.".to_string())
+}
+
 /// Escape path characters that would break a URL (spaces and non-ASCII file
 /// names are common in font sets).
+#[cfg(not(target_arch = "wasm32"))]
 fn percent_encode_path(file: &str) -> String {
     let mut out = String::with_capacity(file.len());
     for byte in file.bytes() {

@@ -2489,6 +2489,7 @@ impl OpenCADStudio {
                             if is_dwg {
                                 return self.update(Message::OpenRecent(std::path::PathBuf::from(found)));
                             } else {
+                                #[cfg(not(target_arch = "wasm32"))]
                                 let _ = open::that_detached(&found);
                             }
                         } else {
