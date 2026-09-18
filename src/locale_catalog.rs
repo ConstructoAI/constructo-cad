@@ -4149,7 +4149,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "TORUS  Specify second end point of tube diameter:" => Some(("model", "torus-specify-second-end-point-of-tube-diameter")),
         "2Point" => Some(("model", "value-2point")),
         "Cube" => Some(("model", "cube")),
-        "UCS  option [World/View/3Point/Z/X/Y/Origin/Save/Delete] or name:" => Some(("view", "ucs-option-world-view-3point-z-x-y-origin-save-delete-or-name")),
+        "UCS  option [Face/OBject/World/View/3Point/Z/X/Y/Origin/Save/Delete] or name:" => Some(("view", "ucs-option-world-view-3point-z-x-y-origin-save-delete-or-name")),
         "UCS  specify new origin:" => Some(("view", "ucs-specify-new-origin")),
         "UCS  specify point on positive X axis:" => Some(("view", "ucs-specify-point-on-positive-x-axis")),
         "UCS  specify point in positive XY plane:" => Some(("view", "ucs-specify-point-in-positive-xy-plane")),

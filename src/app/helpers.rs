@@ -249,35 +249,20 @@ pub(super) fn ucs_z_axis(ucs: &Ucs) -> glam::DVec3 {
 
 /// Build a UCS whose Z axis is `normal`, anchored at `origin`.
 ///
-/// X and Y come from the Arbitrary Axis Algorithm, the same rule DWG uses to
-/// turn an extrusion direction into an object coordinate system. Picking the
-/// world axis that is *least* parallel to the normal keeps the cross product
-/// well conditioned, and makes the result stable: the same face always yields
-/// the same X axis, so a sketch drawn on it does not spin when the UCS is
-/// rebuilt.
-///
-/// Returns `None` when `normal` is degenerate and defines no plane.
+/// X and Y come from the arbitrary-axis algorithm in
+/// [`crate::scene::view::transform::ocs_axes`], the same frame entities get
+/// from their extrusion direction, so the same face always yields the same X
+/// axis. Returns `None` when `normal` is degenerate and defines no plane.
 pub(super) fn ucs_from_normal(origin: glam::DVec3, normal: glam::DVec3) -> Option<Ucs> {
     let z = normal.normalize_or_zero();
     if z.length_squared() < 1e-12 {
         return None;
     }
-    // 1/64 is the threshold the DWG spec names for "close enough to the world
-    // Z axis that using it as the reference would be ill conditioned".
-    let reference = if z.x.abs() < 1.0 / 64.0 && z.y.abs() < 1.0 / 64.0 {
-        glam::DVec3::Y
-    } else {
-        glam::DVec3::Z
-    };
-    let x = reference.cross(z).normalize_or_zero();
-    if x.length_squared() < 1e-12 {
-        return None;
-    }
-    let y = z.cross(x).normalize_or_zero();
+    let ((xx, xy, xz), (yx, yy, yz)) = crate::scene::view::transform::ocs_axes((z.x, z.y, z.z));
     let mut ucs = Ucs::new("*ACTIVE*");
     ucs.origin = acadrust::types::Vector3::new(origin.x, origin.y, origin.z);
-    ucs.x_axis = acadrust::types::Vector3::new(x.x, x.y, x.z);
-    ucs.y_axis = acadrust::types::Vector3::new(y.x, y.y, y.z);
+    ucs.x_axis = acadrust::types::Vector3::new(xx, xy, xz);
+    ucs.y_axis = acadrust::types::Vector3::new(yx, yy, yz);
     Some(ucs)
 }
 

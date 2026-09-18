@@ -347,23 +347,30 @@ impl CadCommand for ValuePromptCommand {
     }
 }
 
-/// Interactive front-end for `UCS FACE` — Fusion's "create sketch on a face".
+/// Interactive pick for `UCS FACE` and `UCS OBJECT`.
 ///
-/// Picks one face of a solid and hands the resulting plane to the inline
-/// `UCS FACE <handle> <x,y,z>` handler via [`CmdResult::Dispatch`], so the
-/// plane construction lives in exactly one place whether the user clicked a
-/// face or typed the arguments. `entity_pick_uses_surface_point` is what
-/// makes the click land *on the solid's surface* rather than on the current
-/// drawing plane, which is the whole point: the pick coordinate is the face.
-pub struct UcsFaceCommand;
+/// Hands the picked entity to the inline `UCS FACE <handle> <x,y,z>` /
+/// `UCS OBJECT <handle>` handler via [`CmdResult::Dispatch`], so the plane
+/// construction lives in one place whether the user clicked or typed the
+/// arguments. For a face the click lands *on the solid's surface*
+/// (`entity_pick_uses_surface_point`) and that point becomes the plane
+/// origin; for an object only the handle matters.
+pub struct UcsPickCommand {
+    /// `true` picks a solid face; `false` picks a planar entity.
+    pub face: bool,
+}
 
-impl CadCommand for UcsFaceCommand {
+impl CadCommand for UcsPickCommand {
     fn name(&self) -> &'static str {
         "UCS"
     }
 
     fn prompt(&self) -> String {
-        crate::t!("UCS FACE  Select a face to draw on:").into_owned()
+        if self.face {
+            crate::t!("UCS FACE  Select a face to draw on:").into_owned()
+        } else {
+            crate::t!("UCS OBJECT  Select object to align UCS:").into_owned()
+        }
     }
 
     fn needs_entity_pick(&self) -> bool {
@@ -371,7 +378,7 @@ impl CadCommand for UcsFaceCommand {
     }
 
     fn entity_pick_uses_surface_point(&self) -> bool {
-        true
+        self.face
     }
 
     fn entity_pick_highlights_hover(&self) -> bool {
@@ -381,6 +388,9 @@ impl CadCommand for UcsFaceCommand {
     fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
+        }
+        if !self.face {
+            return CmdResult::Dispatch(format!("UCS OBJECT {:X}", handle.value()));
         }
         // Hex handle and comma-separated coordinates are what the inline
         // parser reads back. Full `{}` precision, not a rounded format: the

@@ -338,7 +338,7 @@ impl OpenCADStudio {
                             // surface point, so both entry points share the
                             // plane construction below.
                             None => {
-                                let picker = crate::command::UcsFaceCommand;
+                                let picker = crate::command::UcsPickCommand { face: true };
                                 self.command_line.push_info(&picker.prompt());
                                 self.tabs[i].active_cmd = Some(Box::new(picker));
                             }
@@ -386,9 +386,13 @@ impl OpenCADStudio {
                             })
                             .map(acadrust::Handle::new);
                         match target {
-                            None => self
-                                .command_line
-                                .push_error(crate::t!("Usage: UCS OBJECT <handle>").as_ref()),
+                            // Bare `UCS OBJECT` starts the pick; the click
+                            // comes back through this arm with the handle.
+                            None => {
+                                let picker = crate::command::UcsPickCommand { face: false };
+                                self.command_line.push_info(&picker.prompt());
+                                self.tabs[i].active_cmd = Some(Box::new(picker));
+                            }
                             Some(handle) => {
                                 let built = self.tabs[i]
                                     .scene

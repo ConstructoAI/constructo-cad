@@ -4198,7 +4198,7 @@ view =
     .cmd-not-yet-implemented = __ocs_fmt_0__: not yet implemented.
     .viewport-s-in-layout = __ocs_fmt_0__ viewport(s) in layout "__ocs_fmt_1__":
 
-    .ucs-option-world-view-3point-z-x-y-origin-save-delete-or-name = UCS  option [World/View/3Point/Z/X/Y/Origin/Save/Delete] or name:
+    .ucs-option-world-view-3point-z-x-y-origin-save-delete-or-name = UCS  option [Face/OBject/World/View/3Point/Z/X/Y/Origin/Save/Delete] or name:
     .ucs-specify-new-origin = UCS  specify new origin:
     .ucs-specify-point-on-positive-x-axis = UCS  specify point on positive X axis:
     .ucs-specify-point-in-positive-xy-plane = UCS  specify point in positive XY plane:
