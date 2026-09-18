@@ -2463,8 +2463,7 @@ fn solve_scope(
                     let dy = store.get(line.p2.y) - store.get(line.p1.y);
                     (dx * dx + dy * dy).sqrt()
                 };
-                let target = sys.add_param(length, true);
-                sys.add_constraint(Rc::new(P2PDistance::new(line.p1, line.p2, target)));
+                retain_segment_length(&mut sys, line.p1, line.p2, length, length);
             }
         }
         let temporary = ParametricConstraint {
