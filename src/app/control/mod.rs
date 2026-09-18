@@ -131,6 +131,24 @@ struct Operation {
 fn failure(code: &str, error: impl ToString) -> Value {
     json!({"ok":false,"status":"failed","code":code,"error":error.to_string()})
 }
+/// `{"op":"open","name":"plan.dwg","data_base64":"…"}`: the web build has no
+/// filesystem path to open, so the caller sends the file itself. `name` is
+/// reduced to its file name; it labels the tab and the recent-files entry.
+fn open_bytes_request(req: &Value) -> Result<(String, Vec<u8>), Value> {
+    use base64::Engine as _;
+    let name = string(req, "name")?;
+    let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    if name.is_empty() {
+        return Err(failure("invalid_request", "Missing name"));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(req["data_base64"].as_str().unwrap_or_default())
+        .map_err(|e| failure("invalid_request", format!("data_base64: {e}")))?;
+    if bytes.is_empty() {
+        return Err(failure("invalid_request", "data_base64 is empty"));
+    }
+    Ok((name.to_string(), bytes))
+}
 fn string<'a>(req: &'a Value, key: &str) -> Result<&'a str, Value> {
     req[key]
         .as_str()
@@ -703,6 +721,24 @@ impl OpenCADStudio {
         let i = self.active_tab;
         Ok(match req["op"].as_str().unwrap_or("") {
             "new" => self.update(Message::TabNew),
+            "open" if req.get("data_base64").is_some() => {
+                let (name, bytes) = open_bytes_request(req)?;
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if self.opening.is_some() {
+                        return Err(failure("busy", "Another drawing is still opening"));
+                    }
+                    self.open_web_bytes(name, bytes)
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let _ = (name, bytes);
+                    return Err(failure(
+                        "invalid_request",
+                        "data_base64 is for the web build; supply path",
+                    ));
+                }
+            }
             "open" => self.update(Message::OpenExternal(std::path::PathBuf::from(string(
                 req, "path",
             )?))),
@@ -1407,6 +1443,41 @@ mod tests {
             1
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn open_from_bytes_validates_the_request() {
+        let ok = open_bytes_request(&json!({"name":"C:\\plans\\plan.dwg","data_base64":"AAEC"}));
+        assert_eq!(ok, Ok(("plan.dwg".to_string(), vec![0, 1, 2])));
+        for (req, error) in [
+            (json!({"data_base64":"AAEC"}), "Missing name"),
+            (json!({"name":"dir/","data_base64":"AAEC"}), "Missing name"),
+            (
+                json!({"name":"a.dwg","data_base64":""}),
+                "data_base64 is empty",
+            ),
+        ] {
+            assert_eq!(
+                open_bytes_request(&req).unwrap_err()["error"],
+                error,
+                "{req}"
+            );
+        }
+        let bad = open_bytes_request(&json!({"name":"a.dwg","data_base64":"not base64!"}));
+        assert_eq!(bad.unwrap_err()["code"], "invalid_request");
+    }
+    #[test]
+    fn open_from_bytes_is_refused_natively_without_touching_documents() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        let tabs = app.tabs.len();
+        let reply = request(
+            &mut app,
+            json!({"op":"open","name":"a.dxf","data_base64":"AAEC"}),
+        );
+        assert_eq!(reply["code"], "invalid_request", "{reply}");
+        assert_eq!(app.tabs.len(), tabs);
+        assert!(app.opening.is_none());
     }
 
     #[test]
