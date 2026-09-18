@@ -25,6 +25,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 use crate::ui::properties::{lw_options, LwItem};
+use crate::ui::style::common::muted_style;
 use crate::ui::style::form::hdivider;
 
 const LABEL_W: f32 = 120.0;
@@ -138,12 +139,6 @@ pub fn color_from_label(label: &str) -> Option<AcadColor> {
         "White" => AcadColor::Index(7),
         _ => return None,
     })
-}
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
 }
 
 fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
