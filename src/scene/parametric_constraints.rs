@@ -891,6 +891,23 @@ impl ConstraintKind {
     }
 }
 
+/// Fixed draws a padlock (`src/ui/overlay.rs`), the way the reference bar
+/// does: the plain symbol for a held curve or segment, this variant when one
+/// addressable point is held (white lock with the point marker).
+pub(crate) const FIXED_POINT_GLYPH: &str = "F·";
+
+pub(crate) fn fixed_glyph_label(constraint: &ParametricConstraint) -> &'static str {
+    let point = constraint
+        .refs
+        .first()
+        .is_some_and(|reference| reference.marker.is_some() && reference.segment_index().is_none());
+    if point {
+        FIXED_POINT_GLYPH
+    } else {
+        ConstraintKind::Fixed.glyph_symbol()
+    }
+}
+
 /// The full glyph text for one constraint: its symbol, plus the driving
 /// value for a dimensional kind (Distance/Angle/Radius).
 pub(crate) fn glyph_label(constraint: &ParametricConstraint) -> String {
@@ -1687,7 +1704,9 @@ impl super::Scene {
             })
             .flat_map(|c| {
                 let is_conflicting = set.conflicts.iter().any(|(id, _)| *id == c.id);
-                let label = if show_values {
+                let label = if c.kind == ConstraintKind::Fixed {
+                    fixed_glyph_label(c).to_string()
+                } else if show_values {
                     glyph_label(c)
                 } else {
                     c.kind.glyph_symbol().to_string()
