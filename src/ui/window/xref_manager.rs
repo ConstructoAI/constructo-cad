@@ -9,6 +9,7 @@ use crate::app::Message;
 use crate::io::xref::collect_entries_with_prev;
 use crate::io::xref_model::{normalize_lexical, Pathtype, RefKind, RefStatus, RefType, ReferenceEntry};
 use crate::ui::ROW_H;
+use crate::ui::style::common::muted_style;
 use acadrust::CadDocument;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, tooltip};
 use iced::Padding;
@@ -1285,12 +1286,6 @@ fn format_date(modified: Option<SystemTime>) -> String {
 }
 
 // ── Widget helpers (layers.rs conventions) ────────────────────────────────
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
-}
 
 fn row_button_style(selected: bool, index: usize) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme: &Theme, status: button::Status| {

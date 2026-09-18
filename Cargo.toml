@@ -55,6 +55,7 @@ ttf-parser = "0.25"
 cosmic-text = "0.15"
 unicode-bidi = "0.3"
 lyon_tessellation = "1.0.20"
+pollster = "0.4"
 
 [dev-dependencies]
 fluent-syntax = "0.12"

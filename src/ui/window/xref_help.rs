@@ -5,18 +5,13 @@
 //! unreadable sliver.
 
 use crate::app::Message;
+use crate::ui::style::common::muted_style;
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Background, Element, Fill, Length, Theme};
 
 /// GitHub issues page linked from the help window, so web users can report
 /// missing or broken behavior where it will be seen.
 pub const XREF_ISSUES_URL: &str = "https://github.com/HakanSeven12/OpenCADStudio/issues";
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
-}
 
 pub fn view_window(sizing: crate::ui::modal::ModalSizing) -> Element<'static, Message> {
     // Fixed window width: paragraphs wrap against this instead of the

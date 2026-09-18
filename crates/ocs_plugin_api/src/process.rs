@@ -193,7 +193,7 @@ fn call_timeout() -> Duration {
 
 /// Per-request-kind timeout floors. The user-configured default is raised to
 /// these minima so that no request kind can be configured into an unsafe value.
-fn request_timeout(kind: &'static str) -> Duration {
+pub(crate) fn request_timeout(kind: &'static str) -> Duration {
     base_max_floor(call_timeout(), kind)
 }
 
@@ -228,7 +228,7 @@ fn base_max_floor(base: Duration, kind: &'static str) -> Duration {
     base.max(floor)
 }
 
-fn request_kind(req: &HostRequest) -> &'static str {
+pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
     match req {
         HostRequest::GetManifest => "GetManifest",
         HostRequest::GetRibbon => "GetRibbon",

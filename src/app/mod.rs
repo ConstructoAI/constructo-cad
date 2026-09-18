@@ -4393,6 +4393,17 @@ impl OpenCADStudio {
         // `--read-only` disables saving. `--script` queues command lines.
         let cfg = crate::cli::gui_config();
         s.read_only = cfg.read_only;
+        // GPU backend / renderer fallback: the resolver ran before iced
+        // booted, so surface its verdict here where the user can see it.
+        if let Some(notice) = cfg.gpu_fallback_notice {
+            s.command_line.push_warning(&notice);
+            crate::scene::pipeline::report_gpu_line(&format!("[gpu] {notice}"));
+        }
+        if cfg.gpu_compat_auto {
+            let notice = crate::gpu_backend::compat_notice();
+            s.command_line.push_warning(&notice);
+            crate::scene::pipeline::report_gpu_line(&format!("[gpu] {notice}"));
+        }
         let cli_open: Task<Message> = if !cfg.files.is_empty() {
             Task::batch(
                 cfg.files
