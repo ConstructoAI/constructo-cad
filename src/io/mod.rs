@@ -1000,6 +1000,7 @@ fn finalize_loaded_outcome(
 ) -> Result<acadrust::ReadOutcome, String> {
     let doc = &mut outcome.document;
     normalize_block_origins(doc);
+    normalize_knotless_splines(doc);
     if outcome.stats.source_format == Some(acadrust::SourceFormat::Dxf) {
         fix_dxf_dimension_rotations(doc);
         fix_dxf_layout_plot_settings(doc);
@@ -2146,8 +2147,12 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
                 && (s.knots.iter().any(|k| !k.is_finite())
                     || s.knots.windows(2).any(|w| w[1] < w[0])
                     || (!compact_periodic_knots && s.knots.len() != n + deg + 1));
+            // A single control point with no knots and no fit points cannot
+            // form a curve, and no knot vector exists for it.
+            let lone_point = n == 1 && s.knots.is_empty() && s.fit_points.is_empty();
             n >= MAX_VERTS
                 || degree_bad
+                || lone_point
                 || s.control_points.iter().any(|p| !finite_vec3(p))
                 || knots_bad
         }
@@ -2155,8 +2160,32 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
     }
 }
 
+/// Give control-point splines stored without knots a degree their control
+/// points can carry, and the matching clamped knot vector.
+///
+/// A degree-p curve needs at least p + 1 control points. Knot generation
+/// (here, and in the DWG writer for knot-less splines) subtracts in `usize`
+/// and underflows when there are fewer; in release builds the wrapped count
+/// drives an unbounded allocation. Lowering the degree keeps the geometry the
+/// points describe: two points are a straight segment at any degree.
+fn normalize_knotless_splines(doc: &mut CadDocument) {
+    for entity in doc.entities_mut() {
+        let EntityType::Spline(spline) = entity else {
+            continue;
+        };
+        let n = spline.control_points.len();
+        if !spline.knots.is_empty() || n < 2 || spline.degree < 1 {
+            continue;
+        }
+        let degree = (spline.degree as usize).min(n - 1);
+        spline.degree = degree as i32;
+        spline.knots = acadrust::entities::Spline::generate_clamped_knots(degree, n);
+    }
+}
+
 pub fn purge_corrupt_entities(doc: &mut CadDocument) -> usize {
     use crate::par::prelude::*;
+    normalize_knotless_splines(doc);
     // Detection is pure and read-only; the per-vertex finite/extent checks on
     // large polylines dominate, so fan the scan out across cores. Gather
     // entity references in one pass, test in parallel, then remove serially
@@ -2362,6 +2391,67 @@ mod corrupt_guard_tests {
     use super::*;
     use acadrust::entities::{Arc, Circle, EntityType, Spline};
     use acadrust::types::Vector3;
+
+    fn knotless_spline(degree: i32, points: usize) -> Spline {
+        let mut spline = Spline::new();
+        spline.degree = degree;
+        spline.control_points = (0..points)
+            .map(|index| Vector3::new(index as f64, index as f64, 0.0))
+            .collect();
+        spline
+    }
+
+    // Degree 3 over two control points with no knot vector: generating knots
+    // for it underflows, and writing it to DWG used to panic (debug) or
+    // allocate without bound (release).
+    #[test]
+    fn knotless_spline_with_too_few_points_is_lowered_and_saves_as_dwg() {
+        let mut doc = CadDocument::new();
+        doc.add_entity(EntityType::Spline(knotless_spline(3, 2)));
+        doc.add_entity(EntityType::Spline(knotless_spline(3, 1)));
+        assert_eq!(purge_corrupt_entities(&mut doc), 1, "the lone point is dropped");
+        let spline = doc
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Spline(spline) => Some(spline.clone()),
+                _ => None,
+            })
+            .expect("the two-point spline is kept");
+        assert_eq!(spline.degree, 1);
+        assert_eq!(spline.knots, vec![0.0, 0.0, 1.0, 1.0]);
+
+        let path = std::env::temp_dir().join(format!(
+            "ocs_knotless_spline_{}.dwg",
+            std::process::id()
+        ));
+        save_as_version(&doc, &path, acadrust::DxfVersion::AC1032).expect("save");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // `load_file` (headless export, xrefs, block import) does not purge, so
+    // the spline repair has to happen when any load is finalized.
+    #[test]
+    fn knotless_spline_is_repaired_by_every_load_path() {
+        const DXF: &str = "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n8\n0\n70\n0\n71\n3\n72\n0\n73\n2\n74\n0\n\
+10\n0\n20\n0\n30\n0\n10\n1\n20\n1\n30\n0\n0\nENDSEC\n0\nEOF\n";
+        let dir = std::env::temp_dir();
+        let source = dir.join(format!("ocs_knotless_load_{}.dxf", std::process::id()));
+        let target = dir.join(format!("ocs_knotless_load_{}.dwg", std::process::id()));
+        std::fs::write(&source, DXF).unwrap();
+        let doc = load_file(&source).expect("load");
+        let _ = std::fs::remove_file(&source);
+        let spline = doc
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Spline(spline) => Some(spline),
+                _ => None,
+            })
+            .expect("spline");
+        assert_eq!(spline.degree, 1);
+        assert_eq!(spline.knots.len(), 4);
+        save_as_version(&doc, &target, acadrust::DxfVersion::AC1032).expect("save");
+        let _ = std::fs::remove_file(&target);
+    }
 
     // Small but finite arcs are valid records. Kernel tessellation is bounded,
     // so opening must retain them instead of treating their size as corruption.
