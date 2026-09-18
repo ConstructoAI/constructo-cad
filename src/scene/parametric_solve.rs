@@ -17,7 +17,7 @@ use cadkernel_constraints::constraints::curve_generic::{BoundedArcValue, CurveVa
 use cadkernel_constraints::constraints::point_line::{
     CenterOfGravity, Difference, Equal, EqualLineLength, MidpointOnLine, P2PDistance,
     Parallel as ParallelConstraint, Perpendicular as PerpendicularConstraint, PointOnLine,
-    ProjectedDistance, ProjectedDistanceAlongLine,
+    ProjectedDistance, ProjectedDistanceAlongLine, SymmetricLineDirections,
 };
 use cadkernel_constraints::constraints::Constraint;
 use cadkernel_constraints::geo::{
@@ -1363,18 +1363,86 @@ fn build_constraint(
             let [a, b, m] = c.refs.as_slice() else {
                 return Vec::new();
             };
-            let (Some(pa), Some(pb), Some(mirror)) = (
-                point_ref(sys, cache, *a),
-                point_ref(sys, cache, *b),
-                whole_line(sys, cache, *m),
+            let Some(mirror) = whole_line(sys, cache, *m) else {
+                return Vec::new();
+            };
+            if let (Some(pa), Some(pb)) =
+                (point_ref(sys, cache, *a), point_ref(sys, cache, *b))
+            {
+                let pair = GLine { p1: pa, p2: pb };
+                return vec![
+                    Rc::new(MidpointOnLine::new(pair, mirror)),
+                    Rc::new(PerpendicularConstraint::new(sys.store(), pair, mirror)),
+                ];
+            }
+            let (Some(first), Some(second)) = (
+                resolve_ref(document, sys, cache, *a),
+                resolve_ref(document, sys, cache, *b),
             ) else {
                 return Vec::new();
             };
-            let pair = GLine { p1: pa, p2: pb };
-            vec![
-                Rc::new(MidpointOnLine::new(pair, mirror)),
-                Rc::new(PerpendicularConstraint::new(sys.store(), pair, mirror)),
-            ]
+            match (
+                as_circle_or_line(first, *a),
+                as_circle_or_line(second, *b),
+            ) {
+                (CircleOrLine::Line(first), CircleOrLine::Line(second)) => {
+                    vec![Rc::new(SymmetricLineDirections::new(
+                        sys.store(),
+                        first,
+                        second,
+                        mirror,
+                    ))]
+                }
+                (CircleOrLine::Circle(first), CircleOrLine::Circle(second)) => {
+                    let centers = GLine {
+                        p1: first.center,
+                        p2: second.center,
+                    };
+                    vec![
+                        Rc::new(MidpointOnLine::new(centers, mirror)),
+                        Rc::new(PerpendicularConstraint::new(
+                            sys.store(),
+                            centers,
+                            mirror,
+                        )),
+                        Rc::new(Equal::new(second.rad, first.rad, 1.0)),
+                    ]
+                }
+                (CircleOrLine::Ellipse(first), CircleOrLine::Ellipse(second)) => {
+                    let centers = GLine {
+                        p1: first.center,
+                        p2: second.center,
+                    };
+                    let first_axis = GLine {
+                        p1: first.center,
+                        p2: first.focus1,
+                    };
+                    let second_axis = GLine {
+                        p1: second.center,
+                        p2: second.focus1,
+                    };
+                    vec![
+                        Rc::new(MidpointOnLine::new(centers, mirror)),
+                        Rc::new(PerpendicularConstraint::new(
+                            sys.store(),
+                            centers,
+                            mirror,
+                        )),
+                        Rc::new(SymmetricLineDirections::new(
+                            sys.store(),
+                            first_axis,
+                            second_axis,
+                            mirror,
+                        )),
+                        Rc::new(EqualMajorAxesConic::new(
+                            GConic::Ellipse(first),
+                            GConic::Ellipse(second),
+                        )),
+                        Rc::new(Equal::new(second.radmin, first.radmin, 1.0)),
+                    ]
+                }
+                _ => Vec::new(),
+            }
         }
         ConstraintKind::Fixed => {
             let Some(r) = c.refs.first() else {
@@ -2309,10 +2377,28 @@ fn solve_scope(
     }
 
     // Ordered two-object constraints use the first pick as a reference for
-    // their initial placement. Build temporary Fixed equations into this
-    // solve only; they are deliberately omitted from `owner` and from the
-    // persistent constraint set/native graph.
-    for reference in initial_fixed_refs {
+    // their initial placement. Temporary Fixed equations stay out of `owner`
+    // and the persistent native graph. Symmetric references are handled as
+    // exact driven anchors below, so they are excluded from this approximate
+    // equality-equation path.
+    let symmetric_constraints = constraints
+        .iter()
+        .filter(|constraint| {
+            constraint.enabled
+                && constraint.kind == ConstraintKind::Symmetric
+                && constraint.refs.len() == 3
+        })
+        .collect::<Vec<_>>();
+    let temporary_fixed_refs = initial_fixed_refs
+        .iter()
+        .copied()
+        .filter(|reference| {
+            !symmetric_constraints
+                .iter()
+                .any(|constraint| constraint.refs.contains(reference))
+        })
+        .collect::<Vec<_>>();
+    for reference in &temporary_fixed_refs {
         let temporary = ParametricConstraint {
             id: ConstraintId::MAX,
             kind: ConstraintKind::Fixed,
@@ -2352,6 +2438,18 @@ fn solve_scope(
     }
 
     let mut anchors = driven_refs.to_vec();
+    for constraint in &symmetric_constraints {
+        if let Some(axis) = constraint.refs.get(2).copied() {
+            if !anchors.contains(&axis) {
+                anchors.push(axis);
+            }
+        }
+        for reference in initial_fixed_refs {
+            if constraint.refs[..2].contains(reference) && !anchors.contains(reference) {
+                anchors.push(*reference);
+            }
+        }
+    }
     if !retain_lengths {
         let mut axis_lines: Vec<_> = line_axes.into_iter().filter_map(|(reference, vertical)| {
             let geometry = cache.get(&reference.entity)?;
@@ -2478,6 +2576,9 @@ fn solve_scope(
             if initial_fixed_refs
                 .iter()
                 .any(|reference| reference.entity == *handle && reference.marker.is_none())
+                || symmetric_constraints.iter().any(|constraint| {
+                    constraint.refs.get(2).is_some_and(|axis| axis.entity == *handle)
+                })
             {
                 continue;
             }
@@ -2638,6 +2739,18 @@ fn solve_scope(
         let EntityGeom::Ellipse(el) = geom else {
             continue;
         };
+        let symmetric = set.constraints.iter().any(|constraint| {
+            constraint.enabled
+                && constraint.kind == ConstraintKind::Symmetric
+                && constraint.refs.get(..2).is_some_and(|references| {
+                    references.iter().any(|reference| {
+                        reference.entity == *handle && reference.marker.is_none()
+                    })
+                })
+        });
+        if symmetric {
+            continue;
+        }
         let (cx, cy, fx, fy) = {
             let store = sys.store();
             (

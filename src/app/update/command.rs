@@ -3263,15 +3263,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 self.tabs[i].properties.active_field = None;
                 let handles = self.property_target_handles(i);
                 if !handles.is_empty() {
-                    let driven_marker = match field {
-                        "start_x" | "start_y" | "start_z" => Some(0),
-                        "end_x" | "end_y" | "end_z" => Some(1),
-                        "center_x" | "center_y" | "center_z" => Some(-3),
+                    let driven_reference = match field {
+                        "start_x" | "start_y" | "start_z" => Some(Some(0)),
+                        "end_x" | "end_y" | "end_z" => Some(Some(1)),
+                        "center_x" | "center_y" | "center_z" => Some(Some(-3)),
+                        "radius" | "diameter" | "circumference" | "area"
+                        | "major_r" | "minor_r" | "ratio" => Some(None),
                         _ => None,
                     };
-                    let retained_originals: Vec<_> = if self.constraint_solve_mode
-                        && driven_marker.is_some()
-                    {
+                    let retain_size = self.constraint_solve_mode
+                        && driven_reference.is_some_and(|marker| marker.is_some());
+                    let retained_originals: Vec<_> = if retain_size {
                         handles
                             .iter()
                             .filter_map(|handle| {
@@ -3602,13 +3604,20 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 }
                             }
                         }
-                        let driven_refs: Vec<_> = driven_marker
+                        let driven_refs: Vec<_> = driven_reference
                             .into_iter()
                             .flat_map(|marker| {
-                                handles.iter().copied().map(move |handle| {
-                                    crate::scene::parametric_constraints::ParametricRef::point(
-                                        handle, marker,
-                                    )
+                                handles.iter().copied().map(move |handle| match marker {
+                                    Some(marker) => {
+                                        crate::scene::parametric_constraints::ParametricRef::point(
+                                            handle, marker,
+                                        )
+                                    }
+                                    None => {
+                                        crate::scene::parametric_constraints::ParametricRef::whole(
+                                            handle,
+                                        )
+                                    }
                                 })
                             })
                             .collect();
@@ -3616,6 +3625,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             i,
                             &handles,
                             &driven_refs,
+                            retain_size,
                             &retained_originals,
                         );
                         self.tabs[i].dirty = true;

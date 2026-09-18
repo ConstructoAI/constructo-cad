@@ -1618,27 +1618,40 @@ impl OpenCADStudio {
             "SYCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
-                    use crate::modules::draw::select::SelectObjectsCommand;
-                    let sel = SelectObjectsCommand::new(cmd);
-                    self.command_line.push_info(&sel.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(sel));
-                } else if handles.len() != 3 {
-                    self.command_line.push_output(
-                        "Select exactly three entities (two circles/arcs, then the mirror line), then run this constraint again.",
-                    );
+                    use crate::modules::parametric::SymmetricConstraintCommand;
+                    let command = SymmetricConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
                 } else {
-                    use crate::command::CmdResult;
-                    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
-                    return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
-                        kind: ConstraintKind::Symmetric,
-                        refs: vec![
-                            ParametricRef::center(handles[0]),
-                            ParametricRef::center(handles[1]),
-                            ParametricRef::whole(handles[2]),
-                        ],
-                        driving_param: None,
-                        label: "Symmetric constraint",
-                    }));
+                    use crate::command::{
+                        CmdResult, SymmetricConstraintSelection,
+                    };
+                    use crate::modules::parametric::SymmetricConstraintCommand;
+
+                    let refs = (handles.len() == 3).then(|| {
+                        let first = self.tabs[i].scene.document.get_entity(handles[0])?;
+                        let second = self.tabs[i].scene.document.get_entity(handles[1])?;
+                        let axis = self.tabs[i].scene.document.get_entity(handles[2])?;
+                        SymmetricConstraintCommand::preselected_refs(
+                            (first, handles[0]),
+                            (second, handles[1]),
+                            (axis, handles[2]),
+                        )
+                    }).flatten();
+                    if let Some([first, second, axis]) = refs {
+                        return Some(self.apply_cmd_result(CmdResult::AddSymmetricConstraint {
+                            selection: SymmetricConstraintSelection::Objects(first, second),
+                            axis,
+                            label: "Symmetric constraint",
+                        }));
+                    }
+                    self.tabs[i].scene.deselect_all();
+                    self.command_line.push_error(
+                        "Symmetric: select two compatible objects followed by a line axis.",
+                    );
+                    let command = SymmetricConstraintCommand::new();
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
                 }
             }
 
