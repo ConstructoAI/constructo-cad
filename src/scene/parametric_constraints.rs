@@ -1197,9 +1197,10 @@ fn glyph_placements(
     document: &acadrust::CadDocument,
     constraint: &ParametricConstraint,
 ) -> Vec<(Vector3, Vector3)> {
+    // Relations the reference marks on every object they join.
     if matches!(
         constraint.kind,
-        ConstraintKind::Parallel | ConstraintKind::Symmetric
+        ConstraintKind::Parallel | ConstraintKind::Symmetric | ConstraintKind::Equal
     ) {
         return constraint
             .refs
