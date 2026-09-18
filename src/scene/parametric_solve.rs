@@ -2224,30 +2224,13 @@ fn solve_scope(
                     }))
         })
     };
-    let mut driven_refs: Vec<ParametricRef> =
+    // A moved entity a Fixed holds only in part gets no temporary pin and
+    // (below) no size retention, so its free points simply stay where the
+    // edit put them while the fixed ones pull their own coordinates back —
+    // a MOVE on a line with one fixed end stretches the line instead of
+    // sliding it — and any other constraint on it reconciles the rest.
+    let driven_refs: Vec<ParametricRef> =
         driven_refs.iter().copied().filter(|r| !held_by_fixed(r)).collect();
-    // A moved entity a Fixed holds only in part keeps its other primary
-    // points where the edit put them (driven), so the fixed ones pull just
-    // their own coordinates back — a MOVE on a line with one fixed end
-    // stretches the line instead of sliding it.
-    for reference in initial_fixed_refs {
-        if reference.marker.is_some() || !fixed_refs.iter().any(|f| f.entity == reference.entity)
-        {
-            continue;
-        }
-        let Some(entity) = document.get_entity(reference.entity) else {
-            continue;
-        };
-        for (marker, _) in super::parametric_constraints::parametric_point_candidates(entity) {
-            let point = ParametricRef::point(reference.entity, marker);
-            if (marker >= 0 || marker == -3)
-                && !held_by_fixed(&point)
-                && !driven_refs.contains(&point)
-            {
-                driven_refs.push(point);
-            }
-        }
-    }
     let driven_refs = driven_refs.as_slice();
     let fixed_touches = |handle: Handle| fixed_refs.iter().any(|f| f.entity == handle);
     let line_axes = if retain_lengths { HashMap::new() } else { constrained_line_axes(&constraints) };
