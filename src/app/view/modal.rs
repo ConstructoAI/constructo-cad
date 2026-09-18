@@ -32,6 +32,7 @@ impl OpenCADStudio {
             Some(K::LayoutManager) => crate::tr!("modal", "layout-manager"),
             Some(K::ScaleManager) => crate::tr!("modal", "scale-manager"),
             Some(K::AnnoObjectScale) => crate::tr!("modal", "annotation-object-scale"),
+            Some(K::Hyperlink) => crate::t!("Hyperlink").into_owned(),
             Some(K::InsertTable) => crate::t!("Insert Table").into_owned(),
             Some(K::DataLinkManager) => crate::t!("Data Link Manager").into_owned(),
             Some(K::DataExtraction) => crate::t!("Data Extraction Wizard").into_owned(),
@@ -1602,6 +1603,14 @@ impl OpenCADStudio {
                     )
                 },
             ),
+            super::super::ModalKind::Hyperlink => sized_flow(ex, 560, 260, |flow| {
+                hyperlink_dialog_window(
+                    &self.hyperlink_editor_url,
+                    &self.hyperlink_editor_description,
+                    self.hyperlink_editor_mixed,
+                    flow,
+                )
+            }),
             super::super::ModalKind::AttributeEditor => {
                 let doc = &self.tabs[self.active_tab].scene.document;
                 let layers: Vec<String> = doc.layers.iter().map(|l| l.name.clone()).collect();
@@ -1732,6 +1741,80 @@ fn dialog_muted_text_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
         color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
     }
+}
+
+fn hyperlink_dialog_window<'a>(
+    url: &'a str,
+    description: &'a str,
+    mixed: bool,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    let label = |value: Cow<'static, str>| {
+        text(value)
+            .size(11)
+            .style(dialog_muted_text_style)
+            .width(90)
+    };
+    let mut items: Vec<Element<'a, Message>> = Vec::new();
+    if mixed {
+        items.push(
+            text(t!("Selected objects have different hyperlink values."))
+                .size(11)
+                .style(dialog_muted_text_style)
+                .into(),
+        );
+        items.push(Space::new().height(8).into());
+    }
+    items.push(
+        row![
+            label(t!("URL:")),
+            iced::widget::text_input("https://", url)
+                .on_input(Message::HyperlinkUrlChanged)
+                .size(13)
+                .padding([5, 8])
+                .width(Fill),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .width(sizing.width)
+        .into(),
+    );
+    items.push(Space::new().height(8).into());
+    items.push(
+        row![
+            label(t!("Description:")),
+            iced::widget::text_input("", description)
+                .on_input(Message::HyperlinkDescriptionChanged)
+                .size(13)
+                .padding([5, 8])
+                .width(Fill),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .width(sizing.width)
+        .into(),
+    );
+    items.push(Space::new().height(Fill).into());
+    items.push(
+        row![
+            dialog_button(t!("Remove"), Message::HyperlinkRemove, button::danger),
+            Space::new().width(Fill),
+            dialog_button(t!("Cancel"), Message::HyperlinkCancel, button::secondary),
+            Space::new().width(8),
+            dialog_button(t!("OK"), Message::HyperlinkApply, button::primary),
+        ]
+        .align_y(iced::Alignment::Center)
+        .into(),
+    );
+    container(
+        column(items)
+            .spacing(0)
+            .width(sizing.width)
+            .height(sizing.height),
+    )
+    .style(dialog_body_style)
+    .padding([14, 16])
+    .into()
 }
 
 /// Compact Save-As options dialog: pick the format/version and a default file

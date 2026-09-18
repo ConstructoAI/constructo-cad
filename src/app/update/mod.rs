@@ -201,6 +201,13 @@ impl OpenCADStudio {
                 self.attr_editor_tab = crate::ui::window::attribute_editor::AttrTab::Attribute;
             }
             Some(GeometricTolerance) => self.geometric_tolerance = None,
+            Some(Hyperlink) => {
+                self.hyperlink_editor_handles.clear();
+                self.hyperlink_editor_url.clear();
+                self.hyperlink_editor_description.clear();
+                self.hyperlink_editor_mixed = false;
+                self.hyperlink_editor_dirty = false;
+            }
             // Closing (✕) discards edits made since the last Apply — matching the
             // style editors. Committing happens only through the Apply button.
             Some(Aliases) => {
@@ -4129,6 +4136,106 @@ impl OpenCADStudio {
                         crate::t!("Select one object first, then run OBJECTSCALE.").as_ref(),
                     );
                 }
+                Task::none()
+            }
+            Message::PropHyperlinkOpen => {
+                let i = self.active_tab;
+                let handles = self.property_target_handles(i);
+                if handles.is_empty() {
+                    return Task::none();
+                }
+                let mut first: Option<(String, String)> = None;
+                let mut mixed = false;
+                for handle in &handles {
+                    let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) else {
+                        continue;
+                    };
+                    let current = (
+                        crate::scene::pe_url_of(entity).unwrap_or_default().to_owned(),
+                        crate::scene::pe_url_description_of(entity)
+                            .unwrap_or_default()
+                            .to_owned(),
+                    );
+                    if first.as_ref().is_some_and(|value| value != &current) {
+                        mixed = true;
+                    } else if first.is_none() {
+                        first = Some(current);
+                    }
+                }
+                let (url, description) = if mixed {
+                    (String::new(), String::new())
+                } else {
+                    first.unwrap_or_default()
+                };
+                self.hyperlink_editor_handles = handles;
+                self.hyperlink_editor_url = url;
+                self.hyperlink_editor_description = description;
+                self.hyperlink_editor_mixed = mixed;
+                self.hyperlink_editor_dirty = false;
+                self.active_modal = Some(crate::app::ModalKind::Hyperlink);
+                Task::none()
+            }
+            Message::HyperlinkUrlChanged(value) => {
+                self.hyperlink_editor_url = value;
+                self.hyperlink_editor_dirty = true;
+                Task::none()
+            }
+            Message::HyperlinkDescriptionChanged(value) => {
+                self.hyperlink_editor_description = value;
+                self.hyperlink_editor_dirty = true;
+                Task::none()
+            }
+            Message::HyperlinkApply => {
+                if !self.hyperlink_editor_dirty {
+                    self.close_active_modal();
+                    return Task::none();
+                }
+                let url = self.hyperlink_editor_url.trim().to_owned();
+                if self.hyperlink_editor_mixed && url.is_empty() {
+                    self.command_line.push_info(
+                        crate::t!("Enter a URL, or use Remove to clear all hyperlinks.").as_ref(),
+                    );
+                    return Task::none();
+                }
+                let description = self.hyperlink_editor_description.trim().to_owned();
+                let values = if url.is_empty() {
+                    None
+                } else {
+                    let mut values = vec![acadrust::xdata::XDataValue::String(url)];
+                    if !description.is_empty() {
+                        values.push(acadrust::xdata::XDataValue::String(description));
+                    }
+                    Some(values)
+                };
+                let i = self.active_tab;
+                let handles = self.hyperlink_editor_handles.clone();
+                self.apply_property_op(i, "HYPERLINK", &handles, |app, handle| {
+                    crate::scene::view::dispatch::set_entity_xdata(
+                        &mut app.tabs[i].scene.document,
+                        handle,
+                        "PE_URL",
+                        values.clone(),
+                    );
+                });
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::HyperlinkRemove => {
+                let i = self.active_tab;
+                let handles = self.hyperlink_editor_handles.clone();
+                self.apply_property_op(i, "HYPERLINK", &handles, |app, handle| {
+                    crate::scene::view::dispatch::set_entity_xdata(
+                        &mut app.tabs[i].scene.document,
+                        handle,
+                        "PE_URL",
+                        None,
+                    );
+                });
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::HyperlinkCancel => {
+                self.close_active_modal();
                 Task::none()
             }
             Message::AnnoObjectScaleToggle(name) => {

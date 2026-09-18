@@ -3234,6 +3234,7 @@ fn make_sections_read_only(sections: &mut [crate::scene::model::object::PropSect
             | PropValue::ReadOnlyWithTooltip { value, .. }
             | PropValue::EditText(value)
             | PropValue::PlainText(value)
+            | PropValue::Hyperlink(value)
             | PropValue::LayerChoice(value)
             | PropValue::LinetypeChoice(value)
             | PropValue::HatchPatternChoice(value) => value.clone(),
@@ -3508,6 +3509,9 @@ fn merge_prop_value(
         (PropValue::PlainText(_), PropValue::PlainText(_)) => {
             PropValue::PlainText(VARIES_LABEL.into())
         }
+        (PropValue::Hyperlink(_), PropValue::Hyperlink(_)) => {
+            PropValue::Hyperlink(VARIES_LABEL.into())
+        }
         (PropValue::ReadOnly(_), PropValue::ReadOnly(_)) => {
             PropValue::ReadOnly(VARIES_LABEL.into())
         }
@@ -3581,7 +3585,8 @@ fn update_row_text(
         match &mut row.value {
             PropValue::ReadOnly(current)
             | PropValue::EditText(current)
-            | PropValue::PlainText(current) => *current = value,
+            | PropValue::PlainText(current)
+            | PropValue::Hyperlink(current) => *current = value,
             PropValue::ReadOnlyWithTooltip { value: current, .. } => *current = value,
             PropValue::Choice { selected, .. } => *selected = value,
             _ => {}

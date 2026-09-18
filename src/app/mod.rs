@@ -803,6 +803,12 @@ pub(super) struct OpenCADStudio {
     /// The open in-canvas modal dialog, if any (Plan B: shared overlay instead
     /// of OS windows).
     active_modal: Option<ModalKind>,
+    /// Selection and staged values owned by the Properties hyperlink dialog.
+    hyperlink_editor_handles: Vec<acadrust::Handle>,
+    hyperlink_editor_url: String,
+    hyperlink_editor_description: String,
+    hyperlink_editor_mixed: bool,
+    hyperlink_editor_dirty: bool,
     pending_startup_modals: std::collections::VecDeque<ModalKind>,
     /// What is drawing the scene, once the first frame has told us. Drives
     /// the graphics warning (popup, status-bar pill, command line).
@@ -1862,6 +1868,8 @@ pub enum ModalKind {
     /// Add / remove the annotation scales a single selected object has a
     /// per-object representation for.
     AnnoObjectScale,
+    /// URL/description collection editor opened by the Hyperlink property row.
+    Hyperlink,
     InsertTable,
     DataLinkManager,
     DataExtraction,
@@ -2703,6 +2711,13 @@ pub enum Message {
     ScaleManagerOpen,
     /// Open the Annotation Object Scale dialog for the current single selection.
     AnnoObjectScaleOpen,
+    /// Open and edit the selected objects' PE_URL hyperlink collection.
+    PropHyperlinkOpen,
+    HyperlinkUrlChanged(String),
+    HyperlinkDescriptionChanged(String),
+    HyperlinkApply,
+    HyperlinkRemove,
+    HyperlinkCancel,
     /// Toggle whether the dialog's object has a representation for this scale.
     AnnoObjectScaleToggle(String),
     /// Select a scale row in the manager (loads it into the editor).
@@ -3980,6 +3995,11 @@ impl OpenCADStudio {
             color_picker_tab: ColorPickerTab::Index,
             recent_colors: Vec::new(),
             active_modal: None,
+            hyperlink_editor_handles: Vec::new(),
+            hyperlink_editor_url: String::new(),
+            hyperlink_editor_description: String::new(),
+            hyperlink_editor_mixed: false,
+            hyperlink_editor_dirty: false,
             pending_startup_modals: std::collections::VecDeque::new(),
             gpu_status: crate::scene::pipeline::GpuStatus::Unknown,
             gpu_status_generation: 0,
