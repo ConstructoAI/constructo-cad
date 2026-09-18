@@ -3591,7 +3591,7 @@ impl OpenCADStudio {
                     self.tabs[i].active_cmd = None;
                     self.tabs[i].snap_result = None;
                     self.command_line
-                        .push_output("The Symmetric constraint already exists.");
+                        .push_error("The constraint already exists on the selected objects.");
                     return Task::none();
                 }
                 let constraints_before = self.tabs[i]

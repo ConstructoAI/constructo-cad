@@ -2419,8 +2419,8 @@ mod corrupt_guard_tests {
     #[test]
     fn knotless_spline_with_too_few_points_is_lowered_and_saves_as_dwg() {
         let mut doc = CadDocument::new();
-        doc.add_entity(EntityType::Spline(knotless_spline(3, 2)));
-        doc.add_entity(EntityType::Spline(knotless_spline(3, 1)));
+        doc.add_entity(EntityType::Spline(knotless_spline(3, 2))).unwrap();
+        doc.add_entity(EntityType::Spline(knotless_spline(3, 1))).unwrap();
         assert_eq!(purge_corrupt_entities(&mut doc), 1, "the lone point is dropped");
         let spline = doc
             .entities()
