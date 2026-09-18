@@ -13,19 +13,18 @@ enum Step {
     First { multiple: bool },
     /// `Select second object:` — the one that takes the first's size.
     Second(ParametricRef),
-    /// `Select objects to make equal to the first:` — a selection set,
-    /// applied on Enter.
+    /// `Select object to make equal to first:` — every pick follows the
+    /// first at once, Enter ends the command.
     Others(ParametricRef),
 }
 
 /// Interactive front end for the Equal geometric constraint: the first
-/// object sets the size, the second (or, with Multiple, every object of a
-/// set) takes its length or radius. Picks are made inside the command; a
+/// object sets the size, the second (or, with Multiple, each further pick)
+/// takes its length or radius. Objects are picked inside the command; a
 /// selection made before it starts is not used.
 pub struct EqualConstraintCommand {
     step: Step,
     picked_entity: Option<EntityType>,
-    others: Vec<Handle>,
 }
 
 impl EqualConstraintCommand {
@@ -39,7 +38,6 @@ impl EqualConstraintCommand {
         Self {
             step: Step::First { multiple: false },
             picked_entity: None,
-            others: Vec::new(),
         }
     }
 
@@ -65,43 +63,15 @@ impl EqualConstraintCommand {
         }
     }
 
-    /// An object of a Multiple set: a whole line, circle or arc, a
-    /// one-segment polyline as its segment.
-    pub fn whole_reference(entity: &EntityType, handle: Handle) -> Option<ParametricRef> {
-        match entity {
-            EntityType::Line(_) | EntityType::Circle(_) | EntityType::Arc(_) => {
-                Some(ParametricRef::whole(handle))
-            }
-            EntityType::LwPolyline(polyline) => {
-                let count = if polyline.is_closed {
-                    polyline.vertices.len()
-                } else {
-                    polyline.vertices.len().saturating_sub(1)
-                };
-                (count == 1 && HorizontalConstraintCommand::segment_is_straight(entity, 0))
-                    .then_some(ParametricRef::segment(handle, 0))
-            }
-            EntityType::Polyline2D(polyline) => {
-                let count = if polyline.is_closed() {
-                    polyline.vertices.len()
-                } else {
-                    polyline.vertices.len().saturating_sub(1)
-                };
-                (count == 1 && HorizontalConstraintCommand::segment_is_straight(entity, 0))
-                    .then_some(ParametricRef::segment(handle, 0))
-            }
-            _ => None,
-        }
-    }
-
     fn report(message: &str) -> CmdResult {
         CmdResult::ReportError(message.to_string())
     }
 
-    fn finish(first: ParametricRef, others: Vec<ParametricRef>) -> CmdResult {
+    fn finish(first: ParametricRef, others: Vec<ParametricRef>, multiple: bool) -> CmdResult {
         CmdResult::AddEqualConstraint {
             first,
             others,
+            multiple,
             label: "Equal constraint",
         }
     }
@@ -119,13 +89,7 @@ impl CadCommand for EqualConstraintCommand {
             }
             Step::First { multiple: true } => "GCEQUAL  Select first object:".to_string(),
             Step::Second(_) => "GCEQUAL  Select second object:".to_string(),
-            Step::Others(_) if self.others.is_empty() => {
-                "GCEQUAL  Select objects to make equal to the first:".to_string()
-            }
-            Step::Others(_) => format!(
-                "GCEQUAL  Select objects to make equal to the first ({} selected, Enter to apply):",
-                self.others.len()
-            ),
+            Step::Others(_) => "GCEQUAL  Select object to make equal to first:".to_string(),
         }
     }
 
@@ -155,10 +119,14 @@ impl CadCommand for EqualConstraintCommand {
     }
 
     fn needs_entity_pick(&self) -> bool {
-        !matches!(self.step, Step::Others(_))
+        true
     }
 
     fn entity_pick_accepts_points(&self) -> bool {
+        true
+    }
+
+    fn typed_point_picks_entity(&self) -> bool {
         true
     }
 
@@ -172,21 +140,6 @@ impl CadCommand for EqualConstraintCommand {
 
     fn inject_picked_entity(&mut self, entity: EntityType) {
         self.picked_entity = Some(entity);
-    }
-
-    fn is_selection_gathering(&self) -> bool {
-        matches!(self.step, Step::Others(_))
-    }
-
-    fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
-        if let Step::Others(first) = self.step {
-            // The first object sets the size; it cannot also follow itself.
-            self.others = handles
-                .into_iter()
-                .filter(|handle| *handle != first.entity)
-                .collect();
-        }
-        CmdResult::NeedPoint
     }
 
     fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
@@ -208,27 +161,23 @@ impl CadCommand for EqualConstraintCommand {
                 self.step = Step::Others(reference);
                 CmdResult::NeedPoint
             }
-            Step::Second(first) => {
-                if first == reference {
-                    return Self::report(Self::SAME_OBJECT);
-                }
-                Self::finish(first, vec![reference])
+            Step::Second(first) | Step::Others(first) if first == reference => {
+                Self::report(Self::SAME_OBJECT)
             }
-            Step::Others(_) => CmdResult::NeedPoint,
+            Step::Second(first) => Self::finish(first, vec![reference], false),
+            Step::Others(first) => Self::finish(first, vec![reference], true),
         }
     }
 
-    // An empty-space click while an object is asked for.
+    // An empty-space click, or a typed coordinate with nothing under it.
     fn on_point(&mut self, _point: DVec3) -> CmdResult {
         Self::report(Self::NO_OBJECT)
     }
 
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
-            Step::Others(first) if !self.others.is_empty() => Self::finish(
-                first,
-                self.others.iter().map(|handle| ParametricRef::whole(*handle)).collect(),
-            ),
+            // Multiple ends with its summary line; the host prints it.
+            Step::Others(first) => Self::finish(first, Vec::new(), true),
             _ => CmdResult::Cancel,
         }
     }
@@ -261,26 +210,38 @@ mod tests {
             CmdResult::NeedPoint
         ));
         command.inject_picked_entity(line());
-        let CmdResult::AddEqualConstraint { first, others, .. } =
-            command.on_entity_pick(Handle::new(8), DVec3::ZERO)
+        let CmdResult::AddEqualConstraint {
+            first,
+            others,
+            multiple,
+            ..
+        } = command.on_entity_pick(Handle::new(8), DVec3::ZERO)
         else {
             panic!("the second pick must create the constraint");
         };
         assert_eq!(first, ParametricRef::whole(Handle::new(7)));
         assert_eq!(others, vec![ParametricRef::whole(Handle::new(8))]);
+        assert!(!multiple);
     }
 
     #[test]
-    fn multiple_applies_the_gathered_set_on_enter() {
+    fn multiple_applies_each_pick_and_ends_on_enter() {
         let mut command = EqualConstraintCommand::new();
         assert!(matches!(command.on_text_input("M"), Some(CmdResult::NeedPoint)));
         command.inject_picked_entity(line());
         command.on_entity_pick(Handle::new(7), DVec3::ZERO);
-        assert!(command.is_selection_gathering());
-        command.on_selection_complete(vec![Handle::new(7), Handle::new(8), Handle::new(9)]);
-        let CmdResult::AddEqualConstraint { others, .. } = command.on_enter() else {
-            panic!("Enter must apply the set");
+        command.inject_picked_entity(line());
+        let CmdResult::AddEqualConstraint {
+            others, multiple, ..
+        } = command.on_entity_pick(Handle::new(8), DVec3::ZERO)
+        else {
+            panic!("a Multiple pick must apply at once");
         };
-        assert_eq!(others.len(), 2);
+        assert_eq!(others, vec![ParametricRef::whole(Handle::new(8))]);
+        assert!(multiple);
+        let CmdResult::AddEqualConstraint { others, .. } = command.on_enter() else {
+            panic!("Enter must end the Multiple flow through the host");
+        };
+        assert!(others.is_empty());
     }
 }

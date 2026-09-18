@@ -1598,6 +1598,9 @@ pub enum CmdResult {
     AddEqualConstraint {
         first: crate::scene::parametric_constraints::ParametricRef,
         others: Vec<crate::scene::parametric_constraints::ParametricRef>,
+        /// A Multiple flow: the command stays for more picks; an empty
+        /// `others` is its Enter and prints the summary line.
+        multiple: bool,
         label: &'static str,
     },
     /// Adds a point or object symmetry relation around a picked line. The
@@ -2435,6 +2438,11 @@ pub trait CadCommand: Send {
 
     /// Accept typed coordinates while object picking.
     fn entity_pick_accepts_points(&self) -> bool {
+        false
+    }
+
+    /// Take a typed coordinate at an object prompt as a pick at that point.
+    fn typed_point_picks_entity(&self) -> bool {
         false
     }
 

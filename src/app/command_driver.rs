@@ -767,6 +767,21 @@ impl OpenCADStudio {
                     if self.command_point_allowed(i, wcs) {
                         self.last_point = Some(wcs);
                         self.push_ucs_to_cmd(i);
+                        // A typed coordinate at an object prompt is a pick at
+                        // that point, as in the reference.
+                        let picks_entity = self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .is_some_and(|command| command.typed_point_picks_entity());
+                        if picks_entity {
+                            let owner = self.tabs[i]
+                                .current_parametric_scope()
+                                .owner_handle(&self.tabs[i].scene.document);
+                            let handle =
+                                entity_at_typed_point(&self.tabs[i].scene.document, owner, wcs)
+                                    .unwrap_or(Handle::NULL);
+                            return self.feed_command(StepInput::EntityPick(handle, wcs));
+                        }
                         return self.feed_command(StepInput::Point(wcs));
                     }
                     return Task::none();
@@ -3268,39 +3283,26 @@ impl OpenCADStudio {
             CmdResult::AddEqualConstraint {
                 first,
                 others,
+                multiple,
                 label,
             } => {
                 use crate::modules::parametric::EqualConstraintCommand;
                 use crate::scene::parametric_constraints::{
-                    equal_size_follower, ConstraintKind, ParametricRef,
+                    equal_size, equal_size_follower, ConstraintKind, EqualSize, ParametricRef,
                 };
 
                 let scope = self.tabs[i].current_parametric_scope();
+                // Enter ends a Multiple flow with the reference's summary line.
+                let finishing = multiple && others.is_empty();
                 let mut followers: Vec<ParametricRef> = Vec::new();
                 for other in others {
-                    // A Multiple set arrives as whole objects.
-                    let resolved = if other.marker.is_none() {
-                        self.tabs[i]
-                            .scene
-                            .document
-                            .get_entity(other.entity)
-                            .and_then(|entity| {
-                                EqualConstraintCommand::whole_reference(entity, other.entity)
-                            })
-                    } else {
-                        Some(other)
-                    };
-                    let Some(other) = resolved.filter(|other| *other != first) else {
-                        self.command_line
-                            .push_error(EqualConstraintCommand::INVALID_OBJECT);
-                        continue;
-                    };
                     let refs = [first, other];
-                    if self
-                        .tabs[i]
-                        .scene
-                        .validate_parametric_constraint(ConstraintKind::Equal, &refs, None)
-                        .is_err()
+                    if other == first
+                        || self
+                            .tabs[i]
+                            .scene
+                            .validate_parametric_constraint(ConstraintKind::Equal, &refs, None)
+                            .is_err()
                         || equal_size_follower(&self.tabs[i].scene.document, first, other)
                             .is_none()
                     {
@@ -3323,12 +3325,25 @@ impl OpenCADStudio {
                             .push_error("The constraint already exists on the selected objects.");
                         continue;
                     }
-                    if !followers.contains(&other) {
-                        followers.push(other);
-                    }
+                    followers.push(other);
                 }
-                self.tabs[i].active_cmd = None;
+                if multiple && !finishing {
+                    if let Some(prompt) =
+                        self.tabs[i].active_cmd.as_ref().map(|command| command.prompt())
+                    {
+                        self.command_line.push_info(&prompt);
+                    }
+                } else {
+                    self.tabs[i].active_cmd = None;
+                }
                 self.tabs[i].snap_result = None;
+                if finishing {
+                    let summary = match equal_size(&self.tabs[i].scene.document, first) {
+                        Some(EqualSize::Radius(_)) => "Radius of objects made equal",
+                        _ => "Length of objects made equal",
+                    };
+                    self.command_line.push_output(summary);
+                }
                 if followers.is_empty() {
                     return Task::none();
                 }
@@ -3379,7 +3394,6 @@ impl OpenCADStudio {
                     self.constraint_solve_mode,
                 );
                 self.tabs[i].dirty = true;
-                self.command_line.push_output("Equal constraint applied.");
                 self.refresh_properties();
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
@@ -7749,6 +7763,40 @@ impl OpenCADStudio {
 /// returning the new root handle. `allocate_handle` advances the document's
 /// handle counter — `next_handle()` only peeks, so reusing it would hand every
 /// object the same handle and collapse the dictionary chain.
+/// The entity a typed coordinate lands on while an object is asked for:
+/// the nearest planar curve of the edited space within a small share of
+/// that space's extent, the way a pick box takes the object under a click.
+fn entity_at_typed_point(
+    document: &acadrust::CadDocument,
+    owner: Handle,
+    point: glam::DVec3,
+) -> Option<Handle> {
+    let mut extent = 0.0f64;
+    let mut nearest: Option<(f64, Handle)> = None;
+    for entity in document.entities() {
+        let common = entity.common();
+        if common.owner_handle != owner {
+            continue;
+        }
+        let bounds = entity.as_entity().bounding_box();
+        extent = extent
+            .max((bounds.max.x - bounds.min.x).abs())
+            .max((bounds.max.y - bounds.min.y).abs());
+        let Some(distance) =
+            crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point)
+        else {
+            continue;
+        };
+        if nearest.is_none_or(|(best, _)| distance < best) {
+            nearest = Some((distance, common.handle));
+        }
+    }
+    let tolerance = (extent * 0.002).max(1.0e-9);
+    nearest
+        .filter(|(distance, _)| *distance <= tolerance)
+        .map(|(_, handle)| handle)
+}
+
 fn recreate_ext_subtree(
     doc: &mut acadrust::CadDocument,
     cap: &crate::app::ClipExtObjects,
