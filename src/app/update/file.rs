@@ -4468,18 +4468,22 @@ impl OpenCADStudio {
                     self.plot_dialog.apply_plot_styles = false;
                     self.plot_dialog.show_plot_styles = false;
                     self.plot_dialog.style_missing = false;
+                    self.plot_dialog.style_error = None;
                 } else {
                     match crate::io::plot_style::PlotStyleTable::load_named(&name) {
                         Ok(table) => {
                             self.plot_dialog.style_name = table.name.clone();
                             self.plot_dialog.apply_plot_styles = true;
                             self.plot_dialog.style_missing = false;
+                            self.plot_dialog.style_error = None;
+                            self.report_plot_style_warnings(&table);
                             self.active_plot_style = Some(table);
                         }
                         Err(error) => {
                             self.plot_dialog.style_name = name;
                             self.plot_dialog.style_missing = true;
                             self.command_line.push_error(&error);
+                            self.plot_dialog.style_error = Some(error);
                         }
                     }
                 }
@@ -4744,16 +4748,19 @@ impl OpenCADStudio {
             ));
             self.plot_dialog.window = self.plot_window;
         }
+        let mut style_error = None;
         if !ps.current_style_sheet.is_empty()
             && self
                 .active_plot_style
                 .as_ref()
                 .is_none_or(|table| !table.name.eq_ignore_ascii_case(&ps.current_style_sheet))
         {
-            if let Ok(table) =
-                crate::io::plot_style::PlotStyleTable::load_named(&ps.current_style_sheet)
-            {
-                self.active_plot_style = Some(table);
+            match crate::io::plot_style::PlotStyleTable::load_named(&ps.current_style_sheet) {
+                Ok(table) => {
+                    self.report_plot_style_warnings(&table);
+                    self.active_plot_style = Some(table);
+                }
+                Err(error) => style_error = Some(error),
             }
         }
         let active_style_name = self
@@ -4901,6 +4908,18 @@ impl OpenCADStudio {
         d.apply_plot_styles = ps.flags.plot_plot_styles;
         d.show_plot_styles = ps.flags.show_plot_styles;
         d.style_missing = !d.style_name.is_empty() && !style_loaded;
+        d.style_error = if d.style_missing { style_error } else { None };
+    }
+
+    /// Tell the user what a plot style table's loader had to tolerate.
+    pub(in crate::app) fn report_plot_style_warnings(
+        &mut self,
+        table: &crate::io::plot_style::PlotStyleTable,
+    ) {
+        for warning in &table.load_warnings {
+            let name = &table.name;
+            self.command_line.push_warning(&format!("{name}: {warning}"));
+        }
     }
 
     /// Copy transient paper/scale choices out of the dialog without changing
