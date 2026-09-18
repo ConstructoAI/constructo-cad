@@ -264,7 +264,10 @@ impl OpenCADStudio {
                     },
                 )
             }
-            super::super::ModalKind::Options => sized_flow(
+            super::super::ModalKind::Options => {
+                let dirty = self.options_dirty();
+                let close_confirm = self.options_close_confirm;
+                sized_flow(
                 ex,
                 880,
                 620,
@@ -359,10 +362,13 @@ impl OpenCADStudio {
                         &self.model_bg_input,
                         &self.paper_bg_input,
                         &self.desk_bg_input,
+                        dirty,
+                        close_confirm,
                         flow,
                     )
                 },
-            ),
+                )
+            }
             super::super::ModalKind::DraftingSettings => {
                 let state = self.drafting_settings_state.as_ref();
                 let dirty = self.drafting_settings_dirty();
