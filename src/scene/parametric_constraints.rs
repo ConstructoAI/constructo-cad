@@ -863,6 +863,19 @@ impl ConstraintKind {
     }
 }
 
+/// Vertical draws the reference bar's axis mark (`src/ui/overlay.rs`): the
+/// plain symbol for an object, this variant — with the point marker — for a
+/// two-point relation.
+pub(crate) const VERTICAL_POINTS_GLYPH: &str = "│·";
+
+pub(crate) fn vertical_glyph_label(constraint: &ParametricConstraint) -> &'static str {
+    if constraint.refs.len() == 2 {
+        VERTICAL_POINTS_GLYPH
+    } else {
+        ConstraintKind::Vertical.glyph_symbol()
+    }
+}
+
 /// The full glyph text for one constraint: its symbol, plus the driving
 /// value for a dimensional kind (Distance/Angle/Radius).
 pub(crate) fn glyph_label(constraint: &ParametricConstraint) -> String {
@@ -1659,7 +1672,9 @@ impl super::Scene {
             })
             .flat_map(|c| {
                 let is_conflicting = set.conflicts.iter().any(|(id, _)| *id == c.id);
-                let label = if show_values {
+                let label = if c.kind == ConstraintKind::Vertical {
+                    vertical_glyph_label(c).to_string()
+                } else if show_values {
                     glyph_label(c)
                 } else {
                     c.kind.glyph_symbol().to_string()

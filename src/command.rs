@@ -1504,10 +1504,12 @@ pub enum CmdResult {
         /// Undo-history label, e.g. `"Horizontal constraint"`.
         label: &'static str,
     },
-    /// Adds a Horizontal relation against the UCS X direction captured when
-    /// the command starts. The direction is persisted with the constraint so
-    /// later edits and save/reopen do not silently fall back to world X.
+    /// Adds a Horizontal or Vertical relation (`kind`) against the UCS X or
+    /// Y direction captured when the command starts. The direction is
+    /// persisted with the constraint so later edits and save/reopen do not
+    /// silently fall back to the world axis.
     AddHorizontalConstraint {
+        kind: crate::scene::parametric_constraints::ConstraintKind,
         selection: HorizontalConstraintSelection,
         direction: acadrust::types::Vector3,
         label: &'static str,
@@ -2797,6 +2799,7 @@ mod constraint_registry_tests {
             "OCCONSTRAINT",
             "GCHORIZONTAL",
             "VCONSTRAINT",
+            "GCVERTICAL",
             "PCONSTRAINT",
             "QCONSTRAINT",
             "GCPERPENDICULAR",

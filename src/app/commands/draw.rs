@@ -1377,18 +1377,34 @@ impl OpenCADStudio {
                 }
             }
 
-            "GCHORIZONTAL" => {
+            "GCHORIZONTAL" | "VCONSTRAINT" | "GCVERTICAL" => {
                 use crate::command::{CmdResult, HorizontalConstraintSelection};
                 use crate::modules::parametric::HorizontalConstraintCommand;
+                use crate::scene::parametric_constraints::ConstraintKind;
 
+                // Vertical is Horizontal mirrored onto the working plane's Y
+                // axis: same picks, same 2Points flow, same reference types.
+                let vertical = cmd != "GCHORIZONTAL";
+                let (kind, axis, label) = if vertical {
+                    (ConstraintKind::Vertical, "Vertical", "Vertical constraint")
+                } else {
+                    (ConstraintKind::Horizontal, "Horizontal", "Horizontal constraint")
+                };
+                let new_command = || {
+                    if vertical {
+                        HorizontalConstraintCommand::vertical()
+                    } else {
+                        HorizontalConstraintCommand::new()
+                    }
+                };
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
-                    let command = HorizontalConstraintCommand::new();
+                    let command = new_command();
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));
                 } else if handles.len() != 1 {
                     self.command_line
-                        .push_error("Horizontal: select exactly one compatible object.");
+                        .push_error(&format!("{axis}: select exactly one compatible object."));
                 } else {
                     let handle = handles[0];
                     let reference = self.tabs[i]
@@ -1399,28 +1415,30 @@ impl OpenCADStudio {
                             HorizontalConstraintCommand::preselected_reference(entity, handle)
                         });
                     if let Some(reference) = reference {
-                        let direction = self.tabs[i].ucs_xform().working_plane().x;
+                        let plane = self.tabs[i].ucs_xform().working_plane();
+                        let direction = if vertical { plane.y } else { plane.x };
                         return Some(self.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+                            kind,
                             selection: HorizontalConstraintSelection::Reference(reference),
                             direction: acadrust::types::Vector3::new(
                                 direction.x,
                                 direction.y,
                                 direction.z,
                             ),
-                            label: "Horizontal constraint",
+                            label,
                         }));
                     }
                     self.tabs[i].scene.deselect_all();
-                    self.command_line.push_error(
-                        "Horizontal: select a line, straight polyline segment, text, MText, or an ellipse axis.",
-                    );
-                    let command = HorizontalConstraintCommand::new();
+                    self.command_line.push_error(&format!(
+                        "Invalid selection for {axis}. Select a line segment, polyline segment, text, MText, major or minor axis of ellipse or elliptical arc."
+                    ));
+                    let command = new_command();
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));
                 }
             }
 
-            "VCONSTRAINT" | "FXCONSTRAINT" => {
+            "FXCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1433,16 +1451,11 @@ impl OpenCADStudio {
                 } else {
                     use crate::command::CmdResult;
                     use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
-                    let (kind, label) = if cmd == "VCONSTRAINT" {
-                        (ConstraintKind::Vertical, "Vertical constraint")
-                    } else {
-                        (ConstraintKind::Fixed, "Fixed constraint")
-                    };
                     return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
-                        kind,
+                        kind: ConstraintKind::Fixed,
                         refs: vec![ParametricRef::whole(handles[0])],
                         driving_param: None,
-                        label,
+                        label: "Fixed constraint",
                     }));
                 }
             }
