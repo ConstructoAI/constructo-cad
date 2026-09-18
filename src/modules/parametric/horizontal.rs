@@ -321,10 +321,12 @@ impl CadCommand for HorizontalConstraintCommand {
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         let pick = Self::point_pick(None, point);
         match self.step {
-            Step::ObjectOrTwoPoints | Step::FirstPoint => {
-                self.step = Step::SecondPoint(pick);
-                CmdResult::NeedPoint
-            }
+            // The host resolves the pick against the document: a hit resumes
+            // at the second point, a miss re-asks for the first one at once.
+            Step::ObjectOrTwoPoints | Step::FirstPoint => CmdResult::CheckHorizontalPoint {
+                kind: self.kind,
+                pick,
+            },
             Step::SecondPoint(first) => self.finish_points(first, pick),
         }
     }
@@ -375,10 +377,12 @@ mod tests {
     fn enter_starts_the_two_point_flow() {
         let mut command = HorizontalConstraintCommand::new();
         assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
-        assert!(matches!(
-            command.on_point(DVec3::new(1.0, 2.0, 0.0)),
-            CmdResult::NeedPoint
-        ));
+        let CmdResult::CheckHorizontalPoint { kind, pick } =
+            command.on_point(DVec3::new(1.0, 2.0, 0.0))
+        else {
+            panic!("the host must check the first point");
+        };
+        let mut command = HorizontalConstraintCommand::resume(kind, Some(pick));
         let CmdResult::AddHorizontalConstraint {
             selection: HorizontalConstraintSelection::Points(first, second),
             direction,
