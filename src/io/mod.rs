@@ -526,6 +526,18 @@ pub async fn pick_and_load_web(
     let name = handle.file_name();
     progress.set(crate::app::OPEN_PHASE_READING, 500, 1, 2);
     let bytes: Arc<[u8]> = Arc::from(handle.read().await);
+    open_bytes_web(name, bytes, progress).await
+}
+
+/// Web file open from bytes the caller already holds (the control channel's
+/// `open` with `data_base64`). Same parse, caching and recovery handling as a
+/// file chosen in the browser picker.
+#[cfg(target_arch = "wasm32")]
+pub async fn open_bytes_web(
+    name: String,
+    bytes: Arc<[u8]>,
+    progress: Arc<OpenProgressState>,
+) -> WebOpenOutcome {
     let size_bytes = bytes.len() as u64;
     let result = load_web_bytes(&name, &bytes, progress.clone(), false, "", None).await;
     let keep_for_recovery = result

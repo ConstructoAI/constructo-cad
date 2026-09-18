@@ -1182,29 +1182,51 @@ impl OpenCADStudio {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            // `FileOpened` only installs the result when an open is in
-            // progress, so mark one. The browser picker + parse happen
-            // inside `pick_and_load_web`; the real name is unknown until
-            // then, so show a generic label meanwhile.
-            let state = std::sync::Arc::new(crate::io::OpenProgressState::new(
-                crate::app::OPEN_PHASE_READING,
-            ));
-            let open_id = self.next_open_id();
-            self.opening = Some(crate::app::OpenProgress {
-                id: open_id,
-                name: "Opening…".into(),
-                source_path: None,
-                size_bytes: 0,
-                state: state.clone(),
-                started: Instant::now(),
-                recovery_error: None,
-                recovery_read_stats: None,
-                recovery_bytes: None,
-            });
+            // The browser picker + parse happen inside `pick_and_load_web`;
+            // the real name is unknown until then, so show a generic label
+            // meanwhile.
+            let (open_id, state) = self.begin_web_open("Opening…".into(), 0);
             Task::perform(crate::io::pick_and_load_web(state), move |outcome| {
                 Message::WebFileOpened(open_id, outcome)
             })
         }
+    }
+
+    /// Web: open a drawing from bytes the caller already holds, through the
+    /// same path as a file chosen in the browser picker.
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::app) fn open_web_bytes(&mut self, name: String, bytes: Vec<u8>) -> Task<Message> {
+        let (open_id, state) = self.begin_web_open(name.clone(), bytes.len() as u64);
+        Task::perform(
+            crate::io::open_bytes_web(name, std::sync::Arc::from(bytes), state),
+            move |outcome| Message::WebFileOpened(open_id, outcome),
+        )
+    }
+
+    /// `FileOpened` only installs the result when an open is in progress, so
+    /// mark one.
+    #[cfg(target_arch = "wasm32")]
+    fn begin_web_open(
+        &mut self,
+        name: String,
+        size_bytes: u64,
+    ) -> (u64, std::sync::Arc<crate::io::OpenProgressState>) {
+        let state = std::sync::Arc::new(crate::io::OpenProgressState::new(
+            crate::app::OPEN_PHASE_READING,
+        ));
+        let open_id = self.next_open_id();
+        self.opening = Some(crate::app::OpenProgress {
+            id: open_id,
+            name,
+            source_path: None,
+            size_bytes,
+            state: state.clone(),
+            started: Instant::now(),
+            recovery_error: None,
+            recovery_read_stats: None,
+            recovery_bytes: None,
+        });
+        (open_id, state)
     }
 
     pub(in crate::app) fn next_open_id(&mut self) -> u64 {
