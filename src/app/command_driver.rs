@@ -3486,6 +3486,53 @@ impl OpenCADStudio {
                         }
                     }
                 }
+                // The solver cannot start from an axis lying exactly across
+                // the datum (its equations are singular there), so turn the
+                // object onto the axis about its anchor first — the
+                // reference turns it about that anchor too — and let the
+                // constraint hold what already fits.
+                if let Some((handle, anchor, end, vertex)) =
+                    crate::scene::parametric_constraints::axis_alignment_target(
+                        &self.tabs[i].scene.document,
+                        &refs,
+                    )
+                {
+                    let axis = (end.x - anchor.x, end.y - anchor.y);
+                    let length = axis.0.hypot(axis.1);
+                    let target = if axis.0 * direction.x + axis.1 * direction.y >= 0.0 {
+                        (direction.x, direction.y)
+                    } else {
+                        (-direction.x, -direction.y)
+                    };
+                    let angle = (axis.0 * target.1 - axis.1 * target.0)
+                        .atan2(axis.0 * target.0 + axis.1 * target.1);
+                    if length > 1.0e-9 && angle.abs() > 1.0e-9 {
+                        match vertex {
+                            Some(index) => {
+                                let moved =
+                                    self.tabs[i].scene.document.get_entity(handle).cloned();
+                                if let Some(mut entity) = moved {
+                                    if crate::scene::parametric_constraints::set_polyline_vertex(
+                                        &mut entity,
+                                        index,
+                                        anchor.x + length * target.0,
+                                        anchor.y + length * target.1,
+                                    ) {
+                                        self.tabs[i].scene.update_entity(entity);
+                                    }
+                                }
+                            }
+                            None => self.tabs[i].scene.transform_entities(
+                                &[handle],
+                                &EntityTransform::Rotate {
+                                    center: glam::DVec3::new(anchor.x, anchor.y, anchor.z),
+                                    axis: glam::DVec3::Z,
+                                    angle_rad: angle,
+                                },
+                            ),
+                        }
+                    }
+                }
                 let id = self.tabs[i]
                     .scene
                     .parametric_constraint_set_mut(scope)
