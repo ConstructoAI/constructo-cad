@@ -231,13 +231,19 @@ pub(crate) fn grip_solve_anchor_refs(
         }
         acadrust::EntityType::Arc(_) => match grip_id {
             0 => vec![ParametricRef::center(handle)],
-            1 => vec![ParametricRef::point(handle, 0)],
-            2 => vec![ParametricRef::point(handle, 1)],
+            1..=3 => vec![ParametricRef::whole(handle)],
             _ => Vec::new(),
         },
-        acadrust::EntityType::Circle(_) if grip_id == 0 => {
-            vec![ParametricRef::center(handle)]
-        }
+        acadrust::EntityType::Circle(_) => match grip_id {
+            0 => vec![ParametricRef::center(handle)],
+            1..=4 => vec![ParametricRef::whole(handle)],
+            _ => Vec::new(),
+        },
+        acadrust::EntityType::Ellipse(_) => match grip_id {
+            0 => vec![ParametricRef::center(handle)],
+            1..=6 => vec![ParametricRef::whole(handle)],
+            _ => Vec::new(),
+        },
         acadrust::EntityType::Point(_)
         | acadrust::EntityType::Insert(_)
         | acadrust::EntityType::Text(_)
@@ -304,11 +310,11 @@ pub enum ConstraintKind {
     /// For the supported entity types, equal curvature is already covered
     /// by the circle/circle radius branch of `Equal`.
     EqualDistance,
-    /// Two circles/arcs are mirror images of each other across a line —
-    /// `refs`: `[center(a), center(b), whole(mirror_line)]`. Scoped to the
-    /// circle-center-pair case (unambiguous with whole-entity selection);
-    /// point-symmetry about a point, and symmetry between two lines, aren't
-    /// modeled.
+    /// Two points or compatible curves are symmetric across a line.
+    /// Point mode stores two point refs plus the axis. Object mode stores two
+    /// whole/segment refs plus the axis and constrains the complete relevant
+    /// geometry: line direction, circular center/radius, or ellipse
+    /// center/axes.
     Symmetric,
     /// A circle/arc's diameter (twice `Radius`'s target) — `refs`:
     /// `[whole(circle_or_arc)]`. Same DWG class as `Radius`
@@ -951,6 +957,10 @@ fn glyph_placement_for_reference(
             let anchor = arc.midpoint_wcs();
             Some((anchor, anchor - center))
         }
+        (acadrust::EntityType::Ellipse(ellipse), None | Some(-3)) => {
+            let anchor = ellipse.center + ellipse.major_axis;
+            Some((anchor, ellipse.major_axis))
+        }
         (acadrust::EntityType::Line(line), Some(marker)) => {
             let anchor = resolve_point(entity, marker)?;
             let direction = anchor - line_midpoint(line);
@@ -983,7 +993,10 @@ fn glyph_placements(
     document: &acadrust::CadDocument,
     constraint: &ParametricConstraint,
 ) -> Vec<(Vector3, Vector3)> {
-    if constraint.kind == ConstraintKind::Parallel {
+    if matches!(
+        constraint.kind,
+        ConstraintKind::Parallel | ConstraintKind::Symmetric
+    ) {
         return constraint
             .refs
             .iter()
@@ -1659,7 +1672,7 @@ impl super::Scene {
             })
             .flat_map(|c| {
                 let is_conflicting = set.conflicts.iter().any(|(id, _)| *id == c.id);
-                let label = if show_values {
+                let base_label = if show_values {
                     glyph_label(c)
                 } else {
                     c.kind.glyph_symbol().to_string()
@@ -1682,7 +1695,22 @@ impl super::Scene {
                     .collect();
                 glyph_placements(&self.document, c)
                     .into_iter()
-                    .filter_map(|(anchor, outward)| {
+                    .enumerate()
+                    .filter_map(|(index, (anchor, outward))| {
+                        let label = if c.kind == ConstraintKind::Symmetric {
+                            if index == 2 {
+                                "S│".to_string()
+                            } else if c.refs.get(index).is_some_and(|reference| {
+                                reference.marker.is_some()
+                                    && reference.segment_index().is_none()
+                            }) {
+                                "S•".to_string()
+                            } else {
+                                "S◇".to_string()
+                            }
+                        } else {
+                            base_label.clone()
+                        };
                         let screen = crate::scene::pick::grip::project_rte(
                             glam::DVec3::new(anchor.x, anchor.y, anchor.z),
                             view_rot,
@@ -1706,7 +1734,7 @@ impl super::Scene {
                             c.id,
                             point,
                             direction.to_array(),
-                            label.clone(),
+                            label,
                             is_conflicting,
                             hover_points.clone(),
                         ))

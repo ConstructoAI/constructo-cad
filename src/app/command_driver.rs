@@ -150,9 +150,14 @@ impl OpenCADStudio {
                     entity, target.handle, target.grip_id,
                 )).unwrap_or_default()
         }).collect();
+        let retain_size = self.constraint_solve_mode
+            && !driven_refs.is_empty()
+            && driven_refs.iter().all(|reference| reference.marker.is_some());
         let solved = self.tabs[i].scene.solve_parametric_constraints_preview(
-            &touched, &driven_refs,
-            self.constraint_solve_mode && !driven_refs.is_empty(), &self.grip_originals,
+            &touched,
+            &driven_refs,
+            retain_size,
+            &self.grip_originals,
         );
         for (handle, entity) in solved {
             if let Some(slot) = self.tabs[i].scene.document.get_entity_mut(handle) {
@@ -3383,6 +3388,132 @@ impl OpenCADStudio {
                 self.tabs[i].snap_result = None;
                 self.command_line
                     .push_output("Horizontal constraint applied.");
+                self.refresh_properties();
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
+                }
+            }
+            CmdResult::AddSymmetricConstraint {
+                selection,
+                axis,
+                label,
+            } => {
+                use crate::command::SymmetricConstraintSelection;
+                use crate::scene::parametric_constraints::ConstraintKind;
+
+                let scope = self.tabs[i].current_parametric_scope();
+                let to_world = |point: glam::DVec3| {
+                    acadrust::types::Vector3::new(point.x, point.y, point.z)
+                };
+                let resolve_point = |pick: crate::command::CoincidentPick| {
+                    if let Some(handle) = pick.handle {
+                        crate::scene::parametric_constraints::nearest_parametric_point_on_entity(
+                            &self.tabs[i].scene.document,
+                            scope,
+                            handle,
+                            to_world(pick.point),
+                        )
+                    } else {
+                        crate::scene::parametric_constraints::nearest_parametric_point(
+                            &self.tabs[i].scene.document,
+                            scope,
+                            to_world(pick.point),
+                            None,
+                        )
+                    }
+                };
+                let (first, second) = match selection {
+                    SymmetricConstraintSelection::Objects(first, second) => (first, second),
+                    SymmetricConstraintSelection::Points(first, second) => {
+                        let (Some(first), Some(second)) =
+                            (resolve_point(first), resolve_point(second))
+                        else {
+                            self.command_line.push_error(
+                                "Symmetric: select supported endpoints, centers, midpoints, or vertices.",
+                            );
+                            return Task::none();
+                        };
+                        (first, second)
+                    }
+                };
+                if first == second
+                    || axis.entity == first.entity
+                    || axis.entity == second.entity
+                {
+                    self.command_line
+                        .push_error("Symmetric: select two different references and a separate line axis.");
+                    return Task::none();
+                }
+                let refs = vec![first, second, axis];
+                if let Err(message) = self.tabs[i].scene.validate_parametric_constraint(
+                    ConstraintKind::Symmetric,
+                    &refs,
+                    None,
+                ) {
+                    self.command_line.push_error(message);
+                    return Task::none();
+                }
+                let duplicate = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .is_some_and(|set| {
+                        set.constraints.iter().any(|constraint| {
+                            constraint.enabled
+                                && constraint.kind == ConstraintKind::Symmetric
+                                && matches!(constraint.refs.as_slice(), [a, b, m]
+                                    if *m == axis
+                                        && ((*a == first && *b == second)
+                                            || (*a == second && *b == first)))
+                        })
+                    });
+                if duplicate {
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.command_line
+                        .push_output("The Symmetric constraint already exists.");
+                    return Task::none();
+                }
+                let constraints_before = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::scene::parametric_constraints::ParametricConstraintSet::new(scope)
+                    });
+                let mut touched = Vec::new();
+                for reference in &refs {
+                    if !touched.contains(&reference.entity) {
+                        touched.push(reference.entity);
+                    }
+                }
+                let pending = self.begin_undo(i, label, touched.len(), true);
+                self.tabs[i]
+                    .scene
+                    .record_undo_parametric_constraints_before(scope, constraints_before);
+                let id = self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
+                    ConstraintKind::Symmetric,
+                    refs,
+                    None,
+                );
+                self.tabs[i].scene.note_parametric_constraint_applied(
+                    scope,
+                    id,
+                    self.constraint_bar_display,
+                );
+                let changes = touched
+                    .into_iter()
+                    .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+                    .collect::<Vec<_>>();
+                self.tabs[i].scene.bump_entities_with_initial_parametric_policy(
+                    &changes,
+                    &[first, axis],
+                    false,
+                );
+                self.tabs[i].dirty = true;
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.command_line
+                    .push_output("Symmetric constraint applied.");
                 self.refresh_properties();
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);

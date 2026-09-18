@@ -1324,6 +1324,18 @@ pub enum HorizontalConstraintSelection {
     Points(CoincidentPick, CoincidentPick),
 }
 
+/// The two input forms accepted by the Symmetric geometric constraint.
+/// Object picks retain their curve or segment references; point picks are
+/// resolved by the host against the live document.
+#[derive(Clone, Copy, Debug)]
+pub enum SymmetricConstraintSelection {
+    Objects(
+        crate::scene::parametric_constraints::ParametricRef,
+        crate::scene::parametric_constraints::ParametricRef,
+    ),
+    Points(CoincidentPick, CoincidentPick),
+}
+
 /// Construction options shared by SWEEP creation and its live preview.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SweepOptions {
@@ -1576,6 +1588,13 @@ pub enum CmdResult {
     AddHorizontalConstraint {
         selection: HorizontalConstraintSelection,
         direction: acadrust::types::Vector3,
+        label: &'static str,
+    },
+    /// Adds a point or object symmetry relation around a picked line. The
+    /// first reference and axis remain fixed during initial placement.
+    AddSymmetricConstraint {
+        selection: SymmetricConstraintSelection,
+        axis: crate::scene::parametric_constraints::ParametricRef,
         label: &'static str,
     },
     /// Adds an ordered perpendicular relation. The first picked direction and
