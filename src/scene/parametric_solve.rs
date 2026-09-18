@@ -1038,6 +1038,18 @@ fn retained_tangent_side(
     Some(dx * (center[1] - y1) - dy * (center[0] - x1) >= 0.0)
 }
 
+/// A solve result with no extent left — the only way the solver could
+/// honour every constraint after an edit that contradicted them.
+fn collapsed_by_solve(entity: &EntityType) -> bool {
+    const EPS: f64 = 1.0e-9;
+    match entity {
+        EntityType::Line(line) => (line.end - line.start).length() <= EPS,
+        EntityType::Circle(circle) => circle.radius <= EPS,
+        EntityType::Arc(arc) => arc.radius <= EPS,
+        _ => false,
+    }
+}
+
 /// The kernel parameters a `Fixed` constraint on `r` holds in place: a
 /// polyline segment's endpoints (plus center/radius for an arc segment), one
 /// addressable point, or every intrinsic parameter of a whole entity. Arc
@@ -2398,10 +2410,67 @@ fn solve_scope(
         if fixed_touches(reference.entity) {
             continue;
         }
+        // A transformed entity with a Horizontal/Vertical relation keeps
+        // only its end point where the transform put it; the rest re-aligns
+        // to the axis at the retained length (a rotated vertical line stays
+        // vertical below its moved end, as in the reference) instead of the
+        // whole-entity pin contradicting the axis and failing the solve.
+        let axis_pin = reference.marker.is_none().then(|| {
+            constraints.iter().find_map(|c| {
+                (c.enabled && matches!(c.kind, ConstraintKind::Horizontal | ConstraintKind::Vertical))
+                    .then(|| c.refs.iter().find(|r| r.entity == reference.entity))
+                    .flatten()
+                    .map(|r| match r.directional_axis() {
+                        Some(super::parametric_constraints::DirectionalAxis::TextBaseline) => {
+                            ParametricRef::point(r.entity, 0)
+                        }
+                        Some(_) => ParametricRef::center(r.entity),
+                        None => ParametricRef::point(
+                            r.entity,
+                            r.segment_index().map_or(1, |index| index as i32 + 1),
+                        ),
+                    })
+            })
+        })
+        .flatten();
+        let pinned = axis_pin.unwrap_or(*reference);
+        // The re-aligned entity keeps the length the transform gave it (a
+        // scaled vertical line stays scaled), not its pre-edit length.
+        if axis_pin.is_some() {
+            let segment = reference
+                .segment_index()
+                .or_else(|| {
+                    constraints.iter().find_map(|c| {
+                        c.refs
+                            .iter()
+                            .find(|r| r.entity == reference.entity)
+                            .and_then(|r| r.segment_index())
+                    })
+                });
+            let line = resolve_ref(document, &mut sys, &mut cache, *reference).and_then(|geometry| {
+                match (&geometry, segment) {
+                    (EntityGeom::Polyline { .. }, Some(index)) => geometry.line_segment(index),
+                    (EntityGeom::Line(line) | EntityGeom::Ray(line) | EntityGeom::XLine(line), _) => {
+                        Some(*line)
+                    }
+                    _ => None,
+                }
+            });
+            if let Some(line) = line {
+                let length = {
+                    let store = sys.store();
+                    let dx = store.get(line.p2.x) - store.get(line.p1.x);
+                    let dy = store.get(line.p2.y) - store.get(line.p1.y);
+                    (dx * dx + dy * dy).sqrt()
+                };
+                let target = sys.add_param(length, true);
+                sys.add_constraint(Rc::new(P2PDistance::new(line.p1, line.p2, target)));
+            }
+        }
         let temporary = ParametricConstraint {
             id: ConstraintId::MAX,
             kind: ConstraintKind::Fixed,
-            refs: vec![*reference],
+            refs: vec![pinned],
             driving_param: None,
             enabled: true,
             native_origin: None,
@@ -3613,6 +3682,19 @@ impl Scene {
                 self.parametric_constraints[i].conflicts.clear();
             }
             for (handle, new_entity) in solved {
+                // An edit the constraints can only satisfy by collapsing the
+                // entity (a rotated line whose start is fixed and direction
+                // constrained) is refused: the entity goes back to its
+                // pre-edit shape, as the reference does.
+                let new_entity = match originals.get(&handle) {
+                    Some(original)
+                        if collapsed_by_solve(&new_entity)
+                            && !collapsed_by_solve(original.as_ref()) =>
+                    {
+                        original.as_ref().clone()
+                    }
+                    _ => new_entity,
+                };
                 if let Some(before) = self.document.get_entity_arc(handle) {
                     self.record_undo_before(handle, Some(before));
                 }
