@@ -605,6 +605,7 @@ fn append_pdf_page(
                 emit_wire_fills(
                     &mut ops,
                     std::slice::from_ref(&wire.wire),
+                    wire.draw_depth,
                     ox,
                     oy,
                     plot_style,
@@ -1036,6 +1037,7 @@ fn plotted_color(
 fn emit_wire_fills(
     ops: &mut Vec<Op>,
     wires: &[WireModel],
+    wire_depth: f32,
     ox: f64,
     oy: f64,
     plot_style: Option<&PlotStyleTable>,
@@ -1090,7 +1092,11 @@ fn emit_wire_fills(
                     line_weight_px: wire.line_weight_px,
                     angle_offset: 0.0,
                     scale: 1.0 / scale.max(1.0e-6),
-                    draw_depth: wire.depth_override.unwrap_or(0.0),
+                    // The host wire's composed draw depth (PlotWire carries
+                    // wire_draw_depth). depth_override alone is a per-block
+                    // child label and would sort the fill outside its block's
+                    // band; keep the pattern fill co-sorted with its wire.
+                    draw_depth: wire_depth,
                 };
                 emit_hatch(
                     ops,

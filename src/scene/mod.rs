@@ -2204,7 +2204,8 @@ pub struct Scene {
         RefCell<HashMap<(String, String), Option<Arc<crate::io::plot_style::PlotStyleTable>>>>,
     styled_wire_cache: RefCell<HashMap<(u64, String), (u64, Arc<Vec<WireModel>>)>>,
     styled_hatch_cache: RefCell<HashMap<(u64, usize, usize, String, u32), Arc<Vec<HatchModel>>>>,
-    styled_wire_fill_cache: RefCell<HashMap<(u64, String, u32), Arc<Vec<HatchModel>>>>,
+    styled_wire_fill_cache:
+        RefCell<HashMap<(u64, String, u32, u64), Arc<Vec<HatchModel>>>>,
     /// Per-viewport projected wire cache for paper-space content viewports.
     /// Stores projected + clipped wires in paper-space coordinates.
     /// Maps vp_handle → (geometry_epoch, Vec<WireModel>).

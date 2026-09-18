@@ -53,6 +53,13 @@ use crate::scene::model::image_model::ImageModel;
 use crate::scene::model::mesh_model::MeshLodSet;
 use crate::scene::model::wire_model::WireModel;
 
+/// Worst-case raster depth bias (in 24-bit quanta, toward the camera) block
+/// text is required to clear. The wipeout pipeline currently carries no bias
+/// (a raster bias can jump a block's narrow depth band and erase its
+/// foreground), so this is a safety budget: the block-text regression asserts
+/// a larger margin over whatever bias the pipeline could reintroduce.
+pub const WIPEOUT_DEPTH_BIAS_QUANTA: i32 = 2;
+
 struct SilhouetteChunk {
     vertex_buffer: wgpu::Buffer,
     instance_buffer: wgpu::Buffer,
@@ -1056,7 +1063,13 @@ impl Pipeline {
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: content_stencil.clone(),
                 // The shader already applies draw order. A raster bias can
-                // jump across a block's narrow range and erase its foreground.
+                // jump across a block's narrow range and erase its foreground
+                // — block text clears its siblings' wipes by only 9-16 depth
+                // quanta, so the pipeline must stay bias-free. Coincident ties
+                // still resolve toward the mask, which draws later under
+                // LessEqual. WIPEOUT_DEPTH_BIAS_QUANTA is the budget the
+                // block-text regression asserts against if a bias ever
+                // returns.
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {

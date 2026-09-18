@@ -5612,7 +5612,12 @@ mod plot_paper_tests {
             env!("CARGO_MANIFEST_DIR"),
             "/tests/fixtures/plot/page-setups-metric.dxf"
         );
-        let reply = app.automation_op(&format!(r#"{{"op":"open","path":"{path}"}}"#));
+        // json! escapes the path: a Windows CARGO_MANIFEST_DIR carries
+        // backslashes, and a raw format! would put invalid \X escapes in the
+        // JSON string.
+        let reply = app.automation_op(
+            &serde_json::json!({"op": "open", "path": path}).to_string(),
+        );
         assert_eq!(reply["ok"], true, "{reply}");
         app
     }
@@ -5911,6 +5916,10 @@ mod plot_paper_tests {
         assert!(app.plot_dialog.custom_editor.is_none());
     }
 
+    // The driver-options editor is the CUPS flow; on Windows
+    // PrinterProperties routes to the system preferences dialog instead, so
+    // the editor under test never opens there.
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn driver_options_are_edited_remembered_and_sent_with_the_job() {
         use crate::io::print_to_printer::parse_lpoptions;
