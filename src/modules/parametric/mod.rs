@@ -6,6 +6,8 @@ mod coincident;
 mod concentric;
 mod constraint_bar;
 mod equal_distance;
+#[path = "fixed.rs"]
+mod fixed_command;
 mod geom_constraint;
 #[path = "horizontal.rs"]
 mod horizontal_command;
@@ -21,6 +23,7 @@ pub use coincident::{coincident_tool, CoincidentConstraintCommand};
 pub use concentric::ConcentricConstraintCommand;
 pub use constraint_bar::ConstraintBarOptionCommand;
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
+pub use fixed_command::FixConstraintCommand;
 pub use geom_constraint::GeomConstraintCommand;
 pub use horizontal_command::HorizontalConstraintCommand;
 pub use perpendicular_command::{PerpendicularConstraintCommand, PerpendicularPick};

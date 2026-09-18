@@ -1420,7 +1420,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "VCONSTRAINT" | "FXCONSTRAINT" => {
+            "VCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1433,18 +1433,47 @@ impl OpenCADStudio {
                 } else {
                     use crate::command::CmdResult;
                     use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
-                    let (kind, label) = if cmd == "VCONSTRAINT" {
-                        (ConstraintKind::Vertical, "Vertical constraint")
-                    } else {
-                        (ConstraintKind::Fixed, "Fixed constraint")
-                    };
                     return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
-                        kind,
+                        kind: ConstraintKind::Vertical,
                         refs: vec![ParametricRef::whole(handles[0])],
                         driving_param: None,
-                        label,
+                        label: "Vertical constraint",
                     }));
                 }
+            }
+
+            "FXCONSTRAINT" | "GCFIX" => {
+                use crate::command::CmdResult;
+                use crate::modules::parametric::FixConstraintCommand;
+                use crate::scene::parametric_constraints::ConstraintKind;
+
+                // One preselected whole curve applies at once (ribbon
+                // "select first, then click"); anything else goes through
+                // the reference's own point-or-object prompt.
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if let [handle] = handles.as_slice() {
+                    let reference = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(*handle)
+                        .and_then(|entity| {
+                            FixConstraintCommand::preselected_reference(entity, *handle)
+                        });
+                    if let Some(reference) = reference {
+                        return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
+                            kind: ConstraintKind::Fixed,
+                            refs: vec![reference],
+                            driving_param: None,
+                            label: "Fixed constraint",
+                        }));
+                    }
+                }
+                if !handles.is_empty() {
+                    self.tabs[i].scene.deselect_all();
+                }
+                let command = FixConstraintCommand::new();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             "CCONSTRAINT" | "GCCOINCIDENT" => {

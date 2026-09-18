@@ -3177,23 +3177,23 @@ impl OpenCADStudio {
                 driving_param,
                 label,
             } => {
+                use crate::scene::parametric_constraints::ConstraintKind;
+                // GCSMOOTH and FXCONSTRAINT re-prompt after a rejected pick.
+                let keep_command = self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
+                    (kind == ConstraintKind::Smooth && command.name() == "GCSMOOTH")
+                        || (kind == ConstraintKind::Fixed && command.name() == "FXCONSTRAINT")
+                });
                 if let Err(message) = self.tabs[i].scene.validate_parametric_constraint(
                     kind,
                     &refs,
                     driving_param.as_ref(),
                 ) {
-                    let keep_smooth_selection = kind
-                        == crate::scene::parametric_constraints::ConstraintKind::Smooth
-                        && self.tabs[i]
-                            .active_cmd
-                            .as_ref()
-                            .is_some_and(|command| command.name() == "GCSMOOTH");
-                    if !keep_smooth_selection {
+                    if !keep_command {
                         self.tabs[i].active_cmd = None;
                     }
                     self.tabs[i].snap_result = None;
                     self.command_line.push_error(message);
-                    if keep_smooth_selection {
+                    if keep_command {
                         if let Some(prompt) =
                             self.tabs[i].active_cmd.as_ref().map(|command| command.prompt())
                         {
@@ -3203,6 +3203,22 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 let scope = self.tabs[i].current_parametric_scope();
+                if kind == ConstraintKind::Fixed
+                    && self.tabs[i]
+                        .scene
+                        .parametric_constraint_set(scope)
+                        .is_some_and(|set| {
+                            set.constraints.iter().any(|existing| {
+                                existing.enabled && existing.kind == kind && existing.refs == refs
+                            })
+                        })
+                {
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.command_line
+                        .push_error("The constraint already exists on the selected objects.");
+                    return Task::none();
+                }
                 let constraints_before = self.tabs[i]
                     .scene
                     .parametric_constraint_set(scope)
@@ -3243,6 +3259,59 @@ impl OpenCADStudio {
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
                 }
+            }
+            CmdResult::AddFixedConstraint(pick) => {
+                use crate::modules::parametric::FixConstraintCommand;
+                use crate::scene::parametric_constraints::{
+                    nearest_parametric_point, nearest_parametric_point_on_entity,
+                    parametric_curve_ref_for_pick, ConstraintKind,
+                };
+
+                let scope = self.tabs[i].current_parametric_scope();
+                let document = &self.tabs[i].scene.document;
+                let world =
+                    acadrust::types::Vector3::new(pick.point.x, pick.point.y, pick.point.z);
+                let resolved = match (pick.whole_curve, pick.handle) {
+                    (true, Some(handle)) => {
+                        parametric_curve_ref_for_pick(document, scope, handle, world)
+                            .ok_or(FixConstraintCommand::INVALID_OBJECT)
+                    }
+                    (true, None) => Err(FixConstraintCommand::NO_OBJECT),
+                    (false, Some(handle)) => {
+                        nearest_parametric_point_on_entity(document, scope, handle, world)
+                            .ok_or(FixConstraintCommand::INVALID_OBJECT)
+                    }
+                    (false, None) => nearest_parametric_point(document, scope, world, None)
+                        .ok_or(FixConstraintCommand::NO_POINT),
+                };
+                // An off-plane or 3D curve is "not a valid object" to the
+                // reference, not a solver limitation.
+                let resolved = resolved.and_then(|reference| {
+                    let supported = !pick.whole_curve
+                        || self.tabs[i]
+                            .scene
+                            .validate_parametric_constraint(
+                                ConstraintKind::Fixed,
+                                &[reference],
+                                None,
+                            )
+                            .is_ok();
+                    supported
+                        .then_some(reference)
+                        .ok_or(FixConstraintCommand::INVALID_OBJECT)
+                });
+                return match resolved {
+                    Ok(reference) => self.apply_cmd_result(CmdResult::AddParametricConstraint {
+                        kind: ConstraintKind::Fixed,
+                        refs: vec![reference],
+                        driving_param: None,
+                        label: "Fixed constraint",
+                    }),
+                    // A miss re-prompts: `ReportError` keeps the command.
+                    Err(message) => {
+                        self.apply_cmd_result(CmdResult::ReportError(message.to_string()))
+                    }
+                };
             }
             CmdResult::AddHorizontalConstraint {
                 selection,

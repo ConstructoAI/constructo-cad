@@ -28,6 +28,7 @@ use cadkernel_constraints::solvers::dogleg::solve_dl;
 use cadkernel_constraints::solvers::lm::solve_lm;
 use cadkernel_constraints::solvers::SolveStatus;
 use cadkernel_constraints::system::System;
+use cadkernel_constraints::util::ParamId;
 
 use super::named_parameters::ParameterTable;
 use super::parametric_constraints::{
@@ -184,6 +185,16 @@ fn register_entity(
     handle: Handle,
 ) -> Option<EntityGeom> {
     let entity = document.get_entity(handle)?;
+    register_entity_geom(sys, handle, entity)
+}
+
+/// `register_entity` for an entity value that isn't the document's — the
+/// retained pre-edit original a persistent `Fixed` pins to.
+fn register_entity_geom(
+    sys: &mut System,
+    handle: Handle,
+    entity: &EntityType,
+) -> Option<EntityGeom> {
     match entity {
         EntityType::Point(point) => Some(EntityGeom::Point(GPoint::new(
             sys.add_param(point.location.x, false),
@@ -1027,6 +1038,74 @@ fn retained_tangent_side(
     Some(dx * (center[1] - y1) - dy * (center[0] - x1) >= 0.0)
 }
 
+/// The kernel parameters a `Fixed` constraint on `r` holds in place: a
+/// polyline segment's endpoints (plus center/radius for an arc segment), one
+/// addressable point, or every intrinsic parameter of a whole entity. Arc
+/// pins its five intrinsic params only — `start`/`end` are already tied to
+/// those by the arc-rules `CurveValue` constraints `solve_scope` adds;
+/// Ellipse likewise pins center + radmin, `focus1` being tied to `center`
+/// by the ellipse-rules `Difference` constraints.
+fn fixed_pin_params(
+    document: &acadrust::CadDocument,
+    sys: &mut System,
+    cache: &mut HashMap<Handle, EntityGeom>,
+    r: ParametricRef,
+) -> Vec<ParamId> {
+    if let Some(index) = r.segment_index() {
+        let Some(geometry) = resolve_ref(document, sys, cache, r) else {
+            return Vec::new();
+        };
+        if let Some(line) = geometry.line_segment(index) {
+            return vec![line.p1.x, line.p1.y, line.p2.x, line.p2.y];
+        }
+        return geometry
+            .arc_segment(index)
+            .map(|segment| {
+                let arc = segment.arc;
+                vec![
+                    arc.start.x,
+                    arc.start.y,
+                    arc.end.x,
+                    arc.end.y,
+                    arc.circle.center.x,
+                    arc.circle.center.y,
+                    arc.circle.rad,
+                ]
+            })
+            .unwrap_or_default();
+    }
+    if r.marker.is_some() {
+        return resolve_constraint_point(document, sys, cache, r)
+            .map(|point| vec![point.x, point.y])
+            .unwrap_or_default();
+    }
+    match resolve_ref(document, sys, cache, r) {
+        Some(EntityGeom::Point(point)) => vec![point.x, point.y],
+        Some(EntityGeom::Polyline { points, .. }) => {
+            points.iter().flat_map(|point| [point.x, point.y]).collect()
+        }
+        Some(EntityGeom::TextLine(line))
+        | Some(EntityGeom::Line(line))
+        | Some(EntityGeom::Ray(line))
+        | Some(EntityGeom::XLine(line)) => vec![line.p1.x, line.p1.y, line.p2.x, line.p2.y],
+        Some(EntityGeom::Circle(circle)) => vec![circle.center.x, circle.center.y, circle.rad],
+        Some(EntityGeom::Arc(arc)) => vec![
+            arc.circle.center.x,
+            arc.circle.center.y,
+            arc.circle.rad,
+            arc.start_angle,
+            arc.end_angle,
+        ],
+        Some(EntityGeom::Ellipse(ellipse)) => {
+            vec![ellipse.center.x, ellipse.center.y, ellipse.radmin]
+        }
+        Some(EntityGeom::Spline { curve, .. }) => {
+            curve.poles.iter().flat_map(|point| [point.x, point.y]).collect()
+        }
+        None => Vec::new(),
+    }
+}
+
 /// Builds the kernel equations for one constraint. Unsupported references or
 /// invalid dimensional targets produce no equations.
 fn build_constraint(
@@ -1037,6 +1116,7 @@ fn build_constraint(
     c: &ParametricConstraint,
     tangent_side: Option<bool>,
     tangent_point: Option<ParametricRef>,
+    originals: &HashMap<Handle, std::sync::Arc<EntityType>>,
 ) -> Vec<Rc<dyn Constraint>> {
     if !c.enabled || !refs_share_supported_plane(document, &c.refs) {
         return Vec::new();
@@ -1380,175 +1460,36 @@ fn build_constraint(
             let Some(r) = c.refs.first() else {
                 return Vec::new();
             };
-            if r.segment_index().is_some() {
-                let Some(line) = whole_line(sys, cache, *r) else {
-                    return Vec::new();
-                };
-                let (x1, y1, x2, y2) = {
-                    let store = sys.store();
-                    (
-                        store.get(line.p1.x),
-                        store.get(line.p1.y),
-                        store.get(line.p2.x),
-                        store.get(line.p2.y),
-                    )
-                };
-                return vec![
-                    Rc::new(Equal::new(line.p1.x, sys.add_param(x1, true), 1.0)),
-                    Rc::new(Equal::new(line.p1.y, sys.add_param(y1, true), 1.0)),
-                    Rc::new(Equal::new(line.p2.x, sys.add_param(x2, true), 1.0)),
-                    Rc::new(Equal::new(line.p2.y, sys.add_param(y2, true), 1.0)),
-                ];
-            }
-            if r.marker.is_some() {
-                let Some(point) = point_ref(sys, cache, *r) else {
-                    return Vec::new();
-                };
-                let (x, y) = {
-                    let store = sys.store();
-                    (store.get(point.x), store.get(point.y))
-                };
-                return vec![
-                    Rc::new(Equal::new(point.x, sys.add_param(x, true), 1.0)),
-                    Rc::new(Equal::new(point.y, sys.add_param(y, true), 1.0)),
-                ];
-            }
-            let Some(geom) = resolve_ref(document, sys, cache, *r) else {
-                return Vec::new();
-            };
-            match geom {
-                EntityGeom::Point(point) => {
-                    let (x, y) = {
+            let pinned = fixed_pin_params(document, sys, cache, *r);
+            // A persistent Fixed holds the *pre-edit* geometry: after MOVE /
+            // STRETCH / a grip drag the entity in `document` is already
+            // displaced, so the target comes from the caller's retained
+            // original when there is one — the entity's own live values
+            // otherwise (a freshly applied Fixed pins where it stands).
+            let mut targets: Option<Vec<f64>> = None;
+            if let Some(original) = originals.get(&r.entity) {
+                let mut original_cache = HashMap::new();
+                if let Some(geometry) = register_entity_geom(sys, r.entity, original.as_ref()) {
+                    original_cache.insert(r.entity, geometry);
+                    let params = fixed_pin_params(document, sys, &mut original_cache, *r);
+                    if params.len() == pinned.len() {
                         let store = sys.store();
-                        (store.get(point.x), store.get(point.y))
-                    };
-                    vec![
-                        Rc::new(Equal::new(point.x, sys.add_param(x, true), 1.0)),
-                        Rc::new(Equal::new(point.y, sys.add_param(y, true), 1.0)),
-                    ]
-                }
-                EntityGeom::Polyline { points, .. } => {
-                    let values: Vec<_> = points
-                        .iter()
-                        .map(|point| {
-                            let store = sys.store();
-                            (point, store.get(point.x), store.get(point.y))
-                        })
-                        .collect();
-                    values
-                        .into_iter()
-                        .flat_map(|(point, x, y)| {
-                            [
-                                Rc::new(Equal::new(point.x, sys.add_param(x, true), 1.0))
-                                    as Rc<dyn Constraint>,
-                                Rc::new(Equal::new(point.y, sys.add_param(y, true), 1.0))
-                                    as Rc<dyn Constraint>,
-                            ]
-                        })
-                        .collect()
-                }
-                EntityGeom::TextLine(l)
-                | EntityGeom::Line(l)
-                | EntityGeom::Ray(l)
-                | EntityGeom::XLine(l) => {
-                    let (x1, y1, x2, y2) = {
-                        let store = sys.store();
-                        (
-                            store.get(l.p1.x),
-                            store.get(l.p1.y),
-                            store.get(l.p2.x),
-                            store.get(l.p2.y),
-                        )
-                    };
-                    vec![
-                        Rc::new(Equal::new(l.p1.x, sys.add_param(x1, true), 1.0)),
-                        Rc::new(Equal::new(l.p1.y, sys.add_param(y1, true), 1.0)),
-                        Rc::new(Equal::new(l.p2.x, sys.add_param(x2, true), 1.0)),
-                        Rc::new(Equal::new(l.p2.y, sys.add_param(y2, true), 1.0)),
-                    ]
-                }
-                EntityGeom::Circle(circ) => {
-                    let (cx, cy, r) = {
-                        let store = sys.store();
-                        (
-                            store.get(circ.center.x),
-                            store.get(circ.center.y),
-                            store.get(circ.rad),
-                        )
-                    };
-                    vec![
-                        Rc::new(Equal::new(circ.center.x, sys.add_param(cx, true), 1.0)),
-                        Rc::new(Equal::new(circ.center.y, sys.add_param(cy, true), 1.0)),
-                        Rc::new(Equal::new(circ.rad, sys.add_param(r, true), 1.0)),
-                    ]
-                }
-                // Pinning the 5 intrinsic params (center, radius, both
-                // angles) is enough — `start`/`end` are already tied to
-                // those via the arc-rules `CurveValue` constraints
-                // `solve_scope` adds for every arc, so pinning them too
-                // would just be redundant.
-                EntityGeom::Arc(a) => {
-                    let (cx, cy, r, sa, ea) = {
-                        let store = sys.store();
-                        (
-                            store.get(a.circle.center.x),
-                            store.get(a.circle.center.y),
-                            store.get(a.circle.rad),
-                            store.get(a.start_angle),
-                            store.get(a.end_angle),
-                        )
-                    };
-                    vec![
-                        Rc::new(Equal::new(a.circle.center.x, sys.add_param(cx, true), 1.0)),
-                        Rc::new(Equal::new(a.circle.center.y, sys.add_param(cy, true), 1.0)),
-                        Rc::new(Equal::new(a.circle.rad, sys.add_param(r, true), 1.0)),
-                        Rc::new(Equal::new(a.start_angle, sys.add_param(sa, true), 1.0)),
-                        Rc::new(Equal::new(a.end_angle, sys.add_param(ea, true), 1.0)),
-                    ]
-                }
-                // Pinning center + radmin is enough — `focus1` is already
-                // tied to `center` by the ellipse-rules `Difference`
-                // constraints `solve_scope` adds for every registered
-                // ellipse (see this module's doc comment), so with `center`
-                // pinned here too, pinning `focus1` again would just be
-                // redundant (same reasoning as Arc's `Fixed` arm above).
-                EntityGeom::Ellipse(el) => {
-                    let (cx, cy, b) = {
-                        let store = sys.store();
-                        (
-                            store.get(el.center.x),
-                            store.get(el.center.y),
-                            store.get(el.radmin),
-                        )
-                    };
-                    vec![
-                        Rc::new(Equal::new(el.center.x, sys.add_param(cx, true), 1.0)),
-                        Rc::new(Equal::new(el.center.y, sys.add_param(cy, true), 1.0)),
-                        Rc::new(Equal::new(el.radmin, sys.add_param(b, true), 1.0)),
-                    ]
-                }
-                EntityGeom::Spline { curve, .. } => {
-                    let values: Vec<_> = curve
-                        .poles
-                        .iter()
-                        .map(|point| {
-                            let store = sys.store();
-                            (point, store.get(point.x), store.get(point.y))
-                        })
-                        .collect();
-                    values
-                        .into_iter()
-                        .flat_map(|(point, x, y)| {
-                            [
-                                Rc::new(Equal::new(point.x, sys.add_param(x, true), 1.0))
-                                    as Rc<dyn Constraint>,
-                                Rc::new(Equal::new(point.y, sys.add_param(y, true), 1.0))
-                                    as Rc<dyn Constraint>,
-                            ]
-                        })
-                        .collect()
+                        targets = Some(params.iter().map(|param| store.get(*param)).collect());
+                    }
                 }
             }
+            let targets = targets.unwrap_or_else(|| {
+                let store = sys.store();
+                pinned.iter().map(|param| store.get(*param)).collect()
+            });
+            pinned
+                .into_iter()
+                .zip(targets)
+                .map(|(param, value)| {
+                    Rc::new(Equal::new(param, sys.add_param(value, true), 1.0))
+                        as Rc<dyn Constraint>
+                })
+                .collect()
         }
         ConstraintKind::Distance => {
             let [a, b] = c.refs.as_slice() else {
@@ -2252,6 +2193,7 @@ fn solve_scope(
     retain_lengths: bool,
     retained_before: &HashMap<Handle, std::sync::Arc<EntityType>>,
     initial_fixed_refs: &[ParametricRef],
+    originals: &HashMap<Handle, std::sync::Arc<EntityType>>,
 ) -> Option<SolveResult> {
     let params = if set.local_parameters.is_empty() {
         drawing_params
@@ -2261,6 +2203,53 @@ fn solve_scope(
     let mut sys = System::new();
     let mut cache: HashMap<Handle, EntityGeom> = HashMap::new();
     let constraints = constraints_in_drawing_order(document, set);
+    // A persistent Fixed outranks any edit: a point it holds is never a
+    // driven grip / STRETCH anchor, and a moved entity it holds gets no
+    // temporary whole-entity pin — the Fixed one, targeting the retained
+    // original, pulls it back instead (a MOVE leaves a fixed object, or the
+    // fixed points of a partly fixed one, where they were).
+    let fixed_refs: Vec<ParametricRef> = constraints
+        .iter()
+        .filter(|c| c.enabled && c.kind == ConstraintKind::Fixed)
+        .filter_map(|c| c.refs.first().copied())
+        .collect();
+    let held_by_fixed = |r: &ParametricRef| {
+        fixed_refs.iter().any(|f| {
+            f.entity == r.entity
+                && (f.marker.is_none()
+                    || f.marker == r.marker
+                    || f.segment_index().is_some_and(|index| {
+                        matches!(r.marker, Some(marker)
+                            if marker == index as i32 || marker == index as i32 + 1)
+                    }))
+        })
+    };
+    let mut driven_refs: Vec<ParametricRef> =
+        driven_refs.iter().copied().filter(|r| !held_by_fixed(r)).collect();
+    // A moved entity a Fixed holds only in part keeps its other primary
+    // points where the edit put them (driven), so the fixed ones pull just
+    // their own coordinates back — a MOVE on a line with one fixed end
+    // stretches the line instead of sliding it.
+    for reference in initial_fixed_refs {
+        if reference.marker.is_some() || !fixed_refs.iter().any(|f| f.entity == reference.entity)
+        {
+            continue;
+        }
+        let Some(entity) = document.get_entity(reference.entity) else {
+            continue;
+        };
+        for (marker, _) in super::parametric_constraints::parametric_point_candidates(entity) {
+            let point = ParametricRef::point(reference.entity, marker);
+            if (marker >= 0 || marker == -3)
+                && !held_by_fixed(&point)
+                && !driven_refs.contains(&point)
+            {
+                driven_refs.push(point);
+            }
+        }
+    }
+    let driven_refs = driven_refs.as_slice();
+    let fixed_touches = |handle: Handle| fixed_refs.iter().any(|f| f.entity == handle);
     let line_axes = if retain_lengths { HashMap::new() } else { constrained_line_axes(&constraints) };
     // Map partition-local kernel rows back to persistent constraint IDs by Rc identity.
     let mut owner: Vec<(Rc<dyn Constraint>, ConstraintId)> = Vec::new();
@@ -2302,6 +2291,7 @@ fn solve_scope(
             c,
             tangent_side,
             tangent_point,
+            originals,
         ) {
             owner.push((constraint.clone(), c.id));
             sys.add_constraint(constraint);
@@ -2313,6 +2303,9 @@ fn solve_scope(
     // solve only; they are deliberately omitted from `owner` and from the
     // persistent constraint set/native graph.
     for reference in initial_fixed_refs {
+        if fixed_touches(reference.entity) {
+            continue;
+        }
         let temporary = ParametricConstraint {
             id: ConstraintId::MAX,
             kind: ConstraintKind::Fixed,
@@ -2334,6 +2327,7 @@ fn solve_scope(
             &temporary,
             None,
             None,
+            &HashMap::new(),
         ) {
             sys.add_constraint(constraint);
         }
@@ -2475,9 +2469,13 @@ fn solve_scope(
     // endpoints. Other edits can retain line lengths as well.
     if retain_size {
         for (handle, geom) in &cache {
-            if initial_fixed_refs
-                .iter()
-                .any(|reference| reference.entity == *handle && reference.marker.is_none())
+            // A Fixed entity's size is whatever its pins say: whole → all
+            // pinned anyway, partial → the reference lets it resize (MOVE
+            // on a one-end-fixed line shortens it).
+            if fixed_touches(*handle)
+                || initial_fixed_refs
+                    .iter()
+                    .any(|reference| reference.entity == *handle && reference.marker.is_none())
             {
                 continue;
             }
@@ -3346,6 +3344,7 @@ impl Scene {
             &candidate,
             None,
             None,
+            &HashMap::new(),
         )
         .is_empty()
         {
@@ -3443,22 +3442,25 @@ impl Scene {
             }
         }
 
+        // Pre-edit images of everything this transaction touched: what a
+        // persistent Fixed pins to, and (under CONSTRAINTSOLVEMODE) what
+        // sizes are retained from.
+        let mut originals: HashMap<Handle, std::sync::Arc<EntityType>> = self
+            .undo_recording
+            .as_ref()
+            .into_iter()
+            .flat_map(|recording| recording.before.iter())
+            .filter_map(|(handle, entity)| {
+                entity
+                    .as_ref()
+                    .map(|entity| (*handle, std::sync::Arc::clone(entity)))
+            })
+            .collect();
+        for (handle, entity) in retained_originals {
+            originals.insert(*handle, std::sync::Arc::new(entity.clone()));
+        }
         let retained_before: HashMap<Handle, std::sync::Arc<EntityType>> = if retain_size {
-            let mut retained: HashMap<Handle, std::sync::Arc<EntityType>> = self
-                .undo_recording
-                .as_ref()
-                .into_iter()
-                .flat_map(|recording| recording.before.iter())
-                .filter_map(|(handle, entity)| {
-                    entity
-                        .as_ref()
-                        .map(|entity| (*handle, std::sync::Arc::clone(entity)))
-                })
-                .collect();
-            for (handle, entity) in retained_originals {
-                retained.insert(*handle, std::sync::Arc::new(entity.clone()));
-            }
-            retained
+            originals.clone()
         } else {
             HashMap::new()
         };
@@ -3482,6 +3484,7 @@ impl Scene {
                 true,
                 &retained_before,
                 initial_fixed_refs,
+                &originals,
             ) else {
                 continue;
             };
@@ -3543,6 +3546,7 @@ impl Scene {
                 false,
                 &retained_before,
                 &[],
+                &retained_before,
             )
             else {
                 continue;

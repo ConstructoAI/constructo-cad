@@ -587,7 +587,29 @@ impl ParametricConstraintSet {
 ///
 /// Solver-side registration reads raw entity fields directly. This helper is
 /// for UI-side consumers that need the current world-space position.
+/// The single addressable point (marker `0`) of a point-like entity: the
+/// node, insertion, or table origin the solver registers as its
+/// `EntityGeom::Point` / text baseline start. `None` for curve entities,
+/// whose marker `0` is a `source_points()` endpoint.
+pub(crate) fn insertion_point(entity: &acadrust::EntityType) -> Option<Vector3> {
+    match entity {
+        acadrust::EntityType::Point(point) => Some(point.location),
+        acadrust::EntityType::Insert(insert) => Some(insert.insert_point),
+        acadrust::EntityType::Text(text) => Some(text.insertion_point),
+        acadrust::EntityType::MText(text) => Some(text.insertion_point),
+        acadrust::EntityType::AttributeDefinition(attribute) => Some(attribute.insertion_point),
+        acadrust::EntityType::AttributeEntity(attribute) => Some(attribute.insertion_point),
+        acadrust::EntityType::Table(table) => Some(table.insertion_point),
+        _ => None,
+    }
+}
+
 pub(crate) fn resolve_point(entity: &acadrust::EntityType, marker: i32) -> Option<Vector3> {
+    if marker == 0 {
+        if let Some(point) = insertion_point(entity) {
+            return Some(point);
+        }
+    }
     if marker == -3 {
         return match entity {
             acadrust::EntityType::Circle(circle) => Some(circle.center_wcs()),
@@ -645,6 +667,12 @@ pub(crate) fn parametric_point_candidates(
         .enumerate()
         .map(|(marker, point)| (marker as i32, point))
         .collect();
+    // A node / insertion point is a constraint point too (the reference
+    // fixes a POINT via NODe and TEXT via INSert), and these entities have
+    // no `source_points()` to collide with marker `0`.
+    if let Some(point) = insertion_point(entity) {
+        points.push((0, point));
+    }
     match entity {
         acadrust::EntityType::Circle(circle) => points.push((-3, circle.center_wcs())),
         acadrust::EntityType::Arc(arc) => points.push((-3, arc.center_wcs())),
