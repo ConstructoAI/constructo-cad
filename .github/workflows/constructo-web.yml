@@ -19,7 +19,7 @@ on:
       - '**/*.md'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: constructo-web-${{ github.ref }}
@@ -104,8 +104,12 @@ jobs:
           debut=$(date +%s)
           # Seuls les types réellement compressibles : compresser un PNG ajoute
           # un fichier plus gros que l'original, que le client téléchargerait.
+          # `.ttf` COMPRIS : les 11 polices Noto pèsent 33 Mo et partaient en
+          # clair. Mesure du 2026-09-19 : 32,6 Mo non compressés au total, parce
+          # que ce `find` les excluait et que la garde ne regardait que la racine.
           find dist/cad -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.json' \
-            -o -name '*.html' -o -name '*.css' -o -name '*.svg' \) -size +1k -print0 |
+            -o -name '*.html' -o -name '*.css' -o -name '*.svg' -o -name '*.ttf' \) \
+            -size +1k -print0 |
           while IFS= read -r -d '' f; do
             brotli -q 9 -f -o "$f.br" "$f"
             gzip -9 -f -k -S .gz "$f"
@@ -116,10 +120,14 @@ jobs:
           # le nombre de variantes : elle a affiché « 0 brotli, 0 gzip » et rendu
           # succès, pendant que le moteur partait en clair — 51 Mo par visiteur.
           # Un compteur que personne ne lit ne garde rien.
-          for f in dist/cad/*_bg.wasm; do
-            test -f "$f.br" || { echo "MANQUE $f.br — le moteur partirait en clair"; exit 1; }
-            test -f "$f.gz" || { echo "MANQUE $f.gz"; exit 1; }
-          done
+          # RECURSIF : le glob `dist/cad/*_bg.wasm` ne voyait que la racine et
+          # ratait `worker_pkg/ocs_web_worker_bg.wasm` (4,4 Mo) et les polices.
+          manquantes=0
+          while IFS= read -r f; do
+            test -f "$f.br" || { echo "MANQUE $f.br"; manquantes=$((manquantes+1)); }
+            test -f "$f.gz" || { echo "MANQUE $f.gz"; manquantes=$((manquantes+1)); }
+          done < <(find dist/cad -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.ttf' \)                      -size +500k ! -name '*.br' ! -name '*.gz')
+          test "$manquantes" -eq 0 || { echo "$manquantes precompression(s) manquante(s)"; exit 1; }
           echo "Variantes : $(find dist/cad -name '*.br' | wc -l) brotli, $(find dist/cad -name '*.gz' | wc -l) gzip"
 
       # Le coût pour le poste d'un client se mesure en octets TRANSFÉRÉS, pas
@@ -150,3 +158,21 @@ jobs:
           # Le .wasm est déjà mal compressible par le zip d'artefact ; ne pas
           # payer deux fois le temps de compression.
           compression-level: 1
+
+      # 🔴 LA RELEASE EST CE QUE RENDER TELECHARGE, PAS L'ARTEFACT.
+      # Un artefact Actions expire (14 jours) et son URL porte un identifiant
+      # qui CHANGE a chaque build : `CAD_BUNDLE_URL` y serait un épinglage à
+      # usage unique, et le module mourrait en silence à la date d'expiration —
+      # `curl -f` échoue, `build.sh` supprime le bundle, le déploiement reste
+      # vert. Mesure du 2026-09-19 : `expires_at 2026-10-03`.
+      # Un tag MOBILE (`cad-latest`) donne une URL stable dans le temps.
+      - name: Publier le bundle en release (URL stable)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist && zip -qr ../cad-bundle.zip cad && cd ..
+          echo "archive : $(du -h cad-bundle.zip | cut -f1)"
+          gh release delete cad-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create cad-latest cad-bundle.zip             --title "Bundle web CAO (dernier build)"             --notes "Bâti depuis ${GITHUB_SHA}. Tag mobile : cette release est remplacée à chaque build de \`main\`. C'est l'URL que \`CAD_BUNDLE_URL\` doit viser."             --latest=false
+          echo "Release cad-latest publiée." >> "$GITHUB_STEP_SUMMARY"
