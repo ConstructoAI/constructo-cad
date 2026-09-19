@@ -645,44 +645,29 @@ impl Camera {
     /// Snap to a canonical view direction (called by ViewCubeSnap).
     /// `eye_dir` is the unit vector from the target toward the camera.
     ///
-    /// Up vector resolution:
-    ///  1. Take the current up.
-    ///  2. Pick the world axis (±X, ±Y, ±Z) whose dot product with the
-    ///     current up is highest — skipping any axis (anti-)parallel to
-    ///     the new gaze direction.
-    ///  3. Project that axis onto the plane ⊥ `new_eye` and use that as
-    ///     the new up.
-    ///
-    /// Result: small tilts collapse onto the nearest world axis (so the
-    /// view always lands cleanly aligned), while genuine flips of the
-    /// up-sense (e.g. orbited upside-down) are preserved.
+    /// Deterministic horizon: when looking close to ±Z (top/bottom) the
+    /// up is north (+Y), otherwise world up (+Z), projected onto the
+    /// plane ⊥ `new_eye`. This matches the turntable `orbit` (which never
+    /// banks) so a cube corner always lands with the same roll and the
+    /// base never appears rotated. The sign is flipped only if the
+    /// current view is intentionally upside-down, preserving that sense.
     pub fn snap_to_direction(&mut self, eye_dir: Vec3, ucs: glam::Mat4) {
         let new_eye = eye_dir.normalize_or(Vec3::Z);
-        let cur_up = self.rotation * Vec3::Y;
-        // Candidate up axes are the UCS axes, not world X/Y/Z, so a face snap
-        // lands the view square to the user's coordinate system (in-plane roll
-        // included). Identity `ucs` reproduces the world-aligned snap.
-        let ux = ucs.transform_vector3(Vec3::X).normalize_or(Vec3::X);
         let uy = ucs.transform_vector3(Vec3::Y).normalize_or(Vec3::Y);
         let uz = ucs.transform_vector3(Vec3::Z).normalize_or(Vec3::Z);
-        let cardinals = [ux, -ux, uy, -uy, uz, -uz];
-        let mut best_score = f32::NEG_INFINITY;
-        let mut best_up = uz;
-        for axis in cardinals {
-            // Skip axes (nearly) collinear with the new gaze — they can't
-            // serve as up because the projection onto the plane would
-            // vanish.
-            if axis.dot(new_eye).abs() > 0.999 {
-                continue;
-            }
-            let score = axis.dot(cur_up);
-            if score > best_score {
-                best_score = score;
-                best_up = axis;
-            }
-        }
-        // Project the chosen axis onto the plane ⊥ new_eye and normalize.
-        let projected = best_up - new_eye * best_up.dot(new_eye);
+        // Deterministic horizon: top/bottom views (eye ≈ ±Z) use north (+Y)
+        // as up; every other direction uses world up (+Z). This keeps the
+        // cube's "Top Front Right" etc. repeatable and aligned with the
+        // turntable orbit (which never banks), and avoids the previous
+        // adaptive choice that picked the nearest cardinal to the current
+        // up — from a top view that was +Y, so an oblique top corner kept
+        // Y as up and tilted the base (roll) instead of keeping the horizon
+        // level. Preserve the sign only to keep an intentionally inverted
+        // (upside-down) view inverted.
+        let cur_up = self.rotation * Vec3::Y;
+        let raw_ref = if new_eye.dot(uz).abs() > 0.9 { uy } else { uz };
+        let up_ref = if cur_up.dot(raw_ref) < 0.0 { -raw_ref } else { raw_ref };
+        let projected = up_ref - new_eye * up_ref.dot(new_eye);
         let new_up = projected.normalize_or(if new_eye.dot(uz).abs() < 0.99 {
             (uz - new_eye * uz.dot(new_eye)).normalize()
         } else {

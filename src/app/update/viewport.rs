@@ -5511,9 +5511,10 @@ properties={:.1}ms picked={}",
         }
         let eye_dir = r_ucs.transform_vector3(region.snap_direction());
 
-        // Faces snap to a canonical upright orientation (never upside
-        // down); edges/corners keep the current up-sense so they spin
-        // smoothly around the clicked feature.
+        // Faces and edges/corners all snap deterministically (world +Z
+        // horizon, north +Y for top/bottom) so a cube click is repeatable
+        // and matches the turntable orbit; snap_to_direction preserves an
+        // intentional upside-down sense by sign-flipping only.
         let is_face = matches!(region, scene::CubeRegion::Face(_));
         if self.tabs[i].scene.active_viewport.is_some() {
             if is_face {
