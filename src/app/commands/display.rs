@@ -878,6 +878,15 @@ impl OpenCADStudio {
                     self.command_line.push_output(&line);
                 }
             }
+            // PRINTERS <name> — what that printer reports about its sheets
+            // and printable area (asks the driver; may take a moment for an
+            // offline network queue).
+            cmd if cmd.starts_with("PRINTERS ") => {
+                let name = cmd["PRINTERS ".len()..].trim();
+                for line in crate::io::print_to_printer::printer_media_report(name) {
+                    self.command_line.push_output(&line);
+                }
+            }
             "EXPORT" | "EXPORTPDF" => {
                 return Some(Task::done(Message::PlotExport));
             }

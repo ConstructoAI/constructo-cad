@@ -5102,6 +5102,10 @@ plot =
     .save-changes-to-layout = 変更をレイアウトに保存
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ は __ocs_fmt_1__ に対応していません。既定の用紙 __ocs_fmt_2__ に切り替えました（PAPERUPDATE = 1）。
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ は __ocs_fmt_1__ に対応していません。用紙はそのままです（PAPERUPDATE = 0）。
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: プリンターは用紙を報告しません。用紙カタログを使用します。
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: __ocs_fmt_1__ 種類の用紙が報告されました
+    .default-sheet-sheet = 既定の用紙: __ocs_fmt_0__
+    .default-sheet-not-reported = 既定の用紙: 報告なし
     .default-printer-name = 既定のプリンター: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = 既定のプリンター: システムから報告なし
     .printers-none-listed-by-the-system = プリンター: システムに一覧なし

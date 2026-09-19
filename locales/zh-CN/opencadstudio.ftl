@@ -5097,6 +5097,10 @@ plot =
     .save-changes-to-layout = 将修改保存到布局
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ 不支持 __ocs_fmt_1__；已切换到其默认图纸 __ocs_fmt_2__（PAPERUPDATE = 1）。
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ 不支持 __ocs_fmt_1__；保留原图纸（PAPERUPDATE = 0）。
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__：打印机未报告任何纸张；使用纸张目录。
+    .printer-count-sheet-s-reported = __ocs_fmt_0__：报告了 __ocs_fmt_1__ 种纸张
+    .default-sheet-sheet = 默认纸张：__ocs_fmt_0__
+    .default-sheet-not-reported = 默认纸张：未报告
     .default-printer-name = 默认打印机：__ocs_fmt_0__
     .default-printer-none-reported-by-the-system = 默认打印机：系统未报告
     .printers-none-listed-by-the-system = 打印机：系统未列出任何打印机

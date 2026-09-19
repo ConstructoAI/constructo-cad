@@ -5114,6 +5114,10 @@ plot =
     .save-changes-to-layout = Запазване на промените в оформлението
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ не поддържа __ocs_fmt_1__; превключено към листа по подразбиране __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ не поддържа __ocs_fmt_1__; листът се запазва (PAPERUPDATE = 0).
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: принтерът не съобщава листове; използва се каталогът с хартия.
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: съобщени __ocs_fmt_1__ листа
+    .default-sheet-sheet = Лист по подразбиране: __ocs_fmt_0__
+    .default-sheet-not-reported = Лист по подразбиране: не е съобщен
     .default-printer-name = Принтер по подразбиране: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = Принтер по подразбиране: системата не съобщава за такъв
     .printers-none-listed-by-the-system = Принтери: системата не изброява нито един

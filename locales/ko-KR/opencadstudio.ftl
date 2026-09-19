@@ -5113,6 +5113,10 @@ plot =
     .save-changes-to-layout = 변경 사항을 배치에 저장
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__이(가) __ocs_fmt_1__을(를) 지원하지 않습니다. 기본 용지 __ocs_fmt_2__(으)로 전환했습니다 (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__이(가) __ocs_fmt_1__을(를) 지원하지 않습니다. 용지를 유지합니다 (PAPERUPDATE = 0).
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: 프린터가 용지를 보고하지 않습니다. 용지 카탈로그를 사용합니다.
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: 용지 __ocs_fmt_1__개 보고됨
+    .default-sheet-sheet = 기본 용지: __ocs_fmt_0__
+    .default-sheet-not-reported = 기본 용지: 보고되지 않음
     .default-printer-name = 기본 프린터: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = 기본 프린터: 시스템이 보고하지 않음
     .printers-none-listed-by-the-system = 프린터: 시스템에 나열된 항목 없음

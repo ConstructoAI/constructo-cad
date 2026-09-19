@@ -5115,6 +5115,10 @@ plot =
     .save-changes-to-layout = Сохранить изменения в листе
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ не поддерживает __ocs_fmt_1__; выбран формат по умолчанию __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ не поддерживает __ocs_fmt_1__; формат сохранён (PAPERUPDATE = 0).
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: принтер не сообщает форматов; используется каталог бумаги.
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: сообщено форматов: __ocs_fmt_1__
+    .default-sheet-sheet = Формат по умолчанию: __ocs_fmt_0__
+    .default-sheet-not-reported = Формат по умолчанию: не сообщён
     .default-printer-name = Принтер по умолчанию: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = Принтер по умолчанию: система не сообщает ни об одном
     .printers-none-listed-by-the-system = Принтеры: система не перечисляет ни одного

@@ -5114,6 +5114,10 @@ plot =
     .save-changes-to-layout = Αποθήκευση αλλαγών στο layout
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = Ο __ocs_fmt_0__ δεν υποστηρίζει το __ocs_fmt_1__· έγινε αλλαγή στο προεπιλεγμένο φύλλο του __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = Ο __ocs_fmt_0__ δεν υποστηρίζει το __ocs_fmt_1__· το φύλλο διατηρείται (PAPERUPDATE = 0).
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: ο εκτυπωτής δεν αναφέρει φύλλα· χρησιμοποιείται ο κατάλογος χαρτιών.
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: αναφέρθηκαν __ocs_fmt_1__ φύλλα
+    .default-sheet-sheet = Προεπιλεγμένο φύλλο: __ocs_fmt_0__
+    .default-sheet-not-reported = Προεπιλεγμένο φύλλο: δεν αναφέρθηκε
     .default-printer-name = Προεπιλεγμένος εκτυπωτής: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = Προεπιλεγμένος εκτυπωτής: το σύστημα δεν αναφέρει κανέναν
     .printers-none-listed-by-the-system = Εκτυπωτές: το σύστημα δεν αναφέρει κανέναν

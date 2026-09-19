@@ -5054,6 +5054,10 @@ plot =
     .save-changes-to-layout = Değişiklikleri yerleşime kaydet
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__, __ocs_fmt_1__ sayfasını desteklemiyor; varsayılan sayfası __ocs_fmt_2__ seçildi (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__, __ocs_fmt_1__ sayfasını desteklemiyor; sayfa korunuyor (PAPERUPDATE = 0).
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: yazıcı sayfa bildirmiyor; kağıt kataloğu kullanılıyor.
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: __ocs_fmt_1__ sayfa bildirildi
+    .default-sheet-sheet = Varsayılan sayfa: __ocs_fmt_0__
+    .default-sheet-not-reported = Varsayılan sayfa: bildirilmedi
     .default-printer-name = Varsayılan yazıcı: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = Varsayılan yazıcı: sistem hiçbirini bildirmiyor
     .printers-none-listed-by-the-system = Yazıcılar: sistem hiçbirini listelemiyor

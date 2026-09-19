@@ -5126,6 +5126,10 @@ plot =
     .save-changes-to-layout = حفظ التغييرات في التخطيط
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ لا يدعم __ocs_fmt_1__؛ تم التبديل إلى الورقة الافتراضية __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ لا يدعم __ocs_fmt_1__؛ تم الاحتفاظ بالورقة (PAPERUPDATE = 0).
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: لا تبلغ الطابعة عن أي أوراق؛ يُستخدم كتالوج الورق.
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: تم الإبلاغ عن __ocs_fmt_1__ ورقة/أوراق
+    .default-sheet-sheet = الورقة الافتراضية: __ocs_fmt_0__
+    .default-sheet-not-reported = الورقة الافتراضية: غير مُبلّغ عنها
     .default-printer-name = الطابعة الافتراضية: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = الطابعة الافتراضية: لم يبلّغ النظام عن أي طابعة
     .printers-none-listed-by-the-system = الطابعات: لم يسرد النظام أي طابعة

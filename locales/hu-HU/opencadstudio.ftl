@@ -5113,6 +5113,10 @@ plot =
     .save-changes-to-layout = Módosítások mentése az elrendezésbe
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = A(z) __ocs_fmt_0__ nem támogatja a(z) __ocs_fmt_1__ lapot; átváltva az alapértelmezett __ocs_fmt_2__ lapra (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = A(z) __ocs_fmt_0__ nem támogatja a(z) __ocs_fmt_1__ lapot; a lap megmarad (PAPERUPDATE = 0).
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: a nyomtató nem jelez lapokat; a papírkatalógus lesz használva.
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: __ocs_fmt_1__ lap jelezve
+    .default-sheet-sheet = Alapértelmezett lap: __ocs_fmt_0__
+    .default-sheet-not-reported = Alapértelmezett lap: nincs jelezve
     .default-printer-name = Alapértelmezett nyomtató: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = Alapértelmezett nyomtató: a rendszer nem jelez egyet sem
     .printers-none-listed-by-the-system = Nyomtatók: a rendszer nem sorol fel egyet sem

@@ -5113,6 +5113,10 @@ plot =
     .save-changes-to-layout = Tallenna muutokset asetteluun
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ ei tue arkkia __ocs_fmt_1__; vaihdettiin oletusarkkiin __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ ei tue arkkia __ocs_fmt_1__; arkki säilytetään (PAPERUPDATE = 0).
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: tulostin ei ilmoita arkkeja; käytetään paperiluetteloa.
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: __ocs_fmt_1__ arkkia ilmoitettu
+    .default-sheet-sheet = Oletusarkki: __ocs_fmt_0__
+    .default-sheet-not-reported = Oletusarkki: ei ilmoitettu
     .default-printer-name = Oletustulostin: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = Oletustulostin: järjestelmä ei ilmoita yhtään
     .printers-none-listed-by-the-system = Tulostimet: järjestelmä ei luettele yhtään

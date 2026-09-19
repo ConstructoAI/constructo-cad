@@ -5102,6 +5102,10 @@ plot =
     .save-changes-to-layout = लेआउट में परिवर्तन सहेजें
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ __ocs_fmt_1__ का समर्थन नहीं करता; इसकी डिफ़ॉल्ट शीट __ocs_fmt_2__ पर स्विच किया गया (PAPERUPDATE = 1)।
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ __ocs_fmt_1__ का समर्थन नहीं करता; शीट रखी गई है (PAPERUPDATE = 0)।
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: प्रिंटर कोई शीट नहीं बताता; पेपर कैटलॉग का उपयोग किया जाता है।
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: __ocs_fmt_1__ शीट बताई गईं
+    .default-sheet-sheet = डिफ़ॉल्ट शीट: __ocs_fmt_0__
+    .default-sheet-not-reported = डिफ़ॉल्ट शीट: नहीं बताई गई
     .default-printer-name = डिफ़ॉल्ट प्रिंटर: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = डिफ़ॉल्ट प्रिंटर: सिस्टम ने कोई नहीं बताया
     .printers-none-listed-by-the-system = प्रिंटर: सिस्टम ने कोई सूचीबद्ध नहीं किया

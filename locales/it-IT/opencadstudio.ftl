@@ -5113,6 +5113,10 @@ plot =
     .save-changes-to-layout = Salva le modifiche nel layout
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ non supporta __ocs_fmt_1__; passato al foglio predefinito __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ non supporta __ocs_fmt_1__; il foglio viene mantenuto (PAPERUPDATE = 0).
+    .printer-the-printer-reports-no-sheets-the-paper-catalogue-is-used = __ocs_fmt_0__: la stampante non segnala fogli; viene usato il catalogo carta.
+    .printer-count-sheet-s-reported = __ocs_fmt_0__: __ocs_fmt_1__ foglio/i segnalato/i
+    .default-sheet-sheet = Foglio predefinito: __ocs_fmt_0__
+    .default-sheet-not-reported = Foglio predefinito: non segnalato
     .default-printer-name = Stampante predefinita: __ocs_fmt_0__
     .default-printer-none-reported-by-the-system = Stampante predefinita: nessuna segnalata dal sistema
     .printers-none-listed-by-the-system = Stampanti: nessuna elencata dal sistema
