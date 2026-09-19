@@ -5111,6 +5111,15 @@ plot =
     .save-changes-to-layout = Uložit změny do rozvržení
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ nepodporuje __ocs_fmt_1__; přepnuto na výchozí list __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ nepodporuje __ocs_fmt_1__; list byl zachován (PAPERUPDATE = 0).
+    .default-printer-name = Výchozí tiskárna: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Výchozí tiskárna: systém žádnou nehlásí
+    .printers-none-listed-by-the-system = Tiskárny: systém žádné neuvádí
+    .printers-count = Tiskárny (__ocs_fmt_0__):
+    .could-not-list-printers-error = Nelze vypsat tiskárny: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Tisk prochází aplikací PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Tisk jde přímo na tiskárnu (žádná aplikace PDF neregistruje příkaz tisku).
+    .via-the-pdf-application = přes aplikaci PDF
+    .direct-print = přímý tisk
     .y-mm = Y (mm)
 
 manage =

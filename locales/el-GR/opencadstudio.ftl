@@ -5114,6 +5114,15 @@ plot =
     .save-changes-to-layout = Αποθήκευση αλλαγών στο layout
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = Ο __ocs_fmt_0__ δεν υποστηρίζει το __ocs_fmt_1__· έγινε αλλαγή στο προεπιλεγμένο φύλλο του __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = Ο __ocs_fmt_0__ δεν υποστηρίζει το __ocs_fmt_1__· το φύλλο διατηρείται (PAPERUPDATE = 0).
+    .default-printer-name = Προεπιλεγμένος εκτυπωτής: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Προεπιλεγμένος εκτυπωτής: το σύστημα δεν αναφέρει κανέναν
+    .printers-none-listed-by-the-system = Εκτυπωτές: το σύστημα δεν αναφέρει κανέναν
+    .printers-count = Εκτυπωτές (__ocs_fmt_0__):
+    .could-not-list-printers-error = Δεν ήταν δυνατή η λίστα εκτυπωτών: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Οι εκτυπώσεις περνούν από την εφαρμογή PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Οι εκτυπώσεις πάνε απευθείας στον εκτυπωτή (καμία εφαρμογή PDF δεν δηλώνει εντολή εκτύπωσης).
+    .via-the-pdf-application = μέσω της εφαρμογής PDF
+    .direct-print = απευθείας εκτύπωση
     .y-mm = Y (mm)
 
 manage =

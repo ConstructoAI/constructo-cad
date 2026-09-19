@@ -5113,6 +5113,15 @@ plot =
     .save-changes-to-layout = 변경 사항을 배치에 저장
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__이(가) __ocs_fmt_1__을(를) 지원하지 않습니다. 기본 용지 __ocs_fmt_2__(으)로 전환했습니다 (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__이(가) __ocs_fmt_1__을(를) 지원하지 않습니다. 용지를 유지합니다 (PAPERUPDATE = 0).
+    .default-printer-name = 기본 프린터: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = 기본 프린터: 시스템이 보고하지 않음
+    .printers-none-listed-by-the-system = 프린터: 시스템에 나열된 항목 없음
+    .printers-count = 프린터 (__ocs_fmt_0__):
+    .could-not-list-printers-error = 프린터 목록을 가져올 수 없습니다: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = 출력은 PDF 응용 프로그램을 거칩니다: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = 출력이 프린터로 직접 전송됩니다 (인쇄 명령을 등록한 PDF 응용 프로그램이 없음).
+    .via-the-pdf-application = PDF 응용 프로그램 경유
+    .direct-print = 직접 인쇄
     .y-mm = Y (mm)
 
 manage =

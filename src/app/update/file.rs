@@ -4104,7 +4104,16 @@ impl OpenCADStudio {
             .collect();
         // Keep session-only choices while loading drawing fields from the layout.
         let d = &mut self.plot_dialog;
-        d.printers = crate::io::print_to_printer::list_printers();
+        match crate::io::print_to_printer::list_printers() {
+            Ok(printers) => {
+                d.printers = printers;
+                d.printers_error = None;
+            }
+            Err(error) => {
+                d.printers = Vec::new();
+                d.printers_error = Some(error);
+            }
+        }
         d.default_printer = crate::io::plot_device::default_printer_name();
         d.plot_styles = crate::io::plot_style::available_ctb_names();
         d.scales = scales;
@@ -4155,6 +4164,10 @@ impl OpenCADStudio {
             self.plot_dialog.scale_lw = false;
         }
         self.refresh_page_setups();
+        if let Some(error) = self.plot_dialog.printers_error.clone() {
+            self.command_line
+                .push_warning(crate::tf!("Could not list printers: {error}").as_ref());
+        }
         self.plot_prev = Some(previous);
         let cur = self.tabs[self.active_tab].scene.current_layout.clone();
         let layout_entry = format!("*{cur}*");
@@ -4323,8 +4336,14 @@ impl OpenCADStudio {
     /// print job honours. Without a named printer, or where the options
     /// cannot be listed, the platform's printer settings open instead.
     fn on_printer_properties(&mut self) -> Task<Message> {
-        let Some(printer) = self.plot_dialog.printer.clone().filter(|_| !self.plot_dialog.to_file)
-        else {
+        // "Default" is a real printer: its preferences sheet is the one to
+        // open, not the system's printer list.
+        let chosen = self
+            .plot_dialog
+            .printer
+            .clone()
+            .or_else(|| self.plot_dialog.default_printer.clone());
+        let Some(printer) = chosen.filter(|_| !self.plot_dialog.to_file) else {
             self.open_printer_settings_fallback();
             return Task::none();
         };

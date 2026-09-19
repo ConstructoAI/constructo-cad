@@ -5114,6 +5114,15 @@ plot =
     .save-changes-to-layout = Salvar alterações no layout
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ não suporta __ocs_fmt_1__; alterado para sua folha padrão __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ não suporta __ocs_fmt_1__; a folha foi mantida (PAPERUPDATE = 0).
+    .default-printer-name = Impressora padrão: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Impressora padrão: nenhuma informada pelo sistema
+    .printers-none-listed-by-the-system = Impressoras: nenhuma listada pelo sistema
+    .printers-count = Impressoras (__ocs_fmt_0__):
+    .could-not-list-printers-error = Não foi possível listar as impressoras: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = As plotagens passam pelo aplicativo de PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = As plotagens vão direto para a impressora (nenhum aplicativo de PDF registra um comando de impressão).
+    .via-the-pdf-application = pelo aplicativo de PDF
+    .direct-print = impressão direta
     .y-mm = Y (mm)
 
 manage =

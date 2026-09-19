@@ -5114,6 +5114,15 @@ plot =
     .save-changes-to-layout = Запазване на промените в оформлението
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ не поддържа __ocs_fmt_1__; превключено към листа по подразбиране __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ не поддържа __ocs_fmt_1__; листът се запазва (PAPERUPDATE = 0).
+    .default-printer-name = Принтер по подразбиране: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Принтер по подразбиране: системата не съобщава за такъв
+    .printers-none-listed-by-the-system = Принтери: системата не изброява нито един
+    .printers-count = Принтери (__ocs_fmt_0__):
+    .could-not-list-printers-error = Принтерите не могат да бъдат изброени: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Печатът минава през PDF приложението: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Печатът отива директно към принтера (никое PDF приложение не регистрира команда за печат).
+    .via-the-pdf-application = чрез PDF приложението
+    .direct-print = директен печат
     .y-mm = Y (мм)
 
 manage =

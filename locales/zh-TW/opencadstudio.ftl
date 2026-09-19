@@ -5109,6 +5109,15 @@ plot =
     .save-changes-to-layout = 將變更儲存到配置
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ 不支援 __ocs_fmt_1__；已切換至其預設圖紙 __ocs_fmt_2__（PAPERUPDATE = 1）。
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ 不支援 __ocs_fmt_1__；保留原圖紙（PAPERUPDATE = 0）。
+    .default-printer-name = 預設印表機：__ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = 預設印表機：系統未回報
+    .printers-none-listed-by-the-system = 印表機：系統未列出任何印表機
+    .printers-count = 印表機（__ocs_fmt_0__）：
+    .could-not-list-printers-error = 無法列出印表機：__ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = 列印透過 PDF 應用程式進行：__ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = 列印直接送到印表機（沒有 PDF 應用程式註冊列印命令）。
+    .via-the-pdf-application = 透過 PDF 應用程式
+    .direct-print = 直接列印
     .y-mm = Y (毫米)
 
 manage =

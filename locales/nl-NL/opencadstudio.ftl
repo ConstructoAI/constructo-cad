@@ -5112,6 +5112,15 @@ plot =
     .save-changes-to-layout = Wijzigingen in lay-out opslaan
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ ondersteunt __ocs_fmt_1__ niet; overgeschakeld naar het standaardblad __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ ondersteunt __ocs_fmt_1__ niet; het blad blijft behouden (PAPERUPDATE = 0).
+    .default-printer-name = Standaardprinter: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Standaardprinter: geen gemeld door het systeem
+    .printers-none-listed-by-the-system = Printers: geen vermeld door het systeem
+    .printers-count = Printers (__ocs_fmt_0__):
+    .could-not-list-printers-error = Kon printers niet weergeven: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Plots gaan via de PDF-toepassing: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Plots gaan rechtstreeks naar de printer (geen PDF-toepassing registreert een afdrukopdracht).
+    .via-the-pdf-application = via de PDF-toepassing
+    .direct-print = rechtstreeks afdrukken
     .y-mm = Y (mm)
 
 manage =

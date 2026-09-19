@@ -232,8 +232,14 @@ pub fn default_printer_name() -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// Windows default printer discovery lands with native GDI printing.
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+/// The spooler's default printer, by name — the same lookup every direct
+/// print job resolves "Default" through, so the dialog names what will print.
+#[cfg(target_os = "windows")]
+pub fn default_printer_name() -> Option<String> {
+    crate::io::print_to_printer::windows_default_printer().ok()
+}
+
+#[cfg(target_arch = "wasm32")]
 pub fn default_printer_name() -> Option<String> {
     None
 }

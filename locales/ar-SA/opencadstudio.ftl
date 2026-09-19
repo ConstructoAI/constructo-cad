@@ -5126,6 +5126,15 @@ plot =
     .save-changes-to-layout = حفظ التغييرات في التخطيط
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ لا يدعم __ocs_fmt_1__؛ تم التبديل إلى الورقة الافتراضية __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ لا يدعم __ocs_fmt_1__؛ تم الاحتفاظ بالورقة (PAPERUPDATE = 0).
+    .default-printer-name = الطابعة الافتراضية: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = الطابعة الافتراضية: لم يبلّغ النظام عن أي طابعة
+    .printers-none-listed-by-the-system = الطابعات: لم يسرد النظام أي طابعة
+    .printers-count = الطابعات (__ocs_fmt_0__):
+    .could-not-list-printers-error = تعذّر سرد الطابعات: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = تمر المخططات عبر تطبيق PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = تذهب المخططات مباشرة إلى الطابعة (لا يسجل أي تطبيق PDF أمر طباعة).
+    .via-the-pdf-application = عبر تطبيق PDF
+    .direct-print = طباعة مباشرة
     .y-mm = Y (مم)
 
 manage =

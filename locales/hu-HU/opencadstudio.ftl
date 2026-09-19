@@ -5113,6 +5113,15 @@ plot =
     .save-changes-to-layout = Módosítások mentése az elrendezésbe
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = A(z) __ocs_fmt_0__ nem támogatja a(z) __ocs_fmt_1__ lapot; átváltva az alapértelmezett __ocs_fmt_2__ lapra (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = A(z) __ocs_fmt_0__ nem támogatja a(z) __ocs_fmt_1__ lapot; a lap megmarad (PAPERUPDATE = 0).
+    .default-printer-name = Alapértelmezett nyomtató: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Alapértelmezett nyomtató: a rendszer nem jelez egyet sem
+    .printers-none-listed-by-the-system = Nyomtatók: a rendszer nem sorol fel egyet sem
+    .printers-count = Nyomtatók (__ocs_fmt_0__):
+    .could-not-list-printers-error = A nyomtatók nem listázhatók: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = A nyomtatás a PDF-alkalmazáson keresztül megy: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = A nyomtatás közvetlenül a nyomtatóra megy (egy PDF-alkalmazás sem regisztrál nyomtatási parancsot).
+    .via-the-pdf-application = a PDF-alkalmazáson keresztül
+    .direct-print = közvetlen nyomtatás
     .y-mm = Y (mm)
 
 manage =

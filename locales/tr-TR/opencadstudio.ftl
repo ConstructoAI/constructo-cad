@@ -5054,6 +5054,15 @@ plot =
     .save-changes-to-layout = Değişiklikleri yerleşime kaydet
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__, __ocs_fmt_1__ sayfasını desteklemiyor; varsayılan sayfası __ocs_fmt_2__ seçildi (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__, __ocs_fmt_1__ sayfasını desteklemiyor; sayfa korunuyor (PAPERUPDATE = 0).
+    .default-printer-name = Varsayılan yazıcı: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Varsayılan yazıcı: sistem hiçbirini bildirmiyor
+    .printers-none-listed-by-the-system = Yazıcılar: sistem hiçbirini listelemiyor
+    .printers-count = Yazıcılar (__ocs_fmt_0__):
+    .could-not-list-printers-error = Yazıcılar listelenemedi: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Çizimler PDF uygulaması üzerinden gider: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Çizimler doğrudan yazıcıya gider (hiçbir PDF uygulaması yazdırma komutu kaydetmiyor).
+    .via-the-pdf-application = PDF uygulaması üzerinden
+    .direct-print = doğrudan yazdırma
     .y-mm = Y (mm)
 
 manage =

@@ -5115,6 +5115,15 @@ plot =
     .save-changes-to-layout = Сохранить изменения в листе
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ не поддерживает __ocs_fmt_1__; выбран формат по умолчанию __ocs_fmt_2__ (PAPERUPDATE = 1).
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ не поддерживает __ocs_fmt_1__; формат сохранён (PAPERUPDATE = 0).
+    .default-printer-name = Принтер по умолчанию: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = Принтер по умолчанию: система не сообщает ни об одном
+    .printers-none-listed-by-the-system = Принтеры: система не перечисляет ни одного
+    .printers-count = Принтеры (__ocs_fmt_0__):
+    .could-not-list-printers-error = Не удалось получить список принтеров: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = Печать идёт через приложение PDF: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = Печать идёт напрямую на принтер (ни одно приложение PDF не регистрирует команду печати).
+    .via-the-pdf-application = через приложение PDF
+    .direct-print = прямая печать
     .y-mm = Y (мм)
 
 manage =

@@ -5102,6 +5102,15 @@ plot =
     .save-changes-to-layout = लेआउट में परिवर्तन सहेजें
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ __ocs_fmt_1__ का समर्थन नहीं करता; इसकी डिफ़ॉल्ट शीट __ocs_fmt_2__ पर स्विच किया गया (PAPERUPDATE = 1)।
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ __ocs_fmt_1__ का समर्थन नहीं करता; शीट रखी गई है (PAPERUPDATE = 0)।
+    .default-printer-name = डिफ़ॉल्ट प्रिंटर: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = डिफ़ॉल्ट प्रिंटर: सिस्टम ने कोई नहीं बताया
+    .printers-none-listed-by-the-system = प्रिंटर: सिस्टम ने कोई सूचीबद्ध नहीं किया
+    .printers-count = प्रिंटर (__ocs_fmt_0__):
+    .could-not-list-printers-error = प्रिंटर सूचीबद्ध नहीं किए जा सके: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = प्लॉट PDF एप्लिकेशन के माध्यम से जाते हैं: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = प्लॉट सीधे प्रिंटर पर जाते हैं (कोई PDF एप्लिकेशन प्रिंट कमांड पंजीकृत नहीं करता)।
+    .via-the-pdf-application = PDF एप्लिकेशन के माध्यम से
+    .direct-print = सीधी प्रिंटिंग
     .y-mm = Y (मिमी)
 
 manage =

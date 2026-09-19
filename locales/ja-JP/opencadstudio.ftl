@@ -5102,6 +5102,15 @@ plot =
     .save-changes-to-layout = 変更をレイアウトに保存
     .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ は __ocs_fmt_1__ に対応していません。既定の用紙 __ocs_fmt_2__ に切り替えました（PAPERUPDATE = 1）。
     .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ は __ocs_fmt_1__ に対応していません。用紙はそのままです（PAPERUPDATE = 0）。
+    .default-printer-name = 既定のプリンター: __ocs_fmt_0__
+    .default-printer-none-reported-by-the-system = 既定のプリンター: システムから報告なし
+    .printers-none-listed-by-the-system = プリンター: システムに一覧なし
+    .printers-count = プリンター（__ocs_fmt_0__）:
+    .could-not-list-printers-error = プリンターを一覧できませんでした: __ocs_fmt_0__
+    .plots-go-through-the-pdf-application-command = 印刷は PDF アプリケーション経由です: __ocs_fmt_0__
+    .plots-go-straight-to-the-printer-no-pdf-application-registers-a-print-verb = 印刷はプリンターへ直接送られます（印刷コマンドを登録した PDF アプリケーションがありません）。
+    .via-the-pdf-application = PDF アプリケーション経由
+    .direct-print = 直接印刷
     .y-mm = Y（mm）
 
 manage =
