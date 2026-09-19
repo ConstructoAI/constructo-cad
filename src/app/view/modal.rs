@@ -289,6 +289,7 @@ impl OpenCADStudio {
                         crate::ui::window::options::AppPrefs {
                             savetime_min: self.savetime_min,
                             backup_on_save: self.backup_on_save,
+                            page_setup_on_new_layout: self.plot_dialog.page_setup_on_new_layout,
                             textfill: crate::scene::text::sdf_atlas::textfill(),
                             cliprompt_lines: self.cliprompt_lines,
                             commandline_fade_ms: self.commandline_fade_ms,

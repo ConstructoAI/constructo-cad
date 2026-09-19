@@ -2196,6 +2196,10 @@ pub enum Message {
     SaveTimeChanged(i32),
     /// Toggle keeping a `.bak` copy when overwriting a drawing (ISAVEBAK).
     BackupOnSaveChanged(bool),
+    /// A drawing was picked to import page setups from (`PSETUPIN`).
+    PageSetupImportFile(std::path::PathBuf),
+    /// Options: open the Plot / Page Setup dialog for every new layout.
+    PageSetupOnNewLayoutChanged(bool),
     /// Toggle filled TrueType glyphs (TEXTFILL).
     TextFillChanged(bool),
     /// Change how many prompt lines sit above the command window (CLIPROMPTLINES).

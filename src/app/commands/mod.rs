@@ -567,6 +567,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "BACKGROUNDPLOT",
         "CTAB",
         "TILEMODE",
+        "PSETUPIN",
+        "-PSETUPIN",
         "DISPSILH",
         "WORLDVIEW",
         "LIMCHECK",

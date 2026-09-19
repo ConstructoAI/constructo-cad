@@ -1,9 +1,11 @@
-//! Plot system variables. `PLOTOFFSET`, `PAPERUPDATE`, `PLOTROTMODE`,
-//! `PLOTTRANSPARENCYOVERRIDE` and `BACKGROUNDPLOT` are plot preferences of
-//! the application, kept with the Plot dialog's persisted settings; `CTAB`
-//! and `TILEMODE` say which layout of the drawing is current. Each is
-//! typeable on its own (`PLOTOFFSET 1`, `CTAB Layout1`) and through
-//! `SETVAR`, and a bare name prompts for the value like the other variables.
+//! Plot system variables and the page-setup import command. `PLOTOFFSET`,
+//! `PAPERUPDATE`, `PLOTROTMODE`, `PLOTTRANSPARENCYOVERRIDE` and
+//! `BACKGROUNDPLOT` are plot preferences of the application, kept with the
+//! Plot dialog's persisted settings; `CTAB` and `TILEMODE` say which layout
+//! of the drawing is current. Each is typeable on its own (`PLOTOFFSET 1`,
+//! `CTAB Layout1`) and through `SETVAR`, and a bare name prompts for the
+//! value like the other variables. `PSETUPIN` brings named page setups in
+//! from another drawing (see `app::update::page_setup_import`).
 
 use crate::app::{Message, OpenCADStudio};
 use iced::Task;
@@ -39,6 +41,16 @@ enum Outcome {
 
 impl OpenCADStudio {
     pub(super) fn dispatch_plotvars(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
+        // PSETUPIN [file [* | name,name…]] — the dash form is the same
+        // command; both read the file and report on the command line.
+        for name in ["PSETUPIN", "-PSETUPIN"] {
+            if cmd == name {
+                return Some(self.on_psetupin(""));
+            }
+            if let Some(args) = cmd.strip_prefix(name).filter(|rest| rest.starts_with(' ')) {
+                return Some(self.on_psetupin(args));
+            }
+        }
         let rest = cmd.strip_prefix("SETVAR ").map(str::trim).unwrap_or(cmd);
         let mut parts = rest.splitn(2, char::is_whitespace);
         let name = parts.next().unwrap_or("").to_ascii_uppercase();

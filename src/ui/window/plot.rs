@@ -151,6 +151,43 @@ pub enum PlotFlag {
     SaveToLayout,
 }
 
+/// The page setups of another drawing, offered for import (`PSETUPIN`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageSetupImportDraft {
+    /// The drawing they come from, as shown to the user.
+    pub file: String,
+    /// Each setup with whether it is ticked for import. The settings are
+    /// carried along so the source file is read once.
+    pub setups: Vec<(String, acadrust::objects::PlotSettings, bool)>,
+    /// Why the file gave nothing, when it did not.
+    pub error: Option<String>,
+}
+
+impl PageSetupImportDraft {
+    pub fn selected(&self) -> impl Iterator<Item = (&str, &acadrust::objects::PlotSettings)> {
+        self.setups
+            .iter()
+            .filter(|(_, _, on)| *on)
+            .map(|(name, ps, _)| (name.as_str(), ps))
+    }
+}
+
+/// Edits of the page-setup import chooser.
+#[derive(Debug, Clone)]
+pub enum PageSetupImportMsg {
+    /// Ask for the drawing to import from.
+    Pick,
+    /// The drawing was read (or could not be): its name and page setups.
+    Loaded(Result<(String, Vec<(String, acadrust::objects::PlotSettings)>), String>),
+    /// Tick or untick one setup.
+    Toggle(String),
+    /// Tick or untick every setup.
+    All(bool),
+    /// Import the ticked setups and close the chooser.
+    Apply,
+    Cancel,
+}
+
 /// Every edit the Plot dialog can emit. Wrapped in `Message::PlotDlg` so the
 /// top-level match stays a single arm.
 #[derive(Debug, Clone)]
@@ -209,6 +246,8 @@ pub enum PlotDlgMsg {
     CopySetup,
     /// Begin an inline rename of the given page setup row.
     RenameStart(String),
+    /// Import named page setups from another drawing (`PSETUPIN`).
+    Import(PageSetupImportMsg),
     /// Delete the selected named page setup.
     DeleteSetup,
     /// Live edit of the new/rename name field.
@@ -397,6 +436,12 @@ pub struct PlotDialogState {
     /// The in-line printer-properties editor while it is open.
     #[serde(skip)]
     pub printer_editor: Option<PrinterOptionsDraft>,
+    /// The page-setup import chooser while it is open.
+    #[serde(skip)]
+    pub import_draft: Option<PageSetupImportDraft>,
+    /// Open the Plot / Page Setup dialog whenever a new layout is created,
+    /// the way a page-setup manager is expected to greet a new layout.
+    pub page_setup_on_new_layout: bool,
     /// Chosen printer name, or `None` for the system default.
     pub printer: Option<String>,
     /// Output goes to a PDF file instead of a printer.
@@ -502,6 +547,8 @@ impl Default for PlotDialogState {
             custom_editor: None,
             driver_options: std::collections::BTreeMap::new(),
             printer_editor: None,
+            import_draft: None,
+            page_setup_on_new_layout: false,
             printer: None,
             to_file: false,
             paper: paper_catalog::default_paper().canonical.to_string(),
@@ -718,6 +765,58 @@ fn check_enabled<'a>(
         .text_size(11)
         .style(checkbox::primary)
         .into()
+}
+
+/// The import chooser: the source drawing's name, one tick per page setup,
+/// All / None, and Import / Cancel.
+fn page_setup_import_chooser<'a>(
+    draft: &'a PageSetupImportDraft,
+    height: Length,
+) -> Element<'a, Message> {
+    let msg = |m: PageSetupImportMsg| Message::PlotDlg(PlotDlgMsg::Import(m));
+    let mut rows = column![].spacing(3);
+    if let Some(error) = &draft.error {
+        rows = rows.push(text(error.clone()).size(10).style(muted_style));
+    } else if draft.setups.is_empty() {
+        let none = text(t!("No named page setups in this drawing.")).size(10);
+        rows = rows.push(none.style(muted_style));
+    }
+    for (name, _, on) in &draft.setups {
+        let name = name.clone();
+        rows = rows.push(
+            checkbox(*on)
+                .label(name.clone())
+                .on_toggle(move |_| msg(PageSetupImportMsg::Toggle(name.clone())))
+                .size(13)
+                .text_size(11),
+        );
+    }
+    let all = !draft.setups.is_empty() && draft.setups.iter().all(|(_, _, on)| *on);
+    let any = draft.setups.iter().any(|(_, _, on)| *on);
+    let mut import = button(text(t!("Import")).size(11)).style(btn(true)).padding([4, 8]);
+    if any {
+        import = import.on_press(msg(PageSetupImportMsg::Apply));
+    }
+    column![
+        text(draft.file.clone()).size(10).style(muted_style),
+        scrollable(rows).height(height),
+        checkbox(all)
+            .label(t!("All"))
+            .on_toggle(move |on| msg(PageSetupImportMsg::All(on)))
+            .size(13)
+            .text_size(11),
+        row![
+            import,
+            button(text(t!("Cancel")).size(11))
+                .on_press(msg(PageSetupImportMsg::Cancel))
+                .style(btn(false))
+                .padding([4, 8]),
+        ]
+        .spacing(4),
+    ]
+    .spacing(6)
+    .padding(4)
+    .into()
 }
 
 /// The custom-scale row: `Custom: [paper] mm = [drawing] units`. Editing
@@ -1011,6 +1110,12 @@ pub fn view_window(
         } else {
             Space::new().height(0).into()
         };
+    // While an import is being chosen, the list shows the other drawing's
+    // setups with a tick each instead of this drawing's.
+    let list_body: Element<'_, Message> = match &s.import_draft {
+        Some(draft) => page_setup_import_chooser(draft, height),
+        None => list_body,
+    };
     let list_panel = container(
         column![
             text(t!("Page setups")).size(10).style(muted_style),
@@ -1062,10 +1167,18 @@ pub fn view_window(
     if is_named && !print_all_options {
         delete_button = delete_button.on_press(Message::PlotDlg(PlotDlgMsg::DeleteSetup));
     }
+    let mut import_button = button(text(t!("Import…")).size(11))
+        .style(btn(false))
+        .padding([4, 12]);
+    if !print_all_options && s.import_draft.is_none() {
+        import_button = import_button
+            .on_press(Message::PlotDlg(PlotDlgMsg::Import(PageSetupImportMsg::Pick)));
+    }
     let left_bar = row![
         new_button,
         copy_button,
         delete_button,
+        import_button,
     ]
     .spacing(4);
 
