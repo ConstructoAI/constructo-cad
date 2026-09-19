@@ -56,8 +56,8 @@ pub struct PrintOptions {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn list_printers() -> Vec<String> {
-    Vec::new()
+pub fn list_printers() -> Result<Vec<String>, String> {
+    Ok(Vec::new())
 }
 
 #[cfg(target_arch = "wasm32")]

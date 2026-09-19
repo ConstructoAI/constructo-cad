@@ -5119,8 +5119,8 @@ impl OpenCADStudio {
         d.apply_plot_styles = ps.flags.plot_plot_styles;
         d.show_plot_styles = ps.flags.show_plot_styles;
         d.style_missing = !d.style_name.is_empty() && !style_loaded;
-        self.refresh_custom_scale_fields();
         d.style_error = if d.style_missing { style_error } else { None };
+        self.refresh_custom_scale_fields();
     }
 
     /// Tell the user what a plot style table's loader had to tolerate.
