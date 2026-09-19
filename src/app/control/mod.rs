@@ -248,6 +248,7 @@ fn command_category(name: &str) -> &'static str {
         "GCHORIZONTAL",
         "VCONSTRAINT",
         "ECONSTRAINT",
+        "GCEQUAL",
         "TCONSTRAINT",
         "GCCONCENTRIC",
         "NRCONSTRAINT",

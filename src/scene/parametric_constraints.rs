@@ -265,6 +265,89 @@ pub(crate) fn set_polyline_vertex(
     }
 }
 
+/// The size an Equal relation copies.
+#[derive(Clone, Copy)]
+pub(crate) enum EqualSize {
+    /// A line's or a straight polyline segment's length.
+    Length(f64),
+    /// A circle's or an arc's radius.
+    Radius(f64),
+}
+
+pub(crate) fn equal_size(
+    document: &acadrust::CadDocument,
+    reference: ParametricRef,
+) -> Option<EqualSize> {
+    let entity = document.get_entity(reference.entity)?;
+    match entity {
+        acadrust::EntityType::Circle(circle) if reference.marker.is_none() => {
+            Some(EqualSize::Radius(circle.radius))
+        }
+        acadrust::EntityType::Arc(arc) if reference.marker.is_none() => {
+            Some(EqualSize::Radius(arc.radius))
+        }
+        acadrust::EntityType::Line(_)
+        | acadrust::EntityType::LwPolyline(_)
+        | acadrust::EntityType::Polyline2D(_) => {
+            let index = reference.segment_index().map_or(0, |index| index as i32);
+            let start = resolve_point(entity, index)?;
+            let end = resolve_point(entity, index + 1)?;
+            let length = (end - start).length();
+            (length > 1.0e-12).then_some(EqualSize::Length(length))
+        }
+        _ => None,
+    }
+}
+
+/// `follower` resized to `first`'s size the way the reference does it: a
+/// line or segment keeps its start and direction and only its end moves,
+/// a circle or arc keeps its center and takes the radius. `None` when the
+/// two do not share a size kind.
+pub(crate) fn equal_size_follower(
+    document: &acadrust::CadDocument,
+    first: ParametricRef,
+    follower: ParametricRef,
+) -> Option<acadrust::EntityType> {
+    let size = equal_size(document, first)?;
+    let original = document.get_entity(follower.entity)?;
+    let mut entity = original.clone();
+    match size {
+        EqualSize::Radius(radius) if follower.marker.is_none() => match &mut entity {
+            acadrust::EntityType::Circle(circle) => circle.radius = radius,
+            acadrust::EntityType::Arc(arc) => arc.radius = radius,
+            _ => return None,
+        },
+        EqualSize::Length(length) => {
+            let index = follower.segment_index().map_or(0, |index| index as i32);
+            let start = resolve_point(original, index)?;
+            let end = resolve_point(original, index + 1)?;
+            let current = (end - start).length();
+            if current <= 1.0e-12 {
+                return None;
+            }
+            let scale = length / current;
+            let x = start.x + (end.x - start.x) * scale;
+            let y = start.y + (end.y - start.y) * scale;
+            if matches!(
+                original,
+                acadrust::EntityType::LwPolyline(_) | acadrust::EntityType::Polyline2D(_)
+            ) {
+                if !set_polyline_vertex(&mut entity, index as usize + 1, x, y) {
+                    return None;
+                }
+            } else if let (acadrust::EntityType::Line(line), None) = (&mut entity, follower.marker)
+            {
+                line.end.x = x;
+                line.end.y = y;
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    }
+    Some(entity)
+}
+
 /// Grabbed points are exact kernel inputs; the solver anchors the remaining
 /// endpoint coordinates according to the line's directional constraints.
 pub(crate) fn grip_solve_anchor_refs(
@@ -1114,9 +1197,10 @@ fn glyph_placements(
     document: &acadrust::CadDocument,
     constraint: &ParametricConstraint,
 ) -> Vec<(Vector3, Vector3)> {
+    // Relations the reference marks on every object they join.
     if matches!(
         constraint.kind,
-        ConstraintKind::Parallel | ConstraintKind::Symmetric
+        ConstraintKind::Parallel | ConstraintKind::Symmetric | ConstraintKind::Equal
     ) {
         return constraint
             .refs
