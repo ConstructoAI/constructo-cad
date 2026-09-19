@@ -1,0 +1,103 @@
+name: Bundle web Constructo (/cad)
+
+# Bâtit le bundle WebAssembly servi par l'ERP sous `app.constructoai.ca/cad/`.
+#
+# POURQUOI ICI ET PAS DANS LE BUILD RENDER : compiler 425 000 lignes de Rust
+# (iced + wgpu + cadkernel) prend des dizaines de minutes et exige la chaîne
+# rustup/trunk/wasm-bindgen. Le build Render de l'ERP est Node + Python et doit
+# le rester ; il descendra l'artefact produit ici au lieu de le recompiler.
+#
+# `--public-url /cad/` est ce qui distingue ce build de celui de l'amont
+# (`/app/`) : c'est le préfixe sous lequel `erp_api.py` sert les fichiers.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: constructo-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `build.rs` mesure la distance au dernier tag pour étiqueter la
+          # version ; un clone superficiel la remplacerait par `+g<hash>`.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Installer trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+
+      # wasm-bindgen refuse de tourner si sa version diffère de celle de la
+      # crate compilée dans le binaire : on lit la version depuis Cargo.lock.
+      - name: Lire la version de wasm-bindgen
+        id: wasm_bindgen
+        run: |
+          VERSION=$(sed -n '/name = "wasm-bindgen"/{n;s/version = "\(.*\)"/\1/p;q;}' Cargo.lock)
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "wasm-bindgen $VERSION" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Installer wasm-bindgen CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.wasm_bindgen.outputs.version }}
+
+      - name: Bâtir le bundle sous /cad/
+        run: |
+          debut=$(date +%s)
+          trunk build --locked --release \
+            --public-url /cad/ \
+            --dist dist/cad \
+            --html-output index.html \
+            web-app.html
+          echo "Build wasm : $(( $(date +%s) - debut )) s" >> "$GITHUB_STEP_SUMMARY"
+
+      # Le coût pour le poste d'un client se mesure en octets TRANSFÉRÉS, pas
+      # en octets sur le disque : l'ERP servira le bundle compressé.
+      - name: Mesurer le bundle
+        run: |
+          test -f dist/cad/index.html
+          {
+            echo ""
+            echo "| Fichier | Sur disque | gzip -9 |"
+            echo "|---|---:|---:|"
+            for f in $(find dist/cad -type f | sort); do
+              brut=$(stat -c %s "$f")
+              comprime=$(gzip -9 -c "$f" | wc -c)
+              printf '| %s | %s | %s |\n' \
+                "${f#dist/cad/}" \
+                "$(numfmt --to=iec "$brut")" \
+                "$(numfmt --to=iec "$comprime")"
+            done
+            echo ""
+            echo "**Total sur disque : $(du -sh dist/cad | cut -f1)**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cad-web-bundle
+          path: dist/cad
+          retention-days: 14
+          # Le .wasm est déjà mal compressible par le zip d'artefact ; ne pas
+          # payer deux fois le temps de compression.
+          compression-level: 1
