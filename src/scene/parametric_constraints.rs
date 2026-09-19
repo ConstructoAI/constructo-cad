@@ -202,6 +202,69 @@ pub(crate) fn directional_axis_endpoints(
     }
 }
 
+/// The axis a lone Horizontal/Vertical reference — or two points on one
+/// entity — turns onto its datum: the entity, the anchor that stays, the
+/// axis end that moves, and for a polyline the vertex to move instead of
+/// turning the whole entity.
+pub(crate) fn axis_alignment_target(
+    document: &acadrust::CadDocument,
+    refs: &[ParametricRef],
+) -> Option<(Handle, Vector3, Vector3, Option<usize>)> {
+    let (handle, start_marker, end_marker) = match refs {
+        [reference] => {
+            let entity = document.get_entity(reference.entity)?;
+            if reference.directional_axis().is_some() {
+                let [start, end] = directional_axis_endpoints(entity, *reference)?;
+                return Some((reference.entity, start, end, None));
+            }
+            let index = reference.segment_index().map_or(0, |index| index as i32);
+            (reference.entity, index, index + 1)
+        }
+        [first, second] if first.entity == second.entity => {
+            (first.entity, first.marker?, second.marker?)
+        }
+        _ => return None,
+    };
+    let entity = document.get_entity(handle)?;
+    let start = resolve_point(entity, start_marker)?;
+    let end = resolve_point(entity, end_marker)?;
+    let vertex = matches!(
+        entity,
+        acadrust::EntityType::LwPolyline(_) | acadrust::EntityType::Polyline2D(_)
+    )
+    .then(|| usize::try_from(end_marker).ok())
+    .flatten();
+    Some((handle, start, end, vertex))
+}
+
+/// Moves one polyline vertex in its plane; `false` for any other entity.
+pub(crate) fn set_polyline_vertex(
+    entity: &mut acadrust::EntityType,
+    index: usize,
+    x: f64,
+    y: f64,
+) -> bool {
+    match entity {
+        acadrust::EntityType::LwPolyline(polyline) => polyline
+            .vertices
+            .get_mut(index)
+            .map(|vertex| {
+                vertex.location.x = x;
+                vertex.location.y = y;
+            })
+            .is_some(),
+        acadrust::EntityType::Polyline2D(polyline) => polyline
+            .vertices
+            .get_mut(index)
+            .map(|vertex| {
+                vertex.location.x = x;
+                vertex.location.y = y;
+            })
+            .is_some(),
+        _ => false,
+    }
+}
+
 /// Grabbed points are exact kernel inputs; the solver anchors the remaining
 /// endpoint coordinates according to the line's directional constraints.
 pub(crate) fn grip_solve_anchor_refs(
