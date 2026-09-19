@@ -3474,7 +3474,9 @@ pub enum Message {
     /// Open file dialog to load a CTB/STB plot style table.
     PlotStyleLoad,
     /// Callback when the user picks (or cancels) a CTB/STB file.
-    PlotStyleLoaded(Option<crate::io::plot_style::PlotStyleTable>),
+    /// The Load… picker finished: a table, nothing (cancelled), or why the
+    /// file could not be read.
+    PlotStyleLoaded(Result<Option<crate::io::plot_style::PlotStyleTable>, String>),
     /// Clear the active plot style table.
     PlotStyleClear,
     /// Open/close the Plot Style panel.

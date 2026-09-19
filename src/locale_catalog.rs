@@ -2059,6 +2059,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Plot table type" => Some(("properties", "plot-table-type")),
         "Plot transparency" => Some(("plot", "plot-transparency")),
         "Plot upside-down" => Some(("plot", "plot-upside-down")),
+        "Named plot style tables (.stb) are not supported yet: {name}" => Some(("plot", "named-plot-style-tables-stb-are-not-supported-yet-name")),
+        "{name} was not found in the plot styles folder ({folder})." => Some(("plot", "name-was-not-found-in-the-plot-styles-folder-folder")),
         "Plot window: {x0:.2},{y0:.2} to {x1:.2},{y1:.2}" => Some(("common", "plot-window-x0-2-y0-2-to-x1-2-y1-2")),
         "Plot window: {x1:.2},{y1:.2} to {x2:.2},{y2:.2}" => Some(("common", "plot-window-x1-2-y1-2-to-x2-2-y2-2")),
         "Plugin '{id}' failed to load: {e}" => Some(("common", "plugin-id-failed-to-load-e")),

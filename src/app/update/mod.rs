@@ -8946,7 +8946,7 @@ impl OpenCADStudio {
             Message::PlotStyleLoad => {
                 Task::perform(crate::io::pick_plot_style(), Message::PlotStyleLoaded)
             }
-            Message::PlotStyleLoaded(Some(table)) => {
+            Message::PlotStyleLoaded(Ok(Some(table))) => {
                 if table.is_stb {
                     self.command_line.push_error(
                         crate::t!(
@@ -8958,6 +8958,8 @@ impl OpenCADStudio {
                 }
                 self.plot_dialog.style_name = table.name.clone();
                 self.plot_dialog.style_missing = false;
+                self.plot_dialog.style_error = None;
+                self.report_plot_style_warnings(&table);
                 self.command_line.push_output(
                     crate::tf!(
                         "Plot style '{}' loaded ({} color entries).",
@@ -8974,7 +8976,15 @@ impl OpenCADStudio {
                 self.plot_dialog.plot_styles = crate::io::plot_style::available_ctb_names();
                 Task::none()
             }
-            Message::PlotStyleLoaded(None) => Task::none(),
+            Message::PlotStyleLoaded(Ok(None)) => Task::none(),
+            Message::PlotStyleLoaded(Err(error)) => {
+                // The file the user pointed at could not be read: say why,
+                // in the dialog as well as on the command line.
+                self.command_line.push_error(&error);
+                self.plot_dialog.style_missing = true;
+                self.plot_dialog.style_error = Some(error);
+                Task::none()
+            }
             Message::PlotStyleClear => {
                 self.active_plot_style = None;
                 self.plot_dialog.style_name.clear();
@@ -9001,12 +9011,15 @@ impl OpenCADStudio {
                     if needs_load {
                         match crate::io::plot_style::PlotStyleTable::load_named(&selected_style) {
                             Ok(table) => {
+                                self.report_plot_style_warnings(&table);
                                 self.active_plot_style = Some(table);
                                 self.plot_dialog.style_missing = false;
+                                self.plot_dialog.style_error = None;
                             }
                             Err(error) => {
                                 self.plot_dialog.style_missing = true;
                                 self.command_line.push_error(&error);
+                                self.plot_dialog.style_error = Some(error);
                                 return Task::none();
                             }
                         }

@@ -525,6 +525,9 @@ pub struct PlotDialogState {
     /// The selected setup references a style table that is not loaded.
     #[serde(skip)]
     pub style_missing: bool,
+    /// Why the selected table could not be loaded, shown under the Table row.
+    #[serde(skip)]
+    pub style_error: Option<String>,
     /// Named page setups in the document (refreshed when the dialog opens).
     #[serde(skip)]
     pub page_setups: Vec<String>,
@@ -596,6 +599,7 @@ impl Default for PlotDialogState {
             show_plot_styles: false,
             plot_styles: Vec::new(),
             style_missing: false,
+            style_error: None,
             page_setups: Vec::new(),
             selected_setup: String::new(),
             name_input: None,
@@ -850,6 +854,17 @@ fn custom_scale_row<'a>(s: &'a PlotDialogState, enabled: bool) -> Element<'a, Me
     .spacing(6)
     .align_y(iced::Center)
     .into()
+}
+
+/// Why the selected plot style table is not loaded, under the Table row —
+/// the file's own problem, or where a copy would be found.
+fn style_note<'a>(s: &'a PlotDialogState) -> Element<'a, Message> {
+    match &s.style_error {
+        Some(error) if s.style_missing => {
+            text(error.clone()).size(10).style(muted_style).into()
+        }
+        _ => Space::new().height(0).into(),
+    }
 }
 
 fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -1460,6 +1475,7 @@ pub fn view_window(
             PlotDlgMsg::Style,
             width,
         ),
+        style_note(s),
         check_enabled(
             t!("Plot with plot styles"),
             s.apply_plot_styles,
