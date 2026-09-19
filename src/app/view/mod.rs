@@ -35,12 +35,9 @@ pub(in crate::app) use overlay::{MTEXT_TEXT_ID, TEXT_INLINE_ID};
 pub(in crate::app) const VIEWPORT_CAPTURE_BOUNDS_ID: &str = "viewport-capture-bounds";
 
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_REGION_PX;
-static MOBILE_SPONSOR_IMAGE: std::sync::LazyLock<iced::widget::image::Handle> =
-    std::sync::LazyLock::new(|| {
-        iced::widget::image::Handle::from_bytes(
-            include_bytes!("../../../assets/sponsors/cad-editor-mobile-dwg-viewer.png").as_slice(),
-        )
-    });
+// FORK CONSTRUCTO : `MOBILE_SPONSOR_IMAGE` supprime avec le bloc « Sponsors ».
+// C'etait l'encart publicitaire d'un lecteur DWG mobile tiers, embarque par
+// `include_bytes!` — donc dans le poids du bundle telecharge par chaque client.
 
 /// Background used by drafting overlays in model or paper space.
 fn crosshair_background(tab: &DocumentTab, is_paper: bool) -> [f32; 4] {
@@ -3391,24 +3388,12 @@ fn start_page_content<'a>(
             })
     };
 
-    // Donate — retire dans ce fork ; conserve pour limiter l'ecart avec l'amont.
-    #[allow(unused_variables)]
-    let donate_btn = {
-        button(
-            row![
-                crate::ui::icons::themed_danger_text(crate::ui::icons::HEART, 14.0),
-                text(crate::tr!("start", "donate")).size(14),
-            ]
-            .spacing(5)
-            .align_y(iced::Center),
-        )
-        .on_press(Message::RibbonToolClick {
-            tool_id: "DONATE".to_string(),
-            event: crate::modules::ModuleEvent::Command("DONATE".to_string()),
-        })
-        .padding([10, 22])
-        .style(|theme: &Theme, status| start_action_shape(button::danger(theme, status)))
-    };
+    // FORK CONSTRUCTO : bloc supprime (don / Reddit / sponsors).
+    // Il etait d'abord garde en place derriere `#[allow(unused_variables)]`,
+    // mais un widget `iced` non utilise ne peut PAS voir son type generique
+    // infere : `error[E0283]: type annotations needed`. Garder du code mort
+    // « pour limiter l'ecart avec l'amont » ne compilait pas — le rebase se
+    // fera sur une suppression franche.
 
     let primary_row = WrapFlow::new(vec![
         outline_btn(crate::tr!("start", "new-drawing"), Message::TabNew).into(),
@@ -3458,75 +3443,7 @@ fn start_page_content<'a>(
         .row_h(44.0)
         .report_natural_width(action_width_out.clone());
 
-    // Reddit — retire dans ce fork ; conserve pour limiter l'ecart avec l'amont.
-    #[allow(unused_variables)]
-    let reddit_btn = button(
-        row![
-            iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
-                "../../../assets/icons/reddit.svg"
-            )))
-            .width(20)
-            .height(20),
-            text("r/OpenCADStudio").size(14),
-        ]
-        .spacing(7)
-        .align_y(iced::Center),
-    )
-    .on_press(Message::OpenUrl(
-        "https://www.reddit.com/r/OpenCADStudio/".to_string(),
-    ))
-    .padding([10, 22])
-    .style(|theme: &Theme, status| {
-        let palette = theme.palette();
-        let pair = match status {
-            button::Status::Hovered => palette.background.strong,
-            _ => palette.background.weak,
-        };
-        start_action_shape(button::Style {
-            background: Some(Background::Color(pair.color)),
-            text_color: pair.text,
-            border: Border {
-                color: Color::from_rgb8(255, 69, 0),
-                width: 1.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-    });
 
-    // Sponsors — retire dans ce fork ; conserve pour limiter l'ecart avec l'amont.
-    #[allow(unused_variables)]
-    let sponsors = column![
-        text(crate::tr!("start", "sponsors")).size(15),
-        mouse_area(
-            container(
-                iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
-                    "../../../assets/sponsors/openaec-logo-dark-on-light.svg"
-                )))
-                .width(Fill)
-                .height(iced::Length::Fixed(120.0))
-                .content_fit(iced::ContentFit::Contain),
-            )
-            .width(Fill.max(300.0)),
-        )
-        .interaction(iced::mouse::Interaction::Pointer)
-        .on_press(Message::OpenUrl("https://open-aec.com/".to_string())),
-        mouse_area(
-            container(
-                iced::widget::image(MOBILE_SPONSOR_IMAGE.clone())
-                    .width(Fill)
-                    .content_fit(iced::ContentFit::Contain),
-            )
-            .width(Fill),
-        )
-        .interaction(iced::mouse::Interaction::Pointer)
-        .on_press(Message::OpenUrl(
-            "https://play.google.com/store/apps/details?id=net.cadeditor.app".to_string(),
-        )),
-    ]
-    .spacing(10)
-    .align_x(iced::alignment::Horizontal::Center)
-    .width(Fill);
 
     let content = column![
         Space::new().height(iced::Length::Fixed(28.0)),
