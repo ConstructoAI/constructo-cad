@@ -1317,25 +1317,6 @@ pub(crate) fn constraint_hover_points(
         }
     }
 
-    if matches!(
-        constraint.kind,
-        ConstraintKind::Horizontal | ConstraintKind::Vertical
-    ) {
-        for reference in &constraint.refs {
-            let Some(entity) = document.get_entity(reference.entity) else {
-                continue;
-            };
-            if let Some(endpoints) = constraint_segment_endpoints(document, *reference) {
-                for point in endpoints {
-                    push_unique(&mut points, point);
-                }
-            } else if matches!(entity, acadrust::EntityType::Line(_)) {
-                for point in super::dimension_assoc::source_points(entity) {
-                    push_unique(&mut points, point);
-                }
-            }
-        }
-    }
 
     if matches!(
         constraint.kind,
