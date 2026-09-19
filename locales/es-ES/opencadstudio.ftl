@@ -5099,6 +5099,12 @@ plot =
     .system-default-printer = Impresora predeterminada del sistema
     .what-to-plot = Qué trazar
     .x-mm = X (mm)
+    .x-in = X (pulg)
+    .y-in = Y (pulg)
+    .hide-paperspace-objects = Ocultar objetos del espacio papel
+    .save-changes-to-layout = Guardar cambios en la presentación
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ no admite __ocs_fmt_1__; se cambió a su hoja predeterminada __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ no admite __ocs_fmt_1__; se conserva la hoja (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

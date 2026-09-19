@@ -5100,6 +5100,12 @@ plot =
     .system-default-printer = System default printer
     .what-to-plot = What to plot
     .x-mm = X (mm)
+    .x-in = X (in)
+    .y-in = Y (in)
+    .hide-paperspace-objects = Hide paperspace objects
+    .save-changes-to-layout = Save changes to layout
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ does not support __ocs_fmt_1__; switched to its default sheet __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ does not support __ocs_fmt_1__; the sheet is kept (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

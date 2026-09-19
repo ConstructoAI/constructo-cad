@@ -5098,6 +5098,12 @@ plot =
     .system-default-printer = Stampante predefinita del sistema
     .what-to-plot = Cosa tracciare
     .x-mm = X (mm)
+    .x-in = X (poll.)
+    .y-in = Y (poll.)
+    .hide-paperspace-objects = Nascondi oggetti dello spazio carta
+    .save-changes-to-layout = Salva le modifiche nel layout
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ non supporta __ocs_fmt_1__; passato al foglio predefinito __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ non supporta __ocs_fmt_1__; il foglio viene mantenuto (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

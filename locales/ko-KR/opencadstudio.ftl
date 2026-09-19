@@ -5098,6 +5098,12 @@ plot =
     .system-default-printer = 시스템 기본 프린터
     .what-to-plot = 무엇을 플롯할 것인가
     .x-mm = X (mm)
+    .x-in = X (인치)
+    .y-in = Y (인치)
+    .hide-paperspace-objects = 도면 공간 객체 숨기기
+    .save-changes-to-layout = 변경 사항을 배치에 저장
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__이(가) __ocs_fmt_1__을(를) 지원하지 않습니다. 기본 용지 __ocs_fmt_2__(으)로 전환했습니다 (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__이(가) __ocs_fmt_1__을(를) 지원하지 않습니다. 용지를 유지합니다 (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

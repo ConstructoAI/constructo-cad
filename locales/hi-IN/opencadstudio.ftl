@@ -5087,6 +5087,12 @@ plot =
     .system-default-printer = सिस्टम डिफ़ॉल्ट प्रिंटर
     .what-to-plot = क्या प्लॉट करना है
     .x-mm = एक्स (मिमी)
+    .x-in = एक्स (इंच)
+    .y-in = वाई (इंच)
+    .hide-paperspace-objects = पेपर स्पेस ऑब्जेक्ट छिपाएँ
+    .save-changes-to-layout = लेआउट में परिवर्तन सहेजें
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ __ocs_fmt_1__ का समर्थन नहीं करता; इसकी डिफ़ॉल्ट शीट __ocs_fmt_2__ पर स्विच किया गया (PAPERUPDATE = 1)।
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ __ocs_fmt_1__ का समर्थन नहीं करता; शीट रखी गई है (PAPERUPDATE = 0)।
     .y-mm = Y (मिमी)
 
 manage =

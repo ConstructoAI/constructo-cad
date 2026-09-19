@@ -144,6 +144,11 @@ pub enum PlotFlag {
     Transparency,
     PaperspaceLast,
     Stamp,
+    /// Hidden-line removal for paper-space objects (the page setup's
+    /// "plot hidden" flag).
+    HidePaperspace,
+    /// Write the dialog into the layout when a plot is sent.
+    SaveToLayout,
 }
 
 /// Every edit the Plot dialog can emit. Wrapped in `Message::PlotDlg` so the
@@ -177,6 +182,12 @@ pub enum PlotDlgMsg {
     Orientation(String),
     Area(String),
     Scale(String),
+    /// The unit the page setup counts in (offsets, custom scale).
+    PaperUnits(String),
+    /// The paper side of the custom scale, in the page-setup unit.
+    CustomScalePaper(String),
+    /// The drawing side of the custom scale.
+    CustomScaleDrawing(String),
     Quality(String),
     Shade(String),
     Copies(String),
@@ -404,9 +415,21 @@ pub struct PlotDialogState {
     /// keeps the same window instead of reporting an empty plot area.
     pub window: Option<(f64, f64, f64, f64)>,
     pub center: bool,
+    /// Plot offsets in the page-setup unit (`paper_units`); the file keeps
+    /// them in millimetres.
     pub offset_x: String,
     pub offset_y: String,
+    /// The unit the page setup counts in. Only the offsets and the custom
+    /// scale fields are shown in it; the paper space keeps its own unit
+    /// because the stored scale is converted along with it.
+    pub paper_units: PaperUnits,
     pub scale: String,
+    /// The custom scale as `paper = drawing` in the page-setup unit — the
+    /// same ratio the picker names, or the one typed here.
+    #[serde(skip)]
+    pub custom_scale_paper: String,
+    #[serde(skip)]
+    pub custom_scale_drawing: String,
     #[serde(default = "legacy_fit_to_paper_default")]
     pub fit_to_paper: bool,
     #[serde(skip)]
@@ -422,6 +445,26 @@ pub struct PlotDialogState {
     pub transparency: bool,
     pub paperspace_last: bool,
     pub stamp: bool,
+    /// Hidden-line removal for paper-space objects.
+    pub hide_paperspace: bool,
+    /// Sending a plot also writes the dialog into the layout, the way a
+    /// page setup is expected to remember the last plot.
+    pub save_to_layout: bool,
+    /// `BACKGROUNDPLOT` bit 2: batch plots (PRINTALL / PUBLISH) run in the
+    /// background; `background` is bit 1 for single plots.
+    pub background_publish: bool,
+    /// `PLOTOFFSET`: offsets count from the paper edge instead of the
+    /// printable area's corner.
+    pub plot_offset_from_edge: bool,
+    /// `PAPERUPDATE`: 1 switches to the printer's default sheet when it does
+    /// not support the page setup's, 0 keeps the sheet and warns.
+    pub paper_update: u8,
+    /// `PLOTROTMODE` (0–2): kept for page setups that read it; every
+    /// rotation here turns the sheet about the page.
+    pub plot_rot_mode: u8,
+    /// `PLOTTRANSPARENCYOVERRIDE`: 0 never plots transparency, 1 follows
+    /// the dialog, 2 always plots it.
+    pub transparency_override: u8,
     /// Display name of the active plot style table ("" = none).
     pub style_name: String,
     pub apply_plot_styles: bool,
@@ -472,7 +515,10 @@ impl Default for PlotDialogState {
             center: true,
             offset_x: "0.0".into(),
             offset_y: "0.0".into(),
+            paper_units: PaperUnits::Millimeters,
             scale: "1:1".into(),
+            custom_scale_paper: "1".into(),
+            custom_scale_drawing: "1".into(),
             fit_to_paper: true,
             scales: Vec::new(),
             plot_views: Vec::new(),
@@ -485,6 +531,13 @@ impl Default for PlotDialogState {
             transparency: false,
             paperspace_last: false,
             stamp: false,
+            hide_paperspace: false,
+            save_to_layout: true,
+            background_publish: false,
+            plot_offset_from_edge: false,
+            paper_update: 0,
+            plot_rot_mode: 2,
+            transparency_override: 1,
             style_name: String::new(),
             apply_plot_styles: true,
             show_plot_styles: false,
@@ -517,7 +570,10 @@ impl PlotDialogState {
         self.center = o.center;
         self.offset_x = o.offset_x.clone();
         self.offset_y = o.offset_y.clone();
+        self.paper_units = o.paper_units;
         self.scale = o.scale.clone();
+        self.custom_scale_paper = o.custom_scale_paper.clone();
+        self.custom_scale_drawing = o.custom_scale_drawing.clone();
         self.fit_to_paper = o.fit_to_paper;
         self.scale_lw = o.scale_lw;
         self.quality = o.quality.clone();
@@ -528,6 +584,7 @@ impl PlotDialogState {
         self.transparency = o.transparency;
         self.paperspace_last = o.paperspace_last;
         self.stamp = o.stamp;
+        self.hide_paperspace = o.hide_paperspace;
         self.style_name = o.style_name.clone();
         self.apply_plot_styles = o.apply_plot_styles;
         self.show_plot_styles = o.show_plot_styles;
@@ -661,6 +718,33 @@ fn check_enabled<'a>(
         .text_size(11)
         .style(checkbox::primary)
         .into()
+}
+
+/// The custom-scale row: `Custom: [paper] mm = [drawing] units`. Editing
+/// either side replaces the picked scale with the typed ratio.
+fn custom_scale_row<'a>(s: &'a PlotDialogState, enabled: bool) -> Element<'a, Message> {
+    let field = |value: &'a str, ctor: fn(String) -> PlotDlgMsg| {
+        let mut input = text_input("", value).size(11).padding([3, 6]).width(58);
+        if enabled {
+            input = input.on_input(move |v| Message::PlotDlg(ctor(v)));
+        }
+        input
+    };
+    let unit = match s.paper_units {
+        PaperUnits::Inches => t!("Inches"),
+        PaperUnits::Millimeters => t!("Millimeters"),
+    };
+    row![
+        text(t!("Custom")).size(11).width(form::LABEL_WIDTH),
+        field(&s.custom_scale_paper, PlotDlgMsg::CustomScalePaper),
+        text(unit).size(11),
+        text("=").size(11),
+        field(&s.custom_scale_drawing, PlotDlgMsg::CustomScaleDrawing),
+        text(t!("units")).size(11),
+    ]
+    .spacing(6)
+    .align_y(iced::Center)
+    .into()
 }
 
 fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -1168,13 +1252,19 @@ pub fn view_window(
         );
     }
     let common_area = s.area != "Layout";
+    let inches = s.paper_units == PaperUnits::Inches;
+    let (offset_x_label, offset_y_label) = if inches {
+        (t!("X (in)"), t!("Y (in)"))
+    } else {
+        (t!("X (mm)"), t!("Y (mm)"))
+    };
     let area_panel = panel(column![
         section_label(t!("Plot area")),
         area_row,
         section_label(t!("Plot offset")),
         column![
-            field_row_enabled(t!("X (mm)"), &s.offset_x, PlotDlgMsg::OffsetX, 70, common_area && !s.center),
-            field_row_enabled(t!("Y (mm)"), &s.offset_y, PlotDlgMsg::OffsetY, 70, common_area && !s.center),
+            field_row_enabled(offset_x_label, &s.offset_x, PlotDlgMsg::OffsetX, 70, common_area && !s.center),
+            field_row_enabled(offset_y_label, &s.offset_y, PlotDlgMsg::OffsetY, 70, common_area && !s.center),
         ]
         .spacing(7),
         check_enabled(t!("Center the plot"), s.center, PlotFlag::Center, common_area),
@@ -1202,6 +1292,16 @@ pub fn view_window(
             width,
             common_area && !s.fit_to_paper,
         ),
+        // The custom scale spells the picked ratio in the page-setup unit
+        // and accepts one of its own; the unit picker decides that unit.
+        drop_row(
+            t!("Units"),
+            vec![PlotChoice::localized("Millimeters"), PlotChoice::localized("Inches")],
+            Some(PlotChoice::localized(if inches { "Inches" } else { "Millimeters" })),
+            PlotDlgMsg::PaperUnits,
+            width,
+        ),
+        custom_scale_row(s, common_area && !s.fit_to_paper),
         check_enabled(
             t!("Scale lineweights"),
             s.scale_lw && !s.fit_to_paper,
@@ -1289,14 +1389,12 @@ pub fn view_window(
     ].spacing(7));
 
     // ── Output options and orientation ────────────────────────────────────
-    let paper_order_option: Element<'_, Message> = if s.paper_space {
-        check(
-            t!("Paper space last"),
-            s.paperspace_last,
-            PlotFlag::PaperspaceLast,
-        )
-    } else {
-        Space::new().height(0).into()
+    let paper_space_option = |on: bool, label: Cow<'static, str>, flag: PlotFlag| -> Element<'_, Message> {
+        if s.paper_space {
+            check(label, on, flag)
+        } else {
+            Space::new().height(0).into()
+        }
     };
     let options_panel = panel(column![
         section_label(t!("Plot options")),
@@ -1305,13 +1403,15 @@ pub fn view_window(
                 check(t!("Plot in background"), s.background, PlotFlag::Background),
                 check(t!("Object lineweights"), s.lineweights, PlotFlag::Lineweights),
                 check(t!("Plot transparency"), s.transparency, PlotFlag::Transparency),
+                paper_space_option(s.hide_paperspace, t!("Hide paperspace objects"), PlotFlag::HidePaperspace),
             ]
             .spacing(6)
             .width(width),
             column![
-                paper_order_option,
+                paper_space_option(s.paperspace_last, t!("Paper space last"), PlotFlag::PaperspaceLast),
                 check(t!("Merge overlapping lines"), s.merge_lines, PlotFlag::MergeLines),
                 check(t!("Plot stamp"), s.stamp, PlotFlag::Stamp),
+                paper_space_option(s.save_to_layout, t!("Save changes to layout"), PlotFlag::SaveToLayout),
             ]
             .spacing(6)
             .width(width),

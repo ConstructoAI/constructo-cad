@@ -5097,6 +5097,12 @@ plot =
     .system-default-printer = Standaardprinter van het systeem
     .what-to-plot = Wat te plannen
     .x-mm = X (mm)
+    .x-in = X (inch)
+    .y-in = Y (inch)
+    .hide-paperspace-objects = Papierruimte-objecten verbergen
+    .save-changes-to-layout = Wijzigingen in lay-out opslaan
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ ondersteunt __ocs_fmt_1__ niet; overgeschakeld naar het standaardblad __ocs_fmt_2__ (PAPERUPDATE = 1).
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ ondersteunt __ocs_fmt_1__ niet; het blad blijft behouden (PAPERUPDATE = 0).
     .y-mm = Y (mm)
 
 manage =

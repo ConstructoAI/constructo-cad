@@ -5087,6 +5087,12 @@ plot =
     .system-default-printer = システムの既定プリンター
     .what-to-plot = 印刷対象
     .x-mm = X（mm）
+    .x-in = X（インチ）
+    .y-in = Y（インチ）
+    .hide-paperspace-objects = ペーパー空間のオブジェクトを隠す
+    .save-changes-to-layout = 変更をレイアウトに保存
+    .printer-does-not-support-sheet-switched-to-its-default-sheet-default-paperupdate-1 = __ocs_fmt_0__ は __ocs_fmt_1__ に対応していません。既定の用紙 __ocs_fmt_2__ に切り替えました（PAPERUPDATE = 1）。
+    .printer-does-not-support-sheet-the-sheet-is-kept-paperupdate-0 = __ocs_fmt_0__ は __ocs_fmt_1__ に対応していません。用紙はそのままです（PAPERUPDATE = 0）。
     .y-mm = Y（mm）
 
 manage =
