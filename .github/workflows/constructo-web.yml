@@ -72,22 +72,71 @@ jobs:
             web-app.html
           echo "Build wasm : $(( $(date +%s) - debut )) s" >> "$GITHUB_STEP_SUMMARY"
 
+      # La compression se fait ICI, jamais dans le build Render ni à la volée :
+      # l'ERP n'a aucun middleware de compression, et recompresser 45 Mo à chaque
+      # requête coûterait plus cher que de les envoyer. Le backend sert le `.br`
+      # ou le `.gz` selon `Accept-Encoding` (cf. `serve_cad` dans `erp_api.py`).
+      #
+      # `-q 9` et non `-q 11` : sur un `.wasm` de cette taille, les deux derniers
+      # crans coûtent des minutes de CI pour quelques pourcents. On mesure les
+      # deux tailles ci-dessous plutôt que de l'affirmer.
+      # Servir ce bundle à un client EST une distribution au sens de la GPL-3.0 :
+      # la licence doit voyager AVEC lui, et le client doit pouvoir atteindre les
+      # sources correspondantes. Sans ces fichiers, l'obligation n'est tenue
+      # nulle part — le banc `test_cad_service.py` le vérifie côté ERP.
+      - name: Joindre la licence au bundle
+        run: |
+          cp LICENSE dist/cad/LICENSE
+          cp NOTICE-CONSTRUCTO.md dist/cad/NOTICE.txt
+          {
+            echo "Open CAD Studio — GNU General Public License v3.0"
+            echo ""
+            echo "Sources amont : https://github.com/HakanSeven12/OpenCADStudio"
+            echo "Fork servi ici : https://github.com/ConstructoAI/constructo-cad"
+            echo "Revision       : ${GITHUB_SHA}"
+            echo ""
+            echo "Le texte complet de la licence est dans LICENSE, a cote de ce fichier."
+          } > dist/cad/SOURCES.txt
+
+      - name: Précompresser le bundle
+        run: |
+          command -v brotli >/dev/null || sudo apt-get install -y -qq brotli
+          debut=$(date +%s)
+          # Seuls les types réellement compressibles : compresser un PNG ajoute
+          # un fichier plus gros que l'original, que le client téléchargerait.
+          find dist/cad -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.json' \
+            -o -name '*.html' -o -name '*.css' -o -name '*.svg' \) -size +1k -print0 |
+          while IFS= read -r -d '' f; do
+            brotli -q 9 -f -o "$f.br" "$f"
+            gzip -9 -f -k -S .gz "$f"
+          done
+          echo "Précompression : $(( $(date +%s) - debut )) s" >> "$GITHUB_STEP_SUMMARY"
+
+          # GARDE, PAS COMPTEUR. La version précédente se contentait d'afficher
+          # le nombre de variantes : elle a affiché « 0 brotli, 0 gzip » et rendu
+          # succès, pendant que le moteur partait en clair — 51 Mo par visiteur.
+          # Un compteur que personne ne lit ne garde rien.
+          for f in dist/cad/*_bg.wasm; do
+            test -f "$f.br" || { echo "MANQUE $f.br — le moteur partirait en clair"; exit 1; }
+            test -f "$f.gz" || { echo "MANQUE $f.gz"; exit 1; }
+          done
+          echo "Variantes : $(find dist/cad -name '*.br' | wc -l) brotli, $(find dist/cad -name '*.gz' | wc -l) gzip"
+
       # Le coût pour le poste d'un client se mesure en octets TRANSFÉRÉS, pas
       # en octets sur le disque : l'ERP servira le bundle compressé.
       - name: Mesurer le bundle
         run: |
           test -f dist/cad/index.html
+          taille() { [ -f "$1" ] && numfmt --to=iec "$(stat -c %s "$1")" || echo '—'; }
           {
             echo ""
-            echo "| Fichier | Sur disque | gzip -9 |"
-            echo "|---|---:|---:|"
-            for f in $(find dist/cad -type f | sort); do
-              brut=$(stat -c %s "$f")
-              comprime=$(gzip -9 -c "$f" | wc -c)
-              printf '| %s | %s | %s |\n' \
-                "${f#dist/cad/}" \
-                "$(numfmt --to=iec "$brut")" \
-                "$(numfmt --to=iec "$comprime")"
+            echo "| Fichier | Sur disque | brotli | gzip |"
+            echo "|---|---:|---:|---:|"
+            # Les `.br`/`.gz` ne sont pas listés pour eux-mêmes : ils apparaissent
+            # comme colonnes de l'original. Et on ne recompresse rien pour mesurer.
+            find dist/cad -type f ! -name '*.br' ! -name '*.gz' | sort | while read -r f; do
+              printf '| %s | %s | %s | %s |\n' \
+                "${f#dist/cad/}" "$(taille "$f")" "$(taille "$f.br")" "$(taille "$f.gz")"
             done
             echo ""
             echo "**Total sur disque : $(du -sh dist/cad | cut -f1)**"
