@@ -25,9 +25,10 @@ l'usage.
 
 Conséquences pratiques, à tenir :
 
-1. Ce dépôt reste privé **tant que rien n'est servi**. Il s'ouvre, ou ses
-   sources s'offrent par un autre moyen durable, **au plus tard le jour de la
-   mise en service**.
+1. ✅ **FAIT le 2026-09-19** : ce dépôt est **public**, le jour même de la mise
+   en service. Il l'était resté privé tant que rien n'était servi ; servir le
+   bundle à un navigateur est une distribution, donc les sources
+   correspondantes devaient devenir accessibles. C'est le cas.
 2. Le module `/cad` de l'ERP doit porter, visible depuis l'interface, un lien
    vers ces sources et la mention de la licence.
 3. Les modifications que nous écrivons ici sont **GPL-3.0 elles aussi**. Elles
@@ -51,7 +52,7 @@ GPL.
 
 ```bash
 git remote -v
-# origin    https://github.com/ConstructoAI/constructo-cad.git   (le fork)
+# origin    https://github.com/ConstructoAI/constructo-cad.git   (le fork, PUBLIC)
 # upstream  https://github.com/HakanSeven12/OpenCADStudio.git    (l'amont)
 
 git fetch upstream && git rebase upstream/main
