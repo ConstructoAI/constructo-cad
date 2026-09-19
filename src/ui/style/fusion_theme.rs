@@ -41,6 +41,9 @@ fn rgb(hex: u32) -> Color {
 }
 
 /// Near-black chrome, white text, blue accent.
+///
+/// L'accent suit la charte de l'ERP Constructo AI (D365 Fluent) : le module est
+/// encadre par l'ERP, deux bleus voisins mais differents se voient a l'oeil.
 #[must_use]
 pub fn fusion_black() -> Theme {
     Theme::custom(
@@ -48,7 +51,7 @@ pub fn fusion_black() -> Theme {
         Seed {
             background: rgb(0x1A_1A1A),
             text: rgb(0xF2_F2F2),
-            primary: rgb(0x06_96D7),
+            primary: rgb(0x00_78D4),
             success: rgb(0x4C_AF50),
             warning: rgb(0xFF_B300),
             danger: rgb(0xE5_3935),
@@ -58,6 +61,10 @@ pub fn fusion_black() -> Theme {
 
 /// The inverse: light chrome, near-black text. The accent darkens so it
 /// keeps its contrast against a light surface.
+///
+/// Sur fond clair, l'accent prend le navy de la charte (#002050) plutot qu'un
+/// bleu moyen : c'est la couleur des titres de l'ERP, et elle garde son
+/// contraste sur une surface claire.
 #[must_use]
 pub fn fusion_white() -> Theme {
     Theme::custom(
@@ -65,7 +72,7 @@ pub fn fusion_white() -> Theme {
         Seed {
             background: rgb(0xFA_FAFA),
             text: rgb(0x1A_1A1A),
-            primary: rgb(0x02_77BD),
+            primary: rgb(0x00_2050),
             success: rgb(0x2E_7D32),
             warning: rgb(0xE6_5100),
             danger: rgb(0xC6_2828),

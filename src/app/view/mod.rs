@@ -1330,10 +1330,14 @@ bg={bg_ms:.1}ms n={view_count}"
                 let vh = ((rect.y + rect.height).min(ch) - y).max(1.0);
                 // Highlight the active viewport with a 2-px border so its
                 // boundary is always visible over the GPU shader.
+                // #0078D4 — la charte de l'ERP Constructo AI qui encadre ce
+                // module. Cette couleur est INDEPENDANTE du theme (elle doit
+                // rester visible par-dessus le shader), donc changer le theme
+                // ne la suit pas : elle est alignee ici, a la main.
                 const VP_BORDER: Color = Color {
-                    r: 0.18,
-                    g: 0.52,
-                    b: 0.95,
+                    r: 0.0,
+                    g: 0.471,
+                    b: 0.831,
                     a: 1.0,
                 };
                 let border_frame = container(
@@ -3387,7 +3391,8 @@ fn start_page_content<'a>(
             })
     };
 
-    // Donate — the prominent call-to-action, using the theme's danger role.
+    // Donate — retire dans ce fork ; conserve pour limiter l'ecart avec l'amont.
+    #[allow(unused_variables)]
     let donate_btn = {
         button(
             row![
@@ -3408,7 +3413,7 @@ fn start_page_content<'a>(
     let primary_row = WrapFlow::new(vec![
         outline_btn(crate::tr!("start", "new-drawing"), Message::TabNew).into(),
         outline_btn(crate::tr!("start", "open-file"), Message::OpenFile).into(),
-        donate_btn.into(),
+        // FORK CONSTRUCTO : bouton « Faire un don » retire (voir plus bas).
     ])
     .spacing_x(12.0)
     .row_h(48.0)
@@ -3444,21 +3449,17 @@ fn start_page_content<'a>(
                 .into(),
         );
     }
-    #[cfg(target_arch = "wasm32")]
-    secondary_items.push(
-        button(text(crate::t!("OCS Desktop")).size(14))
-            .on_press(Message::OpenUrl(
-                "https://github.com/HakanSeven12/OpenCADStudio/releases/latest".to_string(),
-            ))
-            .padding([10, 22])
-            .style(|theme: &Theme, status| start_action_shape(button::primary(theme, status)))
-            .into(),
-    );
+    // FORK CONSTRUCTO : le bouton « OCS · Bureau », qui pousse au
+    // telechargement de l'application de bureau, est retire de la build web.
+    // L'utilisateur de l'ERP est venu dessiner dans son ERP, pas installer un
+    // logiciel tiers.
     let secondary_row = WrapFlow::new(secondary_items)
         .spacing_x(12.0)
         .row_h(44.0)
         .report_natural_width(action_width_out.clone());
 
+    // Reddit — retire dans ce fork ; conserve pour limiter l'ecart avec l'amont.
+    #[allow(unused_variables)]
     let reddit_btn = button(
         row![
             iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
@@ -3493,6 +3494,8 @@ fn start_page_content<'a>(
         })
     });
 
+    // Sponsors — retire dans ce fork ; conserve pour limiter l'ecart avec l'amont.
+    #[allow(unused_variables)]
     let sponsors = column![
         text(crate::tr!("start", "sponsors")).size(15),
         mouse_area(
@@ -3532,10 +3535,14 @@ fn start_page_content<'a>(
         container(primary_row).center_x(Fill),
         Space::new().height(iced::Length::Fixed(10.0)),
         container(secondary_row).center_x(Fill),
-        Space::new().height(iced::Length::Fixed(10.0)),
-        container(reddit_btn).center_x(Fill),
-        Space::new().height(iced::Length::Fixed(20.0)),
-        sponsors,
+        // FORK CONSTRUCTO : le lien Reddit et le bloc « Sponsors » (logo
+        // OpenAEC + encart publicitaire « Mobile DWG Viewer ») sont retires.
+        // Ce module est encadre par un ERP que des entreprises paient : y
+        // afficher des appels aux dons et la publicite d'un produit tiers n'a
+        // pas de sens. La GPL-3.0 demande de conserver la LICENCE et
+        // l'ATTRIBUTION — toutes deux presentes (lien « Moteur Open CAD Studio,
+        // GPL-3.0 » dans l'en-tete de l'ERP, `LICENSE`/`NOTICE.txt`/
+        // `SOURCES.txt` servis a cote du bundle) — pas la collecte de fonds.
         Space::new().height(iced::Length::Fixed(52.0)),
     ]
     .spacing(0)
@@ -3560,7 +3567,19 @@ fn start_page_content<'a>(
     let welcome_wide_min = measured_action_w.max(360.0);
     let avail = (avail_w - 16.0).max(0.0); // minus the page's l/r padding
     let panel_widths = [panel_w; 4];
-    let mut panel_visible = [true, true, true, true];
+    // FORK CONSTRUCTO : [recents, tutoriels, discussions, contributeurs].
+    //
+    // Seuls les DOCUMENTS RECENTS restent. Les trois autres panneaux versent
+    // dans l'ERP d'un client le flux communautaire du projet amont : des
+    // tutoriels YouTube, les fils de discussion GitHub, et la liste nominative
+    // des donateurs avec leurs montants. Rien de tout cela n'a sa place dans un
+    // outil qu'une entreprise paie — et les trois `fetch` qui les alimentent
+    // (`videos.json`, `discussions.json`, `supporters.json`) partent pour rien.
+    //
+    // ⚠️ On garde le TABLEAU a quatre entrees, et la boucle de repli qui suit :
+    // elle masque encore les recents quand la fenetre devient trop etroite.
+    // Reduire le tableau casserait ce repli.
+    let mut panel_visible = [true, false, false, false];
     let required_width = |visible: &[bool; 4]| {
         let visible_panels = visible.iter().filter(|&&shown| shown).count();
         welcome_wide_min

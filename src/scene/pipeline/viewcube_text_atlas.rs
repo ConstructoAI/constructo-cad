@@ -177,7 +177,21 @@ fn font_system(
     _labels: &[String; FACE_TILE_COUNT],
 ) -> Option<(FontSystem, Option<&'static str>, Weight)> {
     let script = crate::scene::text::web_font::primary_script();
-    let bytes = crate::scene::text::web_font::loaded(script)?;
+    // `request` et non `loaded` : `loaded` CONSTATE, elle ne demande rien.
+    //
+    // Sur le web, la seule chose qui demandait une police etait le rendu de
+    // TEXTE d'un dessin (`scene/text/ttf_glyph.rs`). Tant que l'utilisateur
+    // n'avait pas ouvert un dessin contenant du texte, la police n'arrivait
+    // jamais, cet atlas restait vide — et le ViewCube perdait ses FACES :
+    // seuls sa maison, ses fleches et le selecteur restaient visibles.
+    // Constate a l'ecran par Sylvain le 2026-09-19 sur la page d'accueil.
+    //
+    // `request` met la police en file et rend `None` au premier appel — c'est
+    // sans consequence : quand elle arrive, `web_font::bump_generation()`
+    // (web_font.rs:304) incremente le compteur, et `ViewCubeText::update`
+    // (viewcube.rs:539-546) reconstruit deja l'atlas sur ce changement. Le
+    // mecanisme d'invalidation existait, il n'etait simplement jamais declenche.
+    let bytes = crate::scene::text::web_font::request(script)?;
     let mut database = fontdb::Database::new();
     database.load_font_data((*bytes).clone());
     database.set_sans_serif_family(script.family());
