@@ -319,10 +319,24 @@ async fn open_path_with_phase_attempt(
                     });
                     callback
                 };
-                std::fs::File::open(&path2).map_err(|error| OpenAttemptFailure {
-                    message: format!("failed to open drawing: {error}"),
-                    read_stats: None,
-                    recoverable: false,
+                std::fs::File::open(&path2).map_err(|error| {
+                    // 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION:
+                    // another program holds the drawing without read sharing,
+                    // so nothing on the machine can read the bytes until it
+                    // closes the file — not even read-only.
+                    let message = match error.raw_os_error() {
+                        Some(32) | Some(33) => format!(
+                            "\"{}\" is in use by another program. Close the file there and \
+                             reopen it here, or open a copy of the file.",
+                            path2.display()
+                        ),
+                        _ => format!("failed to open drawing: {error}"),
+                    };
+                    OpenAttemptFailure {
+                        message,
+                        read_stats: None,
+                        recoverable: false,
+                    }
                 })?;
                 let outcome = load_file_for_open(&path2, Some(parser_progress), &attempt)?;
                 let read_stats = outcome.stats;
@@ -1036,20 +1050,117 @@ fn read_dwg_path(
         DwgReadOptions::default()
     };
     #[cfg(not(target_arch = "wasm32"))]
-    let mut reader = {
-        let mut reader = DwgReader::from_mmap(path).map_err(ReaderFailure::from_reader)?;
-        reader.options = options;
+    {
+        // The memory-mapped read is the fast path, but a mapped file is read
+        // through the page-fault handler: a file that shrinks while mapped
+        // (a writer saving over it) or a cloud placeholder that cannot page
+        // in raises an in-page exception the process cannot catch. Both are
+        // ordinary I/O errors through plain reads, so anything that can
+        // fault — or refuses to open under a third-party lock — falls back
+        // to one in-memory snapshot read below.
+        if !cloud_placeholder(path) {
+            match DwgReader::from_mmap(path) {
+                Ok(mut reader) => {
+                    reader.options = options.clone();
+                    if let Some(progress) = &progress {
+                        reader.set_progress_callback(progress.clone());
+                    }
+                    match reader.read_with_stats() {
+                        Ok(outcome) => return Ok(outcome),
+                        // The file shrank or became unreadable mid-parse;
+                        // retry from a snapshot instead of reporting a bare
+                        // I/O error.
+                        Err(acadrust::DxfError::Io(_)) => {}
+                        Err(error) => return Err(ReaderFailure::from_reader(error)),
+                    }
+                }
+                // Locked or unmappable: the snapshot read surfaces the real
+                // error when the file genuinely cannot be read.
+                Err(_) => {}
+            }
+        }
+        let bytes = read_drawing_snapshot(path).map_err(|error| {
+            ReaderFailure::terminal(format!(
+                "failed to open drawing (is it in use by another program?): {error}"
+            ))
+        })?;
+        let mut reader = DwgReader::from_stream_with_options(std::io::Cursor::new(bytes), options);
+        if let Some(progress) = progress {
+            reader.set_progress_callback(progress);
+        }
         reader
-    };
-    #[cfg(target_arch = "wasm32")]
-    let mut reader = DwgReader::from_file_with_options(path, options)
-        .map_err(ReaderFailure::from_reader)?;
-    if let Some(progress) = progress {
-        reader.set_progress_callback(progress);
+            .read_with_stats()
+            .map_err(ReaderFailure::from_reader)
     }
-    reader
-        .read_with_stats()
-        .map_err(ReaderFailure::from_reader)
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut reader = DwgReader::from_file_with_options(path, options)
+            .map_err(ReaderFailure::from_reader)?;
+        if let Some(progress) = progress {
+            reader.set_progress_callback(progress);
+        }
+        reader
+            .read_with_stats()
+            .map_err(ReaderFailure::from_reader)
+    }
+}
+
+/// Windows cloud-placeholder files (OneDrive "Files On Demand" and similar)
+/// page their bytes in on demand; faulting a placeholder through a memory map
+/// can raise an in-page exception that kills the process. Plain reads hydrate
+/// the file instead. Checks `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`,
+/// `FILE_ATTRIBUTE_RECALL_ON_OPEN` and `FILE_ATTRIBUTE_OFFLINE`.
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+fn cloud_placeholder(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
+    const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
+    const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+    std::fs::metadata(path)
+        .map(|meta| {
+            let attrs = meta.file_attributes();
+            attrs
+                & (FILE_ATTRIBUTE_OFFLINE
+                    | FILE_ATTRIBUTE_RECALL_ON_OPEN
+                    | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+                != 0
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
+fn cloud_placeholder(_path: &Path) -> bool {
+    false
+}
+
+/// Read the whole drawing through the most permissive share mode the platform
+/// offers. On Windows `std::fs::read` opens without `FILE_SHARE_DELETE`, so a
+/// concurrent atomic-save replace makes the read fail even though every byte
+/// was readable. A snapshot can never fault: a writer shrinking the file
+/// mid-read just ends the read early.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_drawing_snapshot(path: &Path) -> std::io::Result<Vec<u8>> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::io::Read;
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(path)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::fs::read(path)
+    }
 }
 
 fn read_dxf_path(path: &Path, failsafe: bool) -> Result<acadrust::ReadOutcome, ReaderFailure> {
