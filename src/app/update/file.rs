@@ -1063,6 +1063,24 @@ impl OpenCADStudio {
                     .collect(),
             },
             model_space: self.model_space.clone(),
+            // FORK CONSTRUCTO. Ce litteral est EXHAUSTIF — pas de
+            // `..Default::default()` — donc tout champ ajoute a `AppConfig`
+            // doit etre nomme ici, sous peine de E0063 sur toutes les cibles.
+            //
+            // On ecrit la CONSTANTE, et non une valeur portee par l'etat vivant.
+            // Mesure du 2026-09-19 sur les deux branches possibles :
+            //   - constante         -> un theme choisi survit au rechargement ;
+            //   - valeur transportee depuis une config d'avant le fork (0)
+            //                       -> le choix est EFFACE a chaque rechargement.
+            // La seconde est le reglage qu'on ne peut plus changer.
+            //
+            // LIMITE ASSUMEE : un module d'une version ANTERIEURE qui lit une
+            // config plus recente rabat ce compteur vers le bas, et la migration
+            // suivante se rejouera une fois au retour. Le prix est un theme
+            // remis a sa valeur par defaut ; le porter dans l'etat vivant
+            // demanderait un champ de plus sur `OpenCADStudio`, donc un second
+            // litteral exhaustif a tenir.
+            constructo_migration: crate::app::config::CONSTRUCTO_MIGRATION,
         }
     }
 
@@ -5562,6 +5580,60 @@ impl OpenCADStudio {
             },
             Message::PlotStylePanelSavePath,
         )
+    }
+}
+
+#[cfg(test)]
+mod constructo_migration_tests {
+    use crate::app::config::{AppConfig, CONSTRUCTO_MIGRATION};
+    use crate::app::OpenCADStudio;
+
+    /// LE TEST QUI MANQUAIT, ET SANS LEQUEL LE CORRECTIF N'ETAIT GARDE PAR RIEN.
+    ///
+    /// `current_config` rebatit la config depuis l'etat vivant, qui ne transporte
+    /// pas le compteur : c'est une CONSTANTE en dur qui part en storage. Une
+    /// campagne de mutation l'a montre — remplacer cette constante par `0`
+    /// laissait **les onze tests de `config.rs` verts**, et chaque enregistrement
+    /// ecrivait alors 0, donc chaque chargement rejouait la migration :
+    /// l'utilisateur choisit un theme, ferme, rouvre, et retrouve Fusion White.
+    /// C'est mot pour mot le reglage-qu'on-ne-peut-pas-changer que tout ce
+    /// mecanisme existe pour eviter.
+    ///
+    /// Les tests de `config.rs` ne pouvaient pas le voir : aucun n'appelle
+    /// `current_config`, qui vit ici. Le banc mesurait la fonction, pas la chaine.
+    #[test]
+    fn ce_qui_part_en_storage_porte_le_numero_de_migration_courant() {
+        let app = OpenCADStudio::new_for_test();
+        assert_eq!(
+            app.current_config().constructo_migration,
+            CONSTRUCTO_MIGRATION,
+            "un 0 ici fait rejouer la migration a chaque ouverture"
+        );
+        assert_ne!(CONSTRUCTO_MIGRATION, 0, "0 rendrait la garde inoperante");
+    }
+
+    /// LA LIMITE EST EPINGLEE ICI, pas seulement commentee.
+    ///
+    /// Le compteur ne vit pas dans l'etat de l'application : `apply_config` ne le
+    /// lit pas, `current_config` ne peut donc pas le restituer. Une config venue
+    /// d'une version PLUS RECENTE est donc rabattue des le premier
+    /// enregistrement, et la migration suivante se rejouera une fois au retour.
+    ///
+    /// Le `max` de `migrer_constructo` protege la valeur EN MEMOIRE ; il ne
+    /// survit pas a l'aller-retour. Ce test dit laquelle des deux proprietes est
+    /// vraie, pour qu'un futur lecteur ne croie pas l'autre.
+    #[test]
+    fn un_compteur_venu_du_futur_ne_survit_PAS_a_l_enregistrement() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut future = AppConfig::default();
+        future.constructo_migration = CONSTRUCTO_MIGRATION + 7;
+        app.apply_config(future);
+        assert_eq!(
+            app.current_config().constructo_migration,
+            CONSTRUCTO_MIGRATION,
+            "si ceci change, le compteur est desormais porte par l'etat vivant \
+             -- mettre a jour le commentaire de `current_config` en consequence"
+        );
     }
 }
 

@@ -1,0 +1,160 @@
+name: Moteur Linux — mesure des dependances et fumee sans fenetre
+
+# CE QUE CE FLUX MESURE, ET POURQUOI IL EXISTE.
+#
+# Question a trancher : les outils MCP `cad_*` et les scripts sans navigateur
+# ont besoin du moteur cote SERVEUR. Peut-il tourner sur un service Render
+# existant (`constructo-mcp`, runtime Python natif, pas de Docker), ou faut-il
+# lui creer un service Docker a lui ?
+#
+# On a dit « il faut Docker, a cause de libfontconfig1 et libfreetype6 ». Ce
+# n'etait PAS mesure. En mode `--serve` le moteur ne rend rien : il est possible
+# que ces bibliotheques ne soient que des dependances de LIEN, presentes dans
+# l'image de Render. Tant que `ldd` n'a pas parle, « il faut Docker » est une
+# supposition qui coute un service.
+#
+# Ce flux rend deux choses :
+#   1. la LISTE exacte des bibliotheques partagees que le binaire reclame ;
+#   2. la preuve que `--serve` dessine reellement sans fenetre.
+#
+# Il ne publie AUCUNE release. `constructo-web.yml:176` fait
+# `gh release delete cad-latest --cleanup-tag` avant de recreer : un binaire
+# depose sur ce tag disparaitrait au build suivant du bundle. La publication
+# viendra quand la mesure aura dit ou le binaire doit vivre.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: constructo-moteur-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mesurer:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `build.rs` mesure la distance au dernier tag pour etiqueter la
+          # version ; un clone superficiel la remplacerait par `+g<hash>`.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Batir le binaire natif
+        run: cargo build --locked --release
+
+      - name: Les bibliotheques que le binaire reclame
+        run: |
+          set -euo pipefail
+          BIN=target/release/OpenCADStudio
+          test -x "$BIN"
+          echo "=== taille ==="
+          ls -la "$BIN"
+          echo
+          echo "=== ldd (toutes les dependances) ==="
+          ldd "$BIN" | tee ldd-complet.txt
+          echo
+          echo "=== celles qui decident de la question ==="
+          # Pas de `grep -q` en garde : une absence est un RESULTAT, pas un
+          # echec. On imprime, et on laisse la lecture conclure.
+          grep -E "fontconfig|freetype|xcb|X11|wayland|GL|asound" ldd-complet.txt \
+            || echo "(aucune de ces familles n'apparait — le binaire est plus autonome que prevu)"
+          echo
+          echo "=== resume pour la decision ==="
+          printf 'nombre total de bibliotheques : %s\n' "$(grep -c '=>' ldd-complet.txt || true)"
+
+      - name: Fumee — le mode sans fenetre dessine-t-il vraiment ?
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, subprocess, sys
+
+          # `--serve` sans `--port` parle en stdio : une requete JSON par ligne,
+          # une reponse par ligne, precedees d'une ligne `ready`
+          # (src/app/automation.rs:79-98).
+          moteur = subprocess.Popen(
+              ["target/release/OpenCADStudio", "--serve"],
+              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+              text=True, bufsize=1,
+          )
+
+          def demander(requete):
+              moteur.stdin.write(json.dumps(requete) + "\n")
+              moteur.stdin.flush()
+              ligne = moteur.stdout.readline()
+              if not ligne:
+                  err = moteur.stderr.read()
+                  raise SystemExit("le moteur s'est tu sans repondre. stderr :\n" + err)
+              return json.loads(ligne)
+
+          pret = json.loads(moteur.stdout.readline())
+          print("annonce de demarrage :", pret)
+          assert pret.get("ready") is True, pret
+
+          # TEMOIN NEGATIF D'ABORD. Sur l'onglet Depart, toute commande doit etre
+          # refusee avec le code `no_document` (src/app/control/mod.rs:650-654).
+          # Sans ce temoin, un `added: 1` plus bas ne prouverait pas que la
+          # mesure sait rendre autre chose que « tout va bien ».
+          avant = demander({"op": "run", "cmd": "LINE 0,0 10,10"})
+          print("sur l'onglet Depart :", avant)
+
+          assert demander({"op": "new"}).get("ok") is True
+
+          trace = demander({"op": "run", "cmd": "LINE 0,0 10,10"})
+          print("apres ouverture d'un dessin :", trace)
+          assert trace.get("ok") is True, trace
+          # `added` est le VRAI temoin : une commande peut repondre `ok` en
+          # n'ayant rien dessine. C'est tout l'interet de le lire.
+          assert trace.get("added") == 1, "aucune entite ajoutee : %r" % trace
+
+          entites = demander({"op": "entities"})
+          print("inventaire :", entites)
+
+          entete = demander({"op": "header"})
+          print("en-tete (dont l'unite du document) :", entete)
+
+          # LE MANIFESTE — la liste des commandes, PAR LE PRODUCTEUR.
+          #
+          # C'est ce qui permettra de GENERER la liste des commandes permises au
+          # lieu de la recopier a la main. Une liste recopiee vieillit et se
+          # trompe : quatre des huit premieres chaines de commande de
+          # `cad_script.py` ont ete ecrites d'apres AutoCAD et etaient fausses,
+          # parce que ce moteur n'a pas de mots-cles d'option — ses variantes
+          # sont des commandes distinctes (`ARC_3P`, `POLY_C`, `ELLIPSE_AXIS`).
+          #
+          # Il passe par le canal de controle (champ `protocol`), pas par le jeu
+          # d'operations simple (src/app/automation.rs:264-278).
+          manifeste = demander({"protocol": 1, "request_id": "m1", "op": "commands"})
+          noms = manifeste.get("commands") or manifeste.get("names") or []
+          print()
+          print("=== MANIFESTE DES COMMANDES ===")
+          print("cles de la reponse :", sorted(manifeste))
+          print("nombre de commandes :", len(noms))
+          with open("commandes-moteur.json", "w", encoding="utf-8") as f:
+              json.dump(manifeste, f, ensure_ascii=False, indent=1, sort_keys=True)
+          print("(ecrit dans commandes-moteur.json)")
+
+          moteur.stdin.close()
+          moteur.wait(timeout=30)
+          print()
+          print("VERDICT : le moteur dessine sans fenetre.")
+          PY
+
+      - name: Garder la mesure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mesure-moteur-linux
+          path: |
+            ldd-complet.txt
+            commandes-moteur.json
+            target/release/OpenCADStudio
+          retention-days: 14
+          if-no-files-found: warn

@@ -42,8 +42,15 @@ fn rgb(hex: u32) -> Color {
 
 /// Near-black chrome, white text, blue accent.
 ///
-/// L'accent suit la charte de l'ERP Constructo AI (D365 Fluent) : le module est
-/// encadre par l'ERP, deux bleus voisins mais differents se voient a l'oeil.
+/// FORK CONSTRUCTO : l'accent d'amont est CONSERVE, apres l'avoir change et
+/// remis. Mesure du 2026-09-19 — sur le fond du theme (#1A1A1A), `#0696D7`
+/// donne **5,26:1** ; le `#0078D4` de la charte de l'ERP, **3,84:1**. Sous la
+/// barre de 4,5 que `ui/command_line.rs:1100-1105` et `ui/icons.rs:594-599`
+/// interrogent, l'accent n'est pas seulement plus terne : il **cesse d'etre
+/// dessine**, remplace par son repli.
+///
+/// Les deux bleus sont de la meme famille et se distinguent mal a l'oeil. Le
+/// gain de charte etait donc nul, et le cout reel.
 #[must_use]
 pub fn fusion_black() -> Theme {
     Theme::custom(
@@ -51,7 +58,7 @@ pub fn fusion_black() -> Theme {
         Seed {
             background: rgb(0x1A_1A1A),
             text: rgb(0xF2_F2F2),
-            primary: rgb(0x00_78D4),
+            primary: rgb(0x06_96D7),
             success: rgb(0x4C_AF50),
             warning: rgb(0xFF_B300),
             danger: rgb(0xE5_3935),
@@ -62,9 +69,33 @@ pub fn fusion_black() -> Theme {
 /// The inverse: light chrome, near-black text. The accent darkens so it
 /// keeps its contrast against a light surface.
 ///
-/// Sur fond clair, l'accent prend le navy de la charte (#002050) plutot qu'un
-/// bleu moyen : c'est la couleur des titres de l'ERP, et elle garde son
-/// contraste sur une surface claire.
+/// FORK CONSTRUCTO — LA PHRASE ANGLAISE CI-DESSUS AVAIT RAISON, ET JE
+/// L'AVAIS RETIREE. L'accent d'amont est conserve.
+///
+/// Ce que j'ai fait, et pourquoi c'etait faux : j'ai remplace cet accent par le
+/// bleu de la charte de l'ERP (#0078D4) apres avoir mesure son contraste sur
+/// **le canevas** — la seule surface que `fusion_accent_is_visible_on_the_canvas`
+/// regarde, avec une barre de 3,0. Le chiffre etait juste (4,53:1) ; la
+/// conclusion ne l'etait pas, parce que j'avais mesure la surface la plus
+/// flatteuse et aucune de celles qui decident.
+///
+/// CE QUE LE RETEST A MESURE, sur le vrai generateur de palette d'iced :
+///
+/// | surface | #0277BD (amont) | #0078D4 (le mien) | barre |
+/// |---|---:|---:|---:|
+/// | canevas (#FFFFFF) | 4,80 | 4,53 | 3,0 |
+/// | **fond du theme (#FAFAFA)** | **4,60** | **4,34** | **4,5** |
+///
+/// Sous 4,5, l'accent n'est pas « un peu moins contraste » : il **cesse d'etre
+/// dessine**, remplace par son repli.
+///   - `ui/command_line.rs:1100-1105` — les lignes « Info » de la ligne de
+///     commande perdaient leur bleu et prenaient la couleur du texte ordinaire,
+///     devenant indistinguables des lignes de commande.
+///   - `ui/icons.rs:594-599` — la coche des cellules basculait au quasi-noir.
+///
+/// UNE MESURE SE PUBLIE AVEC SA SURFACE. Ce que ce fork garde de la charte,
+/// c'est le theme CLAIR par defaut — le changement que l'utilisateur voit. Pas
+/// une teinte a deux pas de celle d'amont, payee d'un accent qui disparait.
 #[must_use]
 pub fn fusion_white() -> Theme {
     Theme::custom(
@@ -72,7 +103,7 @@ pub fn fusion_white() -> Theme {
         Seed {
             background: rgb(0xFA_FAFA),
             text: rgb(0x1A_1A1A),
-            primary: rgb(0x00_2050),
+            primary: rgb(0x02_77BD),
             success: rgb(0x2E_7D32),
             warning: rgb(0xE6_5100),
             danger: rgb(0xC6_2828),
@@ -121,6 +152,38 @@ mod tests {
                     "{theme} {name} surface text is {contrast:.2}:1, below AA"
                 );
             }
+        }
+    }
+
+    /// FORK CONSTRUCTO — LE BANC QUI MANQUAIT, ET QUI AURAIT ATTRAPE LA
+    /// REGRESSION DU 2026-09-19.
+    ///
+    /// `fusion_accent_is_visible_on_the_canvas`, juste en dessous, ne regarde
+    /// que le CANEVAS, avec une barre de 3,0. C'est la seule surface qu'il
+    /// mesure, et c'est sur elle que #0078D4 a ete valide (4,53:1) — puis pose,
+    /// alors qu'il tombe a **4,34** contre le fond du theme.
+    ///
+    /// Or deux surfaces de production interrogent le seuil de **4,5** :
+    ///   - `ui/command_line.rs:1100-1105`, pour les lignes « Info » ;
+    ///   - `ui/icons.rs:594-599`, pour la coche des cellules.
+    /// Sous ce seuil elles ne prennent pas un bleu plus terne : elles basculent
+    /// sur un REPLI, donc l'accent cesse d'etre dessine. Les lignes « Info »
+    /// devenaient indistinguables des lignes de commande.
+    ///
+    /// Une mesure se publie avec sa surface. Celle-ci tient la surface que le
+    /// produit interroge vraiment, pas celle qui donnait le chiffre le plus
+    /// flatteur.
+    #[test]
+    fn fusion_accent_survives_the_threshold_production_asks_for() {
+        for theme in fusion_themes() {
+            let p = theme.palette();
+            let contrast = wcag_contrast(p.primary.base.color, p.background.base.color);
+            assert!(
+                contrast >= 4.5,
+                "{theme} accent is {contrast:.2}:1 on the theme background, below \
+                 the 4.5 that command_line.rs and icons.rs require — the accent \
+                 would be silently replaced by its fallback"
+            );
         }
     }
 

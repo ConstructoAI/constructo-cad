@@ -41,7 +41,41 @@ pub struct AppConfig {
     pub shortcuts: ShortcutConfig,
     /// Model space background, grid, and selection appearance.
     pub model_space: ModelSpaceThemeConfig,
+    /// FORK CONSTRUCTO : numero de la derniere migration appliquee a CETTE
+    /// config. Absent d'une config ecrite avant le fork, il vaut 0 — c'est
+    /// precisement ce qui distingue une config ancienne d'une config neuve, et
+    /// c'est tout son role.
+    ///
+    /// L'ATTRIBUT SUR LE CHAMP N'EST PAS REDONDANT AVEC CELUI DE LA STRUCT,
+    /// IL L'ANNULE — et sans lui tout ce mecanisme est mort.
+    ///
+    /// `#[serde(default)]` pose sur le CONTENEUR (ligne 18) ne met pas le defaut
+    /// du TYPE dans un champ absent : il construit `AppConfig::default()` et y
+    /// PUISE le champ manquant. Ce defaut-la vaut `CONSTRUCTO_MIGRATION`, donc
+    /// **1** — et `1 < 1` etant faux, la migration ne serait partie pour
+    /// personne, exactement sur la population qu'elle vise.
+    ///
+    /// Mesure du 2026-09-19, quatre formes essayees sur une config d'avant le
+    /// fork : conteneur seul -> 1 (mort) ; `Option<u32>` -> `Some(1)` (mort
+    /// aussi) ; `Default` de la struct a 0 -> migre AUSSI les configs neuves ;
+    /// attribut sur le CHAMP -> 0. Seule la derniere passe les trois epreuves.
+    ///
+    /// Le temoin qui tranche vit dans ce fichier : `ShortcutConfig` a le meme
+    /// attribut de conteneur et un `Default` NON VIDE. Si serde mettait le
+    /// defaut du type, toute config sans cle `shortcuts` demarrerait sans aucun
+    /// raccourci clavier.
+    #[serde(default)]
+    pub constructo_migration: u32,
 }
+
+/// Derniere migration connue. `AppConfig::default()` la pose d'emblee : une
+/// config neuve n'a rien a migrer.
+pub const CONSTRUCTO_MIGRATION: u32 = 1;
+
+/// Le theme par defaut d'AMONT — celui qu'une config d'avant le fork porte
+/// quand personne n'a jamais choisi. C'est la seule valeur qu'il soit legitime
+/// de remplacer : voir `migrer_constructo`.
+const THEME_PAR_DEFAUT_AMONT: &str = "Oxocarbon";
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -57,6 +91,7 @@ impl Default for AppConfig {
             plot: PlotDialogState::default(),
             shortcuts: ShortcutConfig::default(),
             model_space: ModelSpaceThemeConfig::default(),
+            constructo_migration: CONSTRUCTO_MIGRATION,
         }
     }
 }
@@ -88,9 +123,23 @@ pub struct UiThemeConfig {
     pub palette: UiThemePalette,
 }
 
+/// FORK CONSTRUCTO : le module est servi DANS l'ERP, qui est clair. Le defaut
+/// amont (`Oxocarbon`, sombre) posait une dalle sombre au milieu d'une page
+/// claire. `Fusion White` existait deja en amont — fond #FAFAFA, texte #1A1A1A.
+///
+/// C'est le THEME par defaut qui change ici, pas ses couleurs : l'accent est
+/// reste celui d'amont, apres qu'une tentative de le passer au bleu de la
+/// charte l'a fait tomber sous la barre de contraste que deux surfaces de
+/// production interrogent. Voir `ui/style/fusion_theme.rs`.
+///
+/// Changer ce defaut ne suffit PAS a atteindre quelqu'un qui a deja ouvert
+/// le module : sur le web, la config vit dans `localStorage`
+/// (`opencadstudio.settings`) et une valeur enregistree l'emporte, `serde`
+/// n'appelant `Default` que sur un champ ABSENT. La bascule des installations
+/// existantes se fait par la migration de `AppConfig::load`.
 impl Default for UiThemeConfig {
     fn default() -> Self {
-        let theme = iced::Theme::Oxocarbon;
+        let theme = crate::ui::style::fusion_theme::fusion_white();
         Self {
             name: theme.to_string(),
             palette: UiThemePalette::from_iced(theme.seed()),
@@ -103,7 +152,11 @@ impl UiThemeConfig {
         if self.name == "Custom" {
             iced::Theme::custom("Custom", self.palette.to_iced())
         } else {
-            builtin_theme(&self.name).unwrap_or(iced::Theme::Oxocarbon)
+            // Le repli suit le defaut : un nom de theme devenu inconnu (theme
+            // retire en amont, config bricolee a la main) ne doit pas rendre la
+            // dalle sombre que ce fork existe pour eviter.
+            builtin_theme(&self.name)
+                .unwrap_or_else(crate::ui::style::fusion_theme::fusion_white)
         }
     }
 }
@@ -120,8 +173,16 @@ pub struct UiThemePalette {
 }
 
 impl Default for UiThemePalette {
+    /// FORK CONSTRUCTO : le JUMEAU de `UiThemeConfig::default`, et il etait reste
+    /// sur le sombre d'amont.
+    ///
+    /// Il ne sert pas qu'a l'editeur de couleurs. `#[serde(default)]` est aussi
+    /// sur CE conteneur : une palette PARTIELLE dans le JSON — par exemple
+    /// `{"palette":{"primary":[2,119,189]}}` — voit ses champs absents remplis
+    /// depuis ici. Laisse sur Oxocarbon, un theme nomme « Fusion White » pouvait
+    /// donc naitre avec un fond sombre.
     fn default() -> Self {
-        Self::from_iced(iced::Theme::Oxocarbon.seed())
+        Self::from_iced(crate::ui::style::fusion_theme::fusion_white().seed())
     }
 }
 
@@ -472,8 +533,94 @@ impl AppConfig {
             .and_then(|window| window.local_storage().ok().flatten())
             .and_then(|storage| storage.get_item(WEB_CONFIG_KEY).ok().flatten());
 
-        body.and_then(|body| serde_json::from_str(&body).ok())
-            .unwrap_or_default()
+        Self::depuis_json(body.as_deref())
+    }
+
+    /// FORK CONSTRUCTO : la CHAINE — lire le JSON, puis migrer.
+    ///
+    /// Elle existe parce que `load()` est MAL testable : elle lit le disque ou
+    /// `localStorage`.
+    ///
+    /// ATTENTION -- CE N'EST PAS « impossible », et le dire serait se mentir.
+    /// En natif, `config_path()` passe par `config_dir()`, donc par `APPDATA` :
+    /// un test peut deposer une config et appeler `load()`. Ce qui l'en empeche
+    /// est autre chose, et ca se dit : la variable est un etat de PROCESSUS, et
+    /// `OpenCADStudio::new_for_test()` appelle `load()` lui aussi. Un tel test
+    /// servirait sa fausse config a tous les tests qui tournent en meme temps.
+    /// Il faudrait `--test-threads=1`, que la CI ne pose pas.
+    ///
+    /// LE TROU QUE CA LAISSE, mesure : remplacer l'appel a `depuis_json`
+    /// ci-dessous par l'ancien corps laisse les tests VERTS, et la migration ne
+    /// part alors jamais en production. C'est le jumeau du defaut ferme un cran
+    /// plus bas. La parade n'est pas un test : c'est que cette ligne reste la
+    /// SEULE chose que `load()` fasse, pour qu'un contournement soit une
+    /// reecriture visible et non une retouche. Un banc qui appelle `migrer_constructo` a la main sur
+    /// une struct batie en Rust mesure la FONCTION, jamais la chaine — et laisse
+    /// donc passer la mutation qui RETIRE l'appel. Mesure du 2026-09-19 :
+    /// supprimer `config.migrer_constructo()` laissait les cinq tests verts.
+    ///
+    /// C'est aussi la seule voie qui traverse serde, donc la seule ou le piege
+    /// du `#[serde(default)]` de conteneur (voir le champ `constructo_migration`)
+    /// puisse etre constate au lieu d'etre suppose.
+    fn depuis_json(body: Option<&str>) -> Self {
+        let mut config: Self = body
+            .and_then(|body| serde_json::from_str(body).ok())
+            .unwrap_or_default();
+        config.migrer_constructo();
+        config
+    }
+
+    /// FORK CONSTRUCTO : amene une config ecrite avant le fork a l'etat que ce
+    /// fork attend.
+    ///
+    /// DEUX CONDITIONS, ET CHACUNE FERME UN DEFAUT DIFFERENT.
+    ///
+    /// 1. **Le compteur** distingue « jamais migre » de « a choisi ». Sans lui,
+    ///    forcer le theme a chaque chargement donnerait un reglage qu'on ne PEUT
+    ///    PAS changer : l'utilisateur choisit, la config enregistre, le
+    ///    rechargement annule son choix.
+    ///
+    /// 2. **Le nom du theme** borne les degats a ceux qu'on vient reparer.
+    ///    Une premiere version ne portait que la condition 1 et remplacait
+    ///    `self.theme` EN ENTIER. Mesure du retest :
+    ///
+    ///    ```text
+    ///    avant : name=Custom  palette=[18,24,38]/[220,228,240]/[255,140,0]
+    ///    apres : name=Fusion White  palette=[250,250,250]/[26,26,26]/[0,32,80]
+    ///    ```
+    ///
+    ///    Un utilisateur d'avant le fork ayant regle ses six couleurs a la main
+    ///    les perdait a la premiere ouverture, **sans retour possible** —
+    ///    `saved_custom_palette` (`app/mod.rs:1123`) est un champ de session,
+    ///    jamais serialise. Et un theme CLAIR choisi deliberement
+    ///    (`SolarizedLight`, `GruvboxLight`) etait ecrase alors qu'il n'a jamais
+    ///    pose la dalle sombre que cette migration existe pour supprimer.
+    ///
+    /// On ne migre donc QUE depuis le defaut d'amont. Celui qui avait choisi
+    ///    Oxocarbon deliberement le voit changer une fois ; tous les autres
+    ///    gardent ce qu'ils avaient. C'est la seule frontiere que la config
+    ///    permette de tracer, et elle laisse passer le moins de monde.
+    fn migrer_constructo(&mut self) {
+        if self.constructo_migration < 1 && self.theme.name == THEME_PAR_DEFAUT_AMONT {
+            // 1 — le module est encadre par un ERP clair ; le defaut amont etait
+            // sombre.
+            self.theme = UiThemeConfig::default();
+        }
+        // Hors du `if`, ET C'EST OBSERVABLE -- depuis la clause de nom seulement.
+        //
+        // Ce commentaire a dit deux choses fausses de suite, et la seconde etait
+        // la mienne. D'abord « sans quoi la migration se rejouerait a chaque
+        // chargement » : faux, mesure. Puis, apres correction, « sans effet
+        // observable a l'interieur » : vrai a l'instant ou je l'ai ecrit, et
+        // perime UNE HEURE plus tard quand la clause `&& self.theme.name == ...`
+        // est arrivee sur la meme ligne. Avec elle, un utilisateur reste sur
+        // `Dracula` ne passe plus dans le `if` -- et son compteur doit quand meme
+        // etre releve, sinon la migration se represente a chaque chargement.
+        //
+        // Le test `le_compteur_est_pose_meme_quand_il_n_y_a_rien_a_migrer` tient
+        // cette position. C'est lui qui fait foi, pas ce paragraphe : un
+        // commentaire vieillit, un test rougit.
+        self.constructo_migration = self.constructo_migration.max(CONSTRUCTO_MIGRATION);
     }
 
     /// Persist the config as JSON. Best-effort; silent on unavailable or
@@ -611,5 +758,326 @@ mod tests {
         assert_eq!(parse_theme_name("1"), None);
         assert_eq!(parse_theme_name("0"), None);
         assert_eq!(parse_theme_name("nonexistent_theme"), None);
+    }
+
+    // ── FORK CONSTRUCTO ──────────────────────────────────────────────────
+
+    #[test]
+    fn le_theme_par_defaut_est_clair_comme_l_erp_qui_l_encadre() {
+        let config = AppConfig::default();
+        assert_eq!(
+            config.theme.name,
+            crate::ui::style::fusion_theme::FUSION_WHITE,
+            "le module est servi dans un ERP clair ; un defaut sombre y pose une dalle"
+        );
+        assert_eq!(config.constructo_migration, CONSTRUCTO_MIGRATION);
+    }
+
+    #[test]
+    fn un_nom_de_theme_inconnu_ne_retombe_pas_sur_du_sombre() {
+        let inconnu = UiThemeConfig {
+            name: "ThemeQuiNExistePlus".to_string(),
+            palette: UiThemePalette::from_iced(iced::Theme::Dark.seed()),
+        };
+        assert_eq!(
+            inconnu.to_iced().to_string(),
+            crate::ui::style::fusion_theme::FUSION_WHITE
+        );
+    }
+
+    /// Le JSON d'une config telle qu'elle existait AVANT le fork : le theme
+    /// sombre d'amont, et **aucune** cle `constructo_migration`.
+    ///
+    /// Fabrique en retirant la cle d'une config serialisee plutot qu'en ecrivant
+    /// un JSON a la main : le litteral vieillirait a chaque champ ajoute, et un
+    /// banc qui ne se deserialise plus se saute au lieu d'echouer.
+    fn json_d_avant_le_fork() -> String {
+        json_avec_theme_sombre(true)
+    }
+
+    /// Une config serialisee portant le theme sombre d'amont ; `sans_compteur`
+    /// retire la cle `constructo_migration`, ce qui est la signature d'une
+    /// config ecrite avant le fork.
+    fn json_avec_theme_sombre(sans_compteur: bool) -> String {
+        let mut valeur = serde_json::to_value(AppConfig::default()).unwrap();
+        let objet = valeur.as_object_mut().unwrap();
+        if sans_compteur {
+            objet.remove("constructo_migration");
+        }
+        objet.insert(
+            "theme".to_string(),
+            serde_json::to_value(UiThemeConfig {
+                name: "Oxocarbon".to_string(),
+                palette: UiThemePalette::from_iced(iced::Theme::Oxocarbon.seed()),
+            })
+            .unwrap(),
+        );
+        valeur.to_string()
+    }
+
+    #[test]
+    fn un_compteur_absent_se_lit_a_zero_et_non_au_defaut_de_la_struct() {
+        // LE TEST QUI MANQUAIT, ET SANS LEQUEL TOUT LE RESTE ETAIT MORT.
+        //
+        // `#[serde(default)]` sur le CONTENEUR puise un champ absent dans
+        // `AppConfig::default()` — donc `CONSTRUCTO_MIGRATION`, donc 1. Il a
+        // fallu l'attribut sur le CHAMP pour obtenir 0. Aucun des tests
+        // precedents ne traversait serde : ils ecrivaient `0` a la main dans un
+        // litteral, puis constataient que la fonction faisait ce qu'on lui avait
+        // dit. Ils jugeaient la forme fabriquee, pas le comportement reel.
+        let brut: AppConfig = serde_json::from_str(&json_d_avant_le_fork()).unwrap();
+        assert_eq!(
+            brut.constructo_migration, 0,
+            "un champ absent doit valoir 0, sinon la migration ne part jamais"
+        );
+    }
+
+    #[test]
+    fn la_chaine_complete_bascule_une_config_d_avant_le_fork() {
+        // Par `depuis_json`, la chaine REELLE de `load()`. Un test qui
+        // appellerait `migrer_constructo` a la main laisserait passer la
+        // mutation qui RETIRE l'appel.
+        let migree = AppConfig::depuis_json(Some(&json_d_avant_le_fork()));
+        assert_eq!(
+            migree.theme.name,
+            crate::ui::style::fusion_theme::FUSION_WHITE
+        );
+        // La PALETTE aussi, pas seulement le nom : une migration qui pose le bon
+        // nom en gardant les couleurs sombres reste invisible a un test de nom,
+        // et `apply_config` alimente l'editeur de couleurs depuis cette palette.
+        //
+        // `assert!` et non `assert_eq!` : aucune de ces structs ne derive
+        // `Debug` (voir les derivations de `UiThemePalette`), et `assert_eq!`
+        // l'exige pour imprimer l'ecart.
+        assert!(
+            migree.theme.palette
+                == UiThemePalette::from_iced(
+                    crate::ui::style::fusion_theme::fusion_white().seed()
+                ),
+            "le nom sans la palette laisse un theme clair aux couleurs sombres"
+        );
+        assert_eq!(migree.constructo_migration, CONSTRUCTO_MIGRATION);
+    }
+
+    #[test]
+    fn la_chaine_migre_aussi_une_config_absente() {
+        let neuve = AppConfig::depuis_json(None);
+        assert_eq!(
+            neuve.theme.name,
+            crate::ui::style::fusion_theme::FUSION_WHITE
+        );
+        assert_eq!(neuve.constructo_migration, CONSTRUCTO_MIGRATION);
+    }
+
+    #[test]
+    fn une_config_illisible_ne_fait_pas_tomber_le_demarrage() {
+        let casse = AppConfig::depuis_json(Some("{ ceci n'est pas du json"));
+        assert_eq!(
+            casse.theme.name,
+            crate::ui::style::fusion_theme::FUSION_WHITE
+        );
+    }
+
+    #[test]
+    fn la_migration_ne_repasse_pas_sur_un_choix_deja_fait() {
+        // LE PIEGE PRINCIPAL. Une migration qui se rejoue donne un reglage
+        // IMPOSSIBLE A CHANGER : on choisit, la config enregistre, le
+        // rechargement annule le choix. Le compteur separe « jamais migre » de
+        // « a choisi » ; une garde sur la VALEUR du theme ne le saurait pas.
+        // Le compteur est PRESENT et a jour : la config a deja ete migree, et
+        // c'est apres coup que l'utilisateur a choisi le sombre.
+        let choisi = AppConfig::depuis_json(Some(&json_avec_theme_sombre(false)));
+        assert_eq!(
+            choisi.theme.name, "Oxocarbon",
+            "un theme choisi apres la migration doit survivre au rechargement"
+        );
+    }
+
+    #[test]
+    fn le_compteur_est_pose_meme_quand_il_n_y_a_rien_a_migrer() {
+        // Il doit etre HORS du `if` : une config neuve qui n'a rien a migrer
+        // doit tout de meme porter le numero courant, sinon la migration se
+        // rejoue a chaque chargement. Rien dans les tests precedents ne fixait
+        // cette position.
+        let mut neuve = AppConfig {
+            constructo_migration: 0,
+            ..AppConfig::default()
+        };
+        neuve.migrer_constructo();
+        assert_eq!(neuve.constructo_migration, CONSTRUCTO_MIGRATION);
+    }
+
+    #[test]
+    fn un_compteur_venu_du_futur_n_est_pas_rabattu() {
+        // Scenario reel : `/cad` est servi depuis une release remplacee a chaque
+        // build. Un onglet qui tient encore l'ancien bundle met un module d'hier
+        // devant une config ecrite aujourd'hui. Rabattre le compteur ferait
+        // rejouer la migration au retour — le defaut meme qu'il empeche.
+        let mut futur = AppConfig {
+            constructo_migration: CONSTRUCTO_MIGRATION + 7,
+            ..AppConfig::default()
+        };
+        futur.migrer_constructo();
+        assert_eq!(futur.constructo_migration, CONSTRUCTO_MIGRATION + 7);
+    }
+
+    #[test]
+    fn la_migration_est_idempotente() {
+        // Elle part d'un theme SOMBRE, et non de `..AppConfig::default()`. Une
+        // campagne de mutation a montre qu'en partant du theme deja cible, ce
+        // test n'attrapait qu'une seule mutation sur trente-cinq : la premiere
+        // migration n'y deplacait rien d'observable. C'etait un sous-ensemble de
+        // ses voisins, pas une garde.
+        let mut config = AppConfig {
+            constructo_migration: 0,
+            theme: UiThemeConfig {
+                name: THEME_PAR_DEFAUT_AMONT.to_string(),
+                palette: UiThemePalette::from_iced(iced::Theme::Oxocarbon.seed()),
+            },
+            ..AppConfig::default()
+        };
+        config.migrer_constructo();
+        let apres_une = config.clone();
+        config.migrer_constructo();
+        assert!(apres_une == config, "rejouer la migration doit etre sans effet");
+    }
+
+    // ── Les six gardes ajoutees apres la campagne de mutation du 2026-09-19 ──
+    //
+    // Elle a rendu 26 prises sur 35, et chacune de ces six-la ferme un survivant
+    // dont l'effet utilisateur avait ete mesure. Elles ne sont pas des tests de
+    // confort : sans elles, les mutations correspondantes laissaient les onze
+    // tests precedents VERTS.
+
+    #[test]
+    fn une_palette_partielle_se_complete_en_clair() {
+        // DEUX defauts d'un coup, tous deux mesures.
+        //
+        // 1. `#[serde(default)]` sur le CONTENEUR `UiThemePalette` : sans lui, un
+        //    champ absent devient une ERREUR de deserialisation, que
+        //    `depuis_json` avale en `unwrap_or_default()`. Une palette partielle
+        //    fait donc jeter TOUTE la config en silence -- fichiers recents,
+        //    raccourcis clavier, dock, reglages d'impression. L'utilisateur
+        //    rouvre le module et tout est revenu par defaut, sans un message.
+        // 2. `UiThemePalette::default()` : le JUMEAU de `UiThemeConfig::default`.
+        //    Laisse sur Oxocarbon, les champs absents naissent SOMBRES sous un
+        //    theme nomme « Fusion White ».
+        let json = r#"{"constructo_migration":1,"theme":{"name":"Fusion White","palette":{"primary":[255,0,0]}}}"#;
+        let config = AppConfig::depuis_json(Some(json));
+        assert_eq!(
+            config.theme.palette.primary,
+            [255, 0, 0],
+            "la config a ete jetee : le defaut de conteneur ne s'applique plus"
+        );
+        assert_eq!(
+            config.theme.palette.background,
+            [250, 250, 250],
+            "les champs absents naissent sombres"
+        );
+    }
+
+    #[test]
+    fn un_theme_sans_palette_ne_jette_pas_la_config() {
+        let config =
+            AppConfig::depuis_json(Some(r#"{"constructo_migration":1,"theme":{"name":"Nord"}}"#));
+        assert_eq!(config.theme.name, "Nord");
+    }
+
+    #[test]
+    fn une_config_a_qui_il_manque_des_sections_garde_ce_qu_elle_porte() {
+        // Le `#[serde(default)]` du conteneur `AppConfig` lui-meme. Une
+        // `settings.json` ecrite par une version anterieure n'a pas toutes les
+        // sections d'aujourd'hui : sans ce defaut, elle est integralement perdue.
+        let config = AppConfig::depuis_json(Some(
+            r#"{"constructo_migration":1,"recent":{"files":["a.dwg"],"limit":7}}"#,
+        ));
+        assert_eq!(config.recent.files, vec!["a.dwg".to_string()]);
+        assert_eq!(config.recent.limit, 7);
+    }
+
+    #[test]
+    fn un_compteur_venu_du_futur_ne_relance_pas_la_migration() {
+        // Le test voisin ne verifie QUE le compteur, sur une config deja au theme
+        // clair : remplacer `< 1` par `!= CONSTRUCTO_MIGRATION` le laissait vert.
+        // Scenario : l'onglet A (bundle neuf) ecrit 8 et l'utilisateur choisit
+        // Oxocarbon ; l'onglet B (bundle d'hier) charge, `8 != 1`, et son theme
+        // est ecrase. Le compteur etait protege, le theme qu'il protege ne
+        // l'etait pas.
+        let mut futur = AppConfig {
+            constructo_migration: CONSTRUCTO_MIGRATION + 7,
+            theme: UiThemeConfig {
+                name: THEME_PAR_DEFAUT_AMONT.to_string(),
+                palette: UiThemePalette::from_iced(iced::Theme::Oxocarbon.seed()),
+            },
+            ..AppConfig::default()
+        };
+        futur.migrer_constructo();
+        assert_eq!(
+            futur.theme.name, THEME_PAR_DEFAUT_AMONT,
+            "un compteur venu du futur ne doit pas relancer la migration"
+        );
+    }
+
+    #[test]
+    fn la_migration_epargne_un_theme_choisi_avant_le_fork() {
+        // La clause de nom n'avait aucun test : la retirer laissait le banc vert.
+        // Elle tranche pourtant une decision produit -- un utilisateur reste sur
+        // `Dracula` garde-t-il son theme ? -- et les autres tests n'exercent
+        // qu'un seul theme d'avant le fork, Oxocarbon.
+        let mut valeur = serde_json::to_value(AppConfig::default()).unwrap();
+        let objet = valeur.as_object_mut().unwrap();
+        assert!(
+            objet.remove("constructo_migration").is_some(),
+            "la cle persistee a change de nom : ce banc ne mesurait plus rien"
+        );
+        objet.insert(
+            "theme".to_string(),
+            serde_json::to_value(UiThemeConfig {
+                name: "Dracula".to_string(),
+                palette: UiThemePalette::from_iced(iced::Theme::Dracula.seed()),
+            })
+            .unwrap(),
+        );
+        let migree = AppConfig::depuis_json(Some(&valeur.to_string()));
+        assert_eq!(
+            migree.theme.name, "Dracula",
+            "un theme CHOISI avant le fork survit ; seul le defaut amont bascule"
+        );
+        assert_eq!(migree.constructo_migration, CONSTRUCTO_MIGRATION);
+    }
+
+    #[test]
+    fn la_garde_suit_la_constante_et_non_un_litteral() {
+        // `CONSTRUCTO_MIGRATION = 1` et la garde `< 1` portent le meme nombre par
+        // COINCIDENCE DE FRAPPE : passer la constante a 2 laissait le banc vert.
+        // Le jour ou la migration 2 arrive, la population qui la demande
+        // (compteur = 1) ne la recevrait pas, `1 < 1` etant faux -- la classe de
+        // defaut que le compteur existe pour servir, desarmee en silence.
+        let mut jamais_migree = AppConfig {
+            constructo_migration: CONSTRUCTO_MIGRATION - 1,
+            theme: UiThemeConfig {
+                name: THEME_PAR_DEFAUT_AMONT.to_string(),
+                palette: UiThemePalette::from_iced(iced::Theme::Oxocarbon.seed()),
+            },
+            ..AppConfig::default()
+        };
+        jamais_migree.migrer_constructo();
+        assert_eq!(
+            jamais_migree.theme.name,
+            crate::ui::style::fusion_theme::FUSION_WHITE,
+            "une config d'un cran sous la constante doit migrer"
+        );
+    }
+
+    #[test]
+    fn ce_qui_est_enregistre_porte_le_numero_courant() {
+        // `current_config` (`update/file.rs`) rebatit la config depuis l'etat
+        // vivant, qui ne transporte pas le compteur : c'est la constante qui
+        // part en storage. Ce test tient le contrat des deux cotes — s'il
+        // changeait, un choix delibere serait efface au rechargement suivant.
+        let json = serde_json::to_string(&AppConfig::default()).unwrap();
+        let relue: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(relue.constructo_migration, CONSTRUCTO_MIGRATION);
+        assert_eq!(relue.theme.name, crate::ui::style::fusion_theme::FUSION_WHITE);
     }
 }

@@ -4205,6 +4205,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Top major radius" => Some(("common", "top-major-radius")),
         "Top minor radius" => Some(("common", "top-minor-radius")),
         "OpenCADStudio renderer error — copy this into a bug report:" => Some(("common", "opencadstudio-renderer-error-copy-this-into-a-bug-report")),
+        "The drawing module needs a computer: it does not open on this device." => Some(("common", "the-drawing-module-needs-a-computer-it-does-not-open-on-this-device")),
+        "Open this link on a computer to draw." => Some(("common", "open-this-link-on-a-computer-to-draw")),
         "Dismiss" => Some(("common", "dismiss")),
         "?" => Some(("common", "value-8a8de8")),
         "Select Color..." => Some(("common", "select-color-8dddf1")),

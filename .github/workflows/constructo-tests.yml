@@ -1,0 +1,62 @@
+name: Tests Rust
+
+# POURQUOI CE FICHIER EXISTE.
+#
+# Mesure du 2026-09-19 : `grep -rl "cargo test"` sur tout ce depot ne rendait que
+# des `docs/` et des `README`. AUCUN flux ne lancait la suite. Les seuls travaux
+# Rust etaient `cargo build --locked --release` (`release.yml`,
+# `constructo-moteur.yml`) et `cargo check --target wasm32` (`web-check.yml`) —
+# qui COMPILENT sans rien executer.
+#
+# Autrement dit, chaque test ecrit dans ce depot ne tournait que sous les doigts
+# du developpeur qui pensait a taper `cargo test`. C'est exactement la classe de
+# defaut que le depot ERP a payee quatre fois : un banc pose la ou rien ne
+# l'execute ne protege personne, et il se lit comme une protection.
+#
+# FICHIER NEUF, ET NON UNE MODIFICATION DE `web-check.yml`. Les flux herites
+# d'amont sont laisses intacts : un fichier modifie ferait conflit a chaque
+# rebase sur `HakanSeven12/OpenCADStudio`.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: constructo-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `build.rs` mesure la distance au dernier tag pour etiqueter la
+          # version ; un clone superficiel la remplacerait par `+g<hash>`.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Les dependances systeme d'iced/wgpu pour BATIR les tests. Rien ici ne
+      # demande un serveur d'affichage : la suite ne cree aucune fenetre
+      # (`OpenCADStudio::new_for_test` construit l'etat, pas une fenetre).
+      - name: Dependances systeme
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfontconfig1-dev libfreetype6-dev pkg-config
+
+      - name: cargo test
+        run: cargo test --locked --workspace

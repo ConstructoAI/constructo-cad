@@ -4,11 +4,30 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, follow" />
-    <meta name="theme-color" content="#1e1e1e" />
+    <!-- FORK CONSTRUCTO : la coquille suit le theme clair de l application.
+         Laissee a #1e1e1e, elle peignait du sombre pendant tout le
+         chargement du wasm (12 Mo), puis le canevas arrivait en #FAFAFA --
+         un clignotement noir a chaque ouverture, plus le letterbox autour
+         du canevas qui restait sombre ensuite. -->
+    <meta name="theme-color" content="#FAFAFA" />
     <title>Open CAD Studio Web App</title>
     <link data-trunk rel="icon" href="assets/logo.svg" />
+    <!--
+      Relais postMessage vers l'ERP Constructo (voir web/ocs-erp-bridge.js).
+
+      CHARGE ICI, SYNCHRONE, ET AVANT TOUT LE RESTE : `postMessage` NE MET RIEN
+      EN FILE. Un message arrive avant que l'ecouteur existe est perdu, sans
+      erreur ni trace. Le poser en tete de `<head>` reduit cette fenetre au
+      minimum ; ce qui la ferme vraiment, c'est que le parent attende l'annonce
+      `pret` (ou envoie `sonde`) avant de parler. Le script n'ouvre rien par
+      lui-meme : sans parent legitime il reste muet dans les deux sens.
+
+      Chemin RELATIF, comme `fetch("locale-labels.json")` plus bas : le bundle
+      est servi sous `/cad/` et se deplace en bloc.
+    -->
+    <script src="ocs-erp-bridge.js"></script>
     <style>
-      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #1e1e1e; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #FAFAFA; }
       canvas { display: block; }
       #loading {
         position: fixed;
@@ -18,21 +37,23 @@
         align-items: center;
         justify-content: center;
         gap: 22px;
-        background: #1e1e1e;
-        color: #cfcfcf;
+        background: #FAFAFA;
+        /* FORK CONSTRUCTO : #cfcfcf etait fait pour un fond sombre --
+           sur #FAFAFA il donne 1,3:1, donc rien de lisible. */
+        color: #1A1A1A;
         font-family: system-ui, sans-serif;
         z-index: 9999;
         transition: opacity 0.4s ease;
       }
       #loading.hide { opacity: 0; pointer-events: none; }
       #loading .title { font-size: 22px; font-weight: 600; letter-spacing: 0.5px; }
-      #loading .title span { color: #3399e6; }
+      #loading .title span { color: #002050; }
       #loading .sub { font-size: 12px; color: #777; }
       #loading .spinner {
         width: 46px;
         height: 46px;
-        border: 4px solid #2e2e2e;
-        border-top-color: #3399e6;
+        border: 4px solid #E0E0E0;
+        border-top-color: #002050;
         border-radius: 50%;
         animation: ocs-spin 0.9s linear infinite;
       }
@@ -41,6 +62,7 @@
     <link data-trunk rel="rust" data-bin="OpenCADStudio" />
     <link data-trunk rel="copy-dir" href="web/fonts" />
     <link data-trunk rel="copy-file" href="web/ocs-parse-worker.js" />
+    <link data-trunk rel="copy-file" href="web/ocs-erp-bridge.js" />
     <link data-trunk rel="copy-file" href="web/discussions.json" />
     <link data-trunk rel="copy-file" href="web/videos.json" />
     <link data-trunk rel="copy-file" href="web/locale-labels.json" />

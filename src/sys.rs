@@ -434,23 +434,133 @@ pub mod web_diag {
             }
             let msg = format!("[{}] {}", record.target(), record.args());
             web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(&msg));
+            // FORK CONSTRUCTO : ce qui vient de la pile graphique va dans la
+            // console, jamais a l'ecran.
+            //
+            // Constate par Sylvain le 2026-09-19 sur iPhone : ouvrir le module
+            // affichait un mur rouge portant un chemin de la machine de build de
+            // GitHub et une invitation a ouvrir un bogue chez `gfx-rs/wgpu`.
+            // C'est de l'interne d'amont servi a un client.
+            //
+            // La coupe est ici ET dans le crochet de panique : sans celle-ci, les
+            // quatre lignes de `wgpu` s'affichent AVANT la panique et restent
+            // visibles sous le message honnete. La console, elle, garde tout —
+            // c'est nous qui en avons besoin, pas le visiteur.
+            if est_de_la_pile_graphique(record.target()) {
+                return;
+            }
             show_banner(&msg);
         }
         fn flush(&self) {}
+    }
+
+    /// Vrai pour les enregistrements de la pile de rendu.
+    ///
+    /// On juge la CIBLE du journal, pas le texte du message : la cible est une
+    /// donnee structuree (`wgpu::backend::wgpu_core`), le texte est de la prose
+    /// qui change avec la version et la langue du pilote.
+    fn est_de_la_pile_graphique(cible: &str) -> bool {
+        cible.starts_with("wgpu") || cible.starts_with("naga") || cible.starts_with("iced_wgpu")
     }
 
     /// Install the logger + panic mirror. Call once at web startup, AFTER
     /// `console_error_panic_hook::set_once` so the chained hook keeps the
     /// console stack trace.
     pub fn init() {
+        // FORK CONSTRUCTO : les deux phrases sont resolues MAINTENANT, pas dans le
+        // crochet. Rentrer dans le chargeur de traductions pendant une panique est
+        // un risque qu'on peut supprimer sans rien couter.
+        let titre = crate::t!(
+            "The drawing module needs a computer: it does not open on this device."
+        )
+        .into_owned();
+        let sortie = crate::t!("Open this link on a computer to draw.").into_owned();
+
         let console_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            show_banner(&info.to_string());
+            let texte = info.to_string();
+            // Sur wasm il n'y a pas de deroulement de pile : une panique est
+            // TOUJOURS terminale. « Panique attrapee » veut donc dire
+            // « application morte », sans faux positif possible — c'est ce qui
+            // rend ce rattrapage sans risque.
+            //
+            // Une panique NON graphique garde le bandeau d'amont : ce sont nos
+            // bogues a nous, et le bouton Copier y a de la valeur.
+            if panique_de_rendu(&texte) {
+                show_fatal(&titre, &sortie);
+            } else {
+                show_banner(&texte);
+            }
+            // La trace complete continue d'aller dans la console, dans les deux
+            // cas. Elle nous sert ; elle n'est simplement plus servie a l'ecran.
             console_hook(info);
         }));
         if log::set_boxed_logger(Box::new(BannerLogger)).is_ok() {
             log::set_max_level(log::LevelFilter::Error);
         }
+    }
+
+    /// Reconnait une panique venue de la pile de rendu.
+    ///
+    /// Ici on n'a que le TEXTE — une panique ne porte pas de cible de journal —
+    /// et les marqueurs choisis sont des noms de module, pas de la prose
+    /// traduisible : `wgpu_core`, `wgpu error`, `naga`. Le chemin de fichier de
+    /// la panique en contient toujours au moins un.
+    fn panique_de_rendu(texte: &str) -> bool {
+        const MARQUEURS: [&str; 5] = [
+            "wgpu_core",
+            "wgpu error",
+            "wgpu-",
+            "naga",
+            "Shader compilation failed",
+        ];
+        MARQUEURS.iter().any(|m| texte.contains(m))
+    }
+
+    /// Remplace la page par un message honnete. Rien de copiable, aucune trace,
+    /// aucun lien vers un depot tiers.
+    ///
+    /// Elle REMPLACE au lieu d'ajouter une ligne : le bandeau d'amont empile, et
+    /// empiler un message clair sous quatre lignes de `wgpu` ne repare rien. Elle
+    /// retire aussi le canevas et le voile de chargement, qui resteraient sinon —
+    /// l'un noir, l'autre en train de tourner pour une application deja morte.
+    fn show_fatal(titre: &str, sortie: &str) {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        for id in ["ocs-err", "loading"] {
+            if let Some(element) = doc.get_element_by_id(id) {
+                element.remove();
+            }
+        }
+        if let Ok(canevas) = doc.query_selector("canvas") {
+            if let Some(canevas) = canevas {
+                canevas.remove();
+            }
+        }
+        let Some(body) = doc.body() else { return };
+        let Ok(panneau) = doc.create_element("div") else {
+            return;
+        };
+        panneau.set_id("ocs-fatal");
+        let _ = panneau.set_attribute(
+            "style",
+            "position:fixed;inset:0;z-index:2147483647;display:flex;\
+             flex-direction:column;align-items:center;justify-content:center;\
+             gap:10px;padding:24px;text-align:center;background:#FAFAFA;\
+             color:#1A1A1A;font:16px/1.5 system-ui,sans-serif;",
+        );
+        if let Ok(ligne) = doc.create_element("div") {
+            let _ = ligne.set_attribute("style", "font-weight:600;max-width:34rem;");
+            ligne.set_text_content(Some(titre));
+            let _ = panneau.append_child(&ligne);
+        }
+        if let Ok(ligne) = doc.create_element("div") {
+            let _ = ligne.set_attribute("style", "color:#555;max-width:34rem;");
+            ligne.set_text_content(Some(sortie));
+            let _ = panneau.append_child(&ligne);
+        }
+        let _ = body.append_child(&panneau);
     }
 
     /// Append `msg` to the on-page banner, creating the overlay on first use.

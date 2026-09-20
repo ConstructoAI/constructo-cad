@@ -4139,8 +4139,12 @@ impl OpenCADStudio {
                 )
             })
             .ok(),
-            // Color scheme (default: Oxocarbon)
-            active_theme: Theme::Oxocarbon,
+            // FORK CONSTRUCTO : le module est servi dans un ERP clair. Valeur
+            // transitoire — `apply_config` (`update/file.rs`) la remplace par
+            // celle de la config des le demarrage — mais elle doit s'accorder
+            // avec `UiThemeConfig::default()` juste en dessous, sans quoi les
+            // deux lignes se contredisent a la construction.
+            active_theme: crate::ui::style::fusion_theme::fusion_white(),
             ui_theme: config::UiThemeConfig::default(),
             theme_color_inputs: config::UiThemePalette::default().hex_values(),
             model_space: config::ModelSpaceThemeConfig::default(),
