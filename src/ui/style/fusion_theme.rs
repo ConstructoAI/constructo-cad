@@ -45,9 +45,9 @@ fn rgb(hex: u32) -> Color {
 /// FORK CONSTRUCTO : l'accent d'amont est CONSERVE, apres l'avoir change et
 /// remis. Mesure du 2026-09-19 — sur le fond du theme (#1A1A1A), `#0696D7`
 /// donne **5,26:1** ; le `#0078D4` de la charte de l'ERP, **3,84:1**. Sous la
-/// barre de 4,5 que `ui/command_line.rs:1100-1105` et `ui/icons.rs:594-599`
-/// interrogent, l'accent n'est pas seulement plus terne : il **cesse d'etre
-/// dessine**, remplace par son repli.
+/// barre de 4,5 que `ui/command_line.rs:1100-1105` interroge, l'accent n'est
+/// pas seulement plus terne : il **cesse d'etre dessine**, remplace par son
+/// repli.
 ///
 /// Les deux bleus sont de la meme famille et se distinguent mal a l'oeil. Le
 /// gain de charte etait donc nul, et le cout reel.
@@ -90,8 +90,14 @@ pub fn fusion_black() -> Theme {
 /// dessine**, remplace par son repli.
 ///   - `ui/command_line.rs:1100-1105` — les lignes « Info » de la ligne de
 ///     commande perdaient leur bleu et prenaient la couleur du texte ordinaire,
-///     devenant indistinguables des lignes de commande.
-///   - `ui/icons.rs:594-599` — la coche des cellules basculait au quasi-noir.
+///     devenant indistinguables des lignes de commande. C'est la SEULE surface
+///     a 4,5 sur `primary` contre `background.base`.
+///
+/// ⚠️ CE BLOC A CITE `ui/icons.rs:594-599` COMME SECONDE SURFACE A 4,5. C'est
+/// FAUX, et re-mesure le 2026-09-20 : la coche des cellules interroge **3,0**,
+/// deux fois, et contre `background.weak` puis `background.strong` — jamais
+/// contre `background.base`. Les deux bleus la passent. Une mesure se publie
+/// avec sa surface, et une surface citee se relit dans le code.
 ///
 /// UNE MESURE SE PUBLIE AVEC SA SURFACE. Ce que ce fork garde de la charte,
 /// c'est le theme CLAIR par defaut — le changement que l'utilisateur voit. Pas
@@ -163,27 +169,50 @@ mod tests {
     /// mesure, et c'est sur elle que #0078D4 a ete valide (4,53:1) — puis pose,
     /// alors qu'il tombe a **4,34** contre le fond du theme.
     ///
-    /// Or deux surfaces de production interrogent le seuil de **4,5** :
-    ///   - `ui/command_line.rs:1100-1105`, pour les lignes « Info » ;
-    ///   - `ui/icons.rs:594-599`, pour la coche des cellules.
-    /// Sous ce seuil elles ne prennent pas un bleu plus terne : elles basculent
-    /// sur un REPLI, donc l'accent cesse d'etre dessine. Les lignes « Info »
-    /// devenaient indistinguables des lignes de commande.
+    /// La surface de production qui interroge **4,5** sur `primary` contre
+    /// `background.base` est `ui/command_line.rs:1100-1105`, pour les lignes
+    /// « Info ». Sous ce seuil elles ne prennent pas un bleu plus terne : elles
+    /// basculent sur un REPLI, donc l'accent cesse d'etre dessine, et les
+    /// lignes « Info » deviennent indistinguables des lignes de commande.
     ///
-    /// Une mesure se publie avec sa surface. Celle-ci tient la surface que le
-    /// produit interroge vraiment, pas celle qui donnait le chiffre le plus
-    /// flatteur.
+    /// ⚠️ CE BLOC A CITE `ui/icons.rs:594-599` COMME SECONDE SURFACE A 4,5,
+    /// a trois endroits, message d'assertion compris. C'est FAUX, re-mesure le
+    /// 2026-09-20 : la coche des cellules interroge **3,0**, deux fois, contre
+    /// `background.weak` puis `background.strong` — jamais contre
+    /// `background.base`. Les deux bleus la passent. Une surface citee se relit
+    /// dans le code, et un message d'assertion se relit aussi : c'est lui qu'on
+    /// lira le jour ou ce banc rougira.
+    ///
+    /// LA VRAIE SECONDE SURFACE A 4,5 est `ui/command_line.rs:709-714`, et
+    /// elle porte `success`, pas `primary` — le libelle de l'invite
+    /// « Commande : ». Elle n'etait tenue par RIEN. Mesure : Fusion Black
+    /// 6,2615, Fusion White 4,9124. Elle passe, avec 0,41 de marge sur le
+    /// theme clair par defaut du fork ; sans cette assertion, un futur vert
+    /// plus clair ferait disparaitre l'invite sans un seul banc rouge.
+    ///
+    /// 🔴 ET C'EST ICI QUE L'ACCENT EST TENU, nulle part ailleurs. Mesure par
+    /// mutation (2026-09-20) : remettre `#0078D4` dans `fusion_white()` laisse
+    /// VERTES les 57 macros d'assertion de `ui/theme_accessibility_tests.rs`,
+    /// parce
+    /// qu'elles assertent sur le resultat du repli. Ce `assert!`-ci est le seul
+    /// qui rougit. Ne pas le supprimer au motif qu'un banc plus gros existe.
     #[test]
     fn fusion_accent_survives_the_threshold_production_asks_for() {
         for theme in fusion_themes() {
             let p = theme.palette();
-            let contrast = wcag_contrast(p.primary.base.color, p.background.base.color);
-            assert!(
-                contrast >= 4.5,
-                "{theme} accent is {contrast:.2}:1 on the theme background, below \
-                 the 4.5 that command_line.rs and icons.rs require — the accent \
-                 would be silently replaced by its fallback"
-            );
+            let bg = p.background.base.color;
+            for (role, couleur, site) in [
+                ("accent", p.primary.base.color, "command_line.rs:1100-1105"),
+                ("success", p.success.base.color, "command_line.rs:709-714"),
+            ] {
+                let contrast = wcag_contrast(couleur, bg);
+                assert!(
+                    contrast >= 4.5,
+                    "{theme} {role} is {contrast:.2}:1 on the theme background, below \
+                     the 4.5 that {site} requires — it would be silently replaced \
+                     by its fallback"
+                );
+            }
         }
     }
 

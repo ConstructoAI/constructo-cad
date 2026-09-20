@@ -83,7 +83,12 @@ jobs:
       # Servir ce bundle à un client EST une distribution au sens de la GPL-3.0 :
       # la licence doit voyager AVEC lui, et le client doit pouvoir atteindre les
       # sources correspondantes. Sans ces fichiers, l'obligation n'est tenue
-      # nulle part — le banc `test_cad_service.py` le vérifie côté ERP.
+      # nulle part.
+      #
+      # ⚠️ CE COMMENTAIRE A DIT « le banc `test_cad_service.py` le vérifie côté
+      # ERP ». C'était faux : ce banc saute en CI (mesuré sur le run 35514780818,
+      # `SKIPPED ... bundle non descendu sur ce poste`). Le vrai cliquet est
+      # l'étape qui suit celle-ci.
       - name: Joindre la licence au bundle
         run: |
           cp LICENSE dist/cad/LICENSE
@@ -97,6 +102,63 @@ jobs:
             echo ""
             echo "Le texte complet de la licence est dans LICENSE, a cote de ce fichier."
           } > dist/cad/SOURCES.txt
+
+      # 🔴 LE CLIQUET DE CONFORMITE, ET IL EST ICI PARCE QUE C'EST ICI QUE LE
+      # FICHIER EST ECRIT.
+      #
+      # L'etape precedente ECRIT ; un flux qui ecrit n'est pas un garde-fou.
+      # Retirez-lui trois lignes et rien ne rougit : le bundle part, se sert
+      # normalement, et la conformite tombe en silence.
+      #
+      # ⚠️ ET LE FILET QU'ON CROYAIT AVOIR N'EN EST PAS UN. Le depot ERP porte
+      # `test_le_bundle_reel_porte_sa_licence` et son voisin, qui lisent
+      # `ERP_REACT/cad-dist`. MESURE sur le run CI reel 35514780818
+      # (2026-09-20) : les deux rendent `SKIPPED [1] ... bundle non descendu sur
+      # ce poste`. Ce repertoire est dans le `.gitignore` de l'ERP et AUCUN flux
+      # ne le telecharge — ces bancs ne passent au vert que sur un poste ou
+      # quelqu'un a descendu le bundle a la main. Ils restent utiles comme
+      # seconde ceinture ; ils ne sont pas la premiere.
+      #
+      # Ce que la conformite demande, et pourquoi trois fichiers et pas un :
+      #   §5(a)(b) — dire que l'oeuvre est modifiee, avec sa date  -> NOTICE.txt
+      #   §5(c)    — faire voyager la licence elle-meme            -> LICENSE
+      #   §6(d)    — dire OU sont les sources correspondantes      -> SOURCES.txt
+      # Le banc cote ERP n'exigeait qu'une INTERSECTION NON VIDE de ces noms :
+      # un bundle qui perdrait `NOTICE.txt` en gardant `LICENSE` y passait vert.
+      - name: La licence voyage-t-elle vraiment avec le bundle ?
+        run: |
+          set -uo pipefail
+          manque=0
+          for f in LICENSE NOTICE.txt SOURCES.txt; do
+            if [ ! -s "dist/cad/$f" ]; then
+              echo "::error title=Conformite GPL::dist/cad/$f absent ou vide"
+              manque=1
+            fi
+          done
+          # Un SOURCES.txt present mais muet ne donne acces a rien.
+          for motif in "github.com/HakanSeven12/OpenCADStudio" \
+                       "github.com/ConstructoAI/constructo-cad" \
+                       "${GITHUB_SHA}"; do
+            if ! grep -qF -- "$motif" dist/cad/SOURCES.txt 2>/dev/null; then
+              echo "::error title=Conformite GPL::SOURCES.txt ne nomme pas $motif"
+              manque=1
+            fi
+          done
+          # Meme exigence pour NOTICE.txt : il doit dire que l'oeuvre est un fork.
+          # `grep -qiF` AVORTE (code 134) sur GNU grep 3.0 de Git Bash : la
+          # forme ci-dessous marche partout, et c'est celle que le temoin
+          # local peut rejouer. Un garde qu'on ne peut pas eprouver hors CI
+          # n'est eprouve nulle part.
+          if ! grep -q -- '[Ff]ork' dist/cad/NOTICE.txt 2>/dev/null; then
+            echo "::error title=Conformite GPL::NOTICE.txt ne dit pas que l oeuvre est modifiee (GPL-3.0 §5a)"
+            manque=1
+          fi
+          if [ "$manque" -ne 0 ]; then
+            echo "Contenu reel de dist/cad/ :"
+            ls -la dist/cad/ | head -30
+            exit 1
+          fi
+          echo "LICENSE, NOTICE.txt et SOURCES.txt sont presents et parlants."
 
       - name: Précompresser le bundle
         run: |

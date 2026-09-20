@@ -3457,9 +3457,18 @@ fn start_page_content<'a>(
         // Ce module est encadre par un ERP que des entreprises paient : y
         // afficher des appels aux dons et la publicite d'un produit tiers n'a
         // pas de sens. La GPL-3.0 demande de conserver la LICENCE et
-        // l'ATTRIBUTION — toutes deux presentes (lien « Moteur Open CAD Studio,
-        // GPL-3.0 » dans l'en-tete de l'ERP, `LICENSE`/`NOTICE.txt`/
-        // `SOURCES.txt` servis a cote du bundle) — pas la collecte de fonds.
+        // l'ATTRIBUTION — toutes deux presentes, et elles le sont par
+        // `LICENSE`, `NOTICE.txt` et `SOURCES.txt` servis a cote du bundle,
+        // avec le cliquet de `constructo-web.yml` qui refuse de publier sans
+        // eux — pas la collecte de fonds.
+        //
+        // ⚠️ Ce commentaire citait aussi le lien « Moteur Open CAD
+        // Studio, GPL-3.0 » de l'en-tete de l'ERP. Il a ete RETIRE le
+        // 2026-09-20 a la demande de Sylvain. Un raisonnement qui autorise
+        // a retirer de l'interface d'amont ne doit pas s'appuyer sur un
+        // element d'interface de l'AUTRE depot : celui-la peut disparaitre
+        // sans que rien ici ne rougisse, et c'est exactement ce qui vient
+        // d'arriver.
         Space::new().height(iced::Length::Fixed(52.0)),
     ]
     .spacing(0)

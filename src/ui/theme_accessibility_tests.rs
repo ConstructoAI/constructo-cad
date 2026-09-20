@@ -1,7 +1,51 @@
 //! Centralized UI Theme Accessibility & Contrast Test Suite.
 //!
-//! Evaluates WCAG 2.1 contrast ratios across all 22 built-in themes for every
-//! major OpenCADStudio UI domain:
+//! Evaluates WCAG 2.1 contrast ratios across the 24 themes `all_themes()`
+//! offers, for every major OpenCADStudio UI domain:
+//!
+//! FORK CONSTRUCTO : la boucle passe par `crate::app::config::all_themes()`
+//! et non par `iced::Theme::ALL`. Les deux themes Fusion sont des
+//! `Theme::Custom`, donc ABSENTS de `Theme::ALL` : ce banc posait les bonnes
+//! questions a tous les themes SAUF les deux que ce fork sert par defaut.
+//! L'avertissement etait deja ecrit dans `app/config.rs:240-243` ("or for
+//! test coverage ... or they silently vanish") et `src/` le violait QUINZE
+//! fois : 9 ici, plus `app/view/controls.rs`, `ui/icons.rs` et quatre dans
+//! `ui/overlay.rs`. Les quinze passent desormais par `all_themes()`.
+//! (Ce bloc a dit SEIZE, alors que sa propre enumeration en donnait 15 :
+//! 9+1+1+4. Un total qui contredit sa liste, dans un fichier dont le sujet
+//! est justement de compter ce qui echappe.)
+//!
+//! 🔴 CE QUE CETTE EXTENSION N'APPORTE **PAS**, et une premiere version de ce
+//! bloc pretendait le contraire. Elle annoncait « une ligne ici aurait attrape
+//! l'accent #0078D4 a 4,34:1 ». MESURE PAR MUTATION dans la vraie caisse
+//! (2026-09-20) : remettre `#0078D4` dans `fusion_white()` laisse **les neuf
+//! tests de ce fichier VERTS**. Seul
+//! `style/fusion_theme::tests::fusion_accent_survives_the_threshold_production_asks_for`
+//! rougit — et
+//! cette garde-la existait deja avant.
+//!
+//! LE MECANISME, parce qu'il vaut pour tout banc ecrit sur ce modele : les
+//! assertions qui touchent `primary` rejouent d'abord `accessible_accent*`,
+//! puis assertent sur SON RESULTAT. Sous le seuil, le repli prend la place et
+//! rend 16,67:1. **L'assertion passe PARCE QUE l'accent a disparu.** Elle ne
+//! peut rougir que si le repli lui-meme echoue, ce qu'une autre assertion
+//! verifie deja. La preuve n'a meme pas besoin d'une mutation : **7 des 24
+//! themes ont deja leur `primary` sous 4,5**, banc vert — `Kanagawa Dragon`
+//! a 1,3907 et `Catppuccin Latte` a 4,3448, soit la valeur meme qu'on
+//! incriminait.
+//!
+//! CE QU'ELLE APPORTE VRAIMENT : les **57 macros d'assertion** de ce fichier
+//! couvrent deux themes de plus (57 x 24 = 1 368 executions au lieu de
+//! 1 254),
+//! et la sonde anti-`Color::WHITE` de `test_block_palette_contrast` s'arme
+//! pour la PREMIERE fois (elle dormait sur les 22 themes d'amont, tous trop
+//! sombres ou trop clairs pour la declencher). C'est un gain reel, et c'est
+//! tout ce que c'est. **L'accent des themes Fusion est tenu par
+//! `style/fusion_theme::tests::fusion_accent_survives_the_threshold_production_asks_for`,
+//! pas ici.** (Ce bloc a cite `fusion_theme.rs:187` puis `:183` pour LA MEME
+//! assertion, a 18 lignes d'ecart, et les deux designaient de la prose : mes
+//! propres editions du fichier voisin les avaient decalees. Un nom de test ne
+//! derive pas.)
 //! - Core Theme Palettes (base, weak, strong, weakest)
 //! - Ribbon Bar (tabs, buttons, dropdown popups, contextual layout tab)
 //! - Status Bar (active/inactive pills, coordinate readouts, dropdown carets)
@@ -13,7 +57,7 @@
 //!   header icon buttons, empty-state muted text)
 
 use crate::ui::style::common::{accessible_accent, accessible_accent_threshold, wcag_contrast};
-use iced::{Color, Theme};
+use iced::Color;
 
 /// Composite a semi-transparent foreground color over a solid background color.
 fn composite_over(fg: Color, bg: Color) -> Color {
@@ -28,7 +72,7 @@ fn composite_over(fg: Color, bg: Color) -> Color {
 
 #[test]
 fn test_theme_core_surfaces_contrast() {
-    for theme in Theme::ALL {
+    for theme in crate::app::config::all_themes().iter() {
         let p = theme.palette();
 
         // Base surface & text
@@ -71,7 +115,7 @@ fn test_theme_core_surfaces_contrast() {
 
 #[test]
 fn test_ribbon_contrast() {
-    for theme in Theme::ALL {
+    for theme in crate::app::config::all_themes().iter() {
         let p = theme.palette();
 
         // 1. Active Tab: rendered on background.weakest.color
@@ -150,7 +194,7 @@ fn test_ribbon_contrast() {
 
 #[test]
 fn test_statusbar_contrast() {
-    for theme in Theme::ALL {
+    for theme in crate::app::config::all_themes().iter() {
         let p = theme.palette();
         let statusbar_bg = p.background.base.color;
 
@@ -190,7 +234,7 @@ fn test_statusbar_contrast() {
 
 #[test]
 fn test_command_line_contrast() {
-    for theme in Theme::ALL {
+    for theme in crate::app::config::all_themes().iter() {
         let p = theme.palette();
         let cli_bg = p.background.base.color;
 
@@ -290,7 +334,7 @@ fn test_command_line_contrast() {
 
 #[test]
 fn test_properties_and_dock_contrast() {
-    for theme in Theme::ALL {
+    for theme in crate::app::config::all_themes().iter() {
         let p = theme.palette();
         let dock_bg = p.background.base.color;
 
@@ -328,7 +372,7 @@ fn test_properties_and_dock_contrast() {
 
 #[test]
 fn test_modals_and_action_buttons_contrast() {
-    for theme in Theme::ALL {
+    for theme in crate::app::config::all_themes().iter() {
         let p = theme.palette();
         let modal_bg = p.background.base.color;
 
@@ -381,7 +425,7 @@ fn test_modals_and_action_buttons_contrast() {
 
 #[test]
 fn test_dropdowns_and_selection_overlays() {
-    for theme in Theme::ALL {
+    for theme in crate::app::config::all_themes().iter() {
         let p = theme.palette();
 
         // 1. Visual Style Dropdown Popup: background is weak.color
@@ -436,7 +480,7 @@ fn test_dropdowns_and_selection_overlays() {
 
 #[test]
 fn test_viewport_controls_toggle_buttons_contrast() {
-    for theme in Theme::ALL {
+    for theme in crate::app::config::all_themes().iter() {
         let p = theme.palette();
 
         // 1. Active Toggle Button (Grid & Snap):
@@ -471,7 +515,7 @@ fn test_block_palette_contrast() {
     };
     use iced::widget::button::Status as BtnStatus;
 
-    for theme in Theme::ALL {
+    for theme in crate::app::config::all_themes().iter() {
         let p = theme.palette();
 
         // ── 1. Card label pairs resolve to the theme's own text colors ──

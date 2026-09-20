@@ -11,6 +11,24 @@
          du canevas qui restait sombre ensuite. -->
     <meta name="theme-color" content="#FAFAFA" />
     <title>Open CAD Studio Web App</title>
+    <!--
+      GPL-3.0 §6(d) demande des « clear directions next to the object code
+      saying where to find the Corresponding Source ». Le binaire est le `.wasm`
+      servi depuis ce meme repertoire ; ces deux liens y pointent, dans le
+      document qui le charge. `rel="license"` est la relation normalisee, donc
+      lisible par un outil sans qu'un humain ait a chercher.
+
+      ⚠️ ILS SONT ICI ET PAS DANS L'EN-TETE DE L'ERP, et c'est le point. Le lien
+      visible « Moteur Open CAD Studio, GPL-3.0 » qui vivait cote ERP a ete
+      retire le 2026-09-20 a la demande de Sylvain. Une direction posee dans
+      l'AUTRE depot pouvait disparaitre sans que rien du bundle ne le remarque —
+      c'est exactement ce qui est arrive. Ici, elle voyage avec le binaire.
+
+      NE PAS les retirer : `constructo-web.yml` verifie que les trois fichiers
+      existent et parlent, mais RIEN ne verifie qu'on y renvoie.
+    -->
+    <link rel="license" href="LICENSE" />
+    <link rel="author" href="SOURCES.txt" />
     <link data-trunk rel="icon" href="assets/logo.svg" />
     <!--
       Relais postMessage vers l'ERP Constructo (voir web/ocs-erp-bridge.js).
@@ -38,8 +56,12 @@
         justify-content: center;
         gap: 22px;
         background: #FAFAFA;
-        /* FORK CONSTRUCTO : #cfcfcf etait fait pour un fond sombre --
-           sur #FAFAFA il donne 1,3:1, donc rien de lisible. */
+        /* FORK CONSTRUCTO : #1A1A1A (16,675:1 sur #FAFAFA). La valeur
+           d amont etait #cfcfcf, faite pour un fond sombre : elle donne
+           1,493:1 ici, donc rien de lisible. Elle n est plus nulle part dans
+           ce fichier -- ce commentaire explique un remplacement, il ne decrit
+           pas une couleur presente. (Il a dit 1,3:1 ; re-mesure le 2026-09-20,
+           c est 1,493. La conclusion tenait, le chiffre non.) */
         color: #1A1A1A;
         font-family: system-ui, sans-serif;
         z-index: 9999;
@@ -47,8 +69,28 @@
       }
       #loading.hide { opacity: 0; pointer-events: none; }
       #loading .title { font-size: 22px; font-weight: 600; letter-spacing: 0.5px; }
+      /* FORK CONSTRUCTO : le navy #002050 est CONSERVE, apres l avoir change
+         et remis -- comme l accent du theme, et pour la meme raison.
+
+         J avais mis l accent de l application (#0277BD) au nom de la coherence
+         visuelle. Mesure : 15,214:1 -> 4,598:1 sur #FAFAFA, soit une division
+         par 3,3 du contraste du SEUL texte colore du voile, dans un lot motive
+         par l accessibilite, et une marge ramenee a 0,098 au-dessus de la barre
+         de 4,5. Le gain etait cosmetique : deux bleus qui se succedent pendant
+         une seconde de chargement.
+
+         ⚠️ Et le cout cache etait pire que le chiffre : #0277BD vit dans
+         `src/ui/style/fusion_theme.rs`, et RIEN ne relierait les deux copies.
+         Ce fichier n est couvert par aucun banc -- la seule valeur qu il peut
+         porter sans deriver en silence est une valeur qui n appartient qu a
+         lui. */
       #loading .title span { color: #002050; }
-      #loading .sub { font-size: 12px; color: #777; }
+      /* FORK CONSTRUCTO : #777 donnait 4,290:1 sur #FAFAFA -- sous la barre
+         de 4,5 que du texte de 12 px demande. C etait le seul texte du voile
+         que le passage au clair n avait pas corrige, et il porte la phrase
+         localisee. #6b6b6b rend 5,106:1 en restant nettement en retrait du
+         titre (#1A1A1A, 16,675:1). */
+      #loading .sub { font-size: 12px; color: #6b6b6b; }
       #loading .spinner {
         width: 46px;
         height: 46px;

@@ -4314,7 +4314,7 @@ mod selection_visual_color_tests {
         assert_eq!(gruv_window, Color::from_rgb(0.51, 0.65, 0.60));
 
         // All 22 themes must provide non-zero, full-alpha colors
-        for theme in Theme::ALL {
+        for theme in crate::app::config::all_themes().iter() {
             let (c, w) = theme_selection_colors(theme);
             assert_eq!(c.a, 1.0, "Theme {:?} crossing alpha should be 1.0", theme);
             assert_eq!(w.a, 1.0, "Theme {:?} window alpha should be 1.0", theme);
@@ -4331,7 +4331,7 @@ mod selection_visual_color_tests {
         let dark_canvas = [0.0, 0.0, 0.0, 1.0];
         let light_canvas = [1.0, 1.0, 1.0, 1.0];
 
-        for theme in Theme::ALL {
+        for theme in crate::app::config::all_themes().iter() {
             let crossing_dark = resolve_selection_base_color(true, theme, &visual, dark_canvas);
             let window_dark = resolve_selection_base_color(false, theme, &visual, dark_canvas);
             assert_eq!(crossing_dark, Color::from_rgb8(255, 0, 0));
@@ -4348,7 +4348,7 @@ mod selection_visual_color_tests {
     fn paper_space_on_dark_themes_uses_light_canvas_palette() {
         let visual = SelectionVisualOptions::default();
         let paper_bg = [1.0, 1.0, 1.0, 1.0];
-        for theme in Theme::ALL {
+        for theme in crate::app::config::all_themes().iter() {
             let crossing = resolve_selection_base_color(true, theme, &visual, paper_bg);
             let window = resolve_selection_base_color(false, theme, &visual, paper_bg);
             let c_lum = crate::ui::style::common::wcag_luminance(crossing);
@@ -4372,7 +4372,7 @@ mod selection_visual_color_tests {
     fn classic_dark_model_bg_resolves_dark_canvas_palette() {
         let visual = SelectionVisualOptions::default();
         let classic_dark = [33.0 / 255.0, 40.0 / 255.0, 48.0 / 255.0, 1.0];
-        for theme in Theme::ALL {
+        for theme in crate::app::config::all_themes().iter() {
             let crossing = resolve_selection_base_color(true, theme, &visual, classic_dark);
             let window = resolve_selection_base_color(false, theme, &visual, classic_dark);
             let (expected_crossing, expected_window) = theme_selection_colors(theme);

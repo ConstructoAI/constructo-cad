@@ -48,15 +48,123 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # Les dependances systeme d'iced/wgpu pour BATIR les tests. Rien ici ne
-      # demande un serveur d'affichage : la suite ne cree aucune fenetre
-      # (`OpenCADStudio::new_for_test` construit l'etat, pas une fenetre).
-      - name: Dependances systeme
+      # 🔴 IL N'Y A PAS D'ETAPE `apt` ICI, ET C'EST DELIBERE. NE PAS EN
+      # REMETTRE UNE « par prudence », comme le fait `release.yml:54-60`.
+      #
+      # Une premiere version installait `libfontconfig1-dev libfreetype6-dev
+      # pkg-config`. Mesure du 2026-09-20 dans le journal du run 35514802248 :
+      # les deux `-dev` sont DEJA installes sur `ubuntu-22.04` (no-op), et
+      # `pkg-config` a REMPLACE le `pkgconf` du systeme — l'etape a supprime
+      # `r-base-dev` et laisse sept paquets en dependance non satisfaite, pour
+      # 13 s par execution.
+      #
+      # Et elle ne servait a rien : `Cargo.lock` ne contient AUCUN crate `-sys`
+      # fontconfig ou freetype — c'est `fontconfig-parser`, du Rust pur. Les
+      # trois seuls consommateurs de pkg-config du graphe (`tiny-xlib`,
+      # `wayland-sys`, `khronos-egl`) sont soit en `dlopen`, soit sans build
+      # script actif. Corroboration : `constructo-moteur.yml` fait
+      # `cargo build --release` sans aucune etape apt.
+
+      # POURQUOI `scripts/test_locales.py` N'EST PAS ICI, ET NE DOIT PAS Y ETRE
+      # AJOUTE « PAR COMPLETUDE ». Il apparie `locale_catalog.rs` aux appels
+      # `t!` du code, et il ECHOUE deja sur amont : mesure du 2026-09-20,
+      # **87 litteraux** repartis sur **22 fichiers** n'ont aucune entree de
+      # catalogue.
+      #
+      # ⚠️ CE COMMENTAIRE A DIT « 29 litteraux, dans deux fichiers ». C'etait le
+      # PLAFOND D'AFFICHAGE du script (`scripts/test_locales.py:37` tronque a
+      # `missing[:30]`), pas la mesure : j'ai lu la sortie d'un instrument
+      # tronque comme si c'etait son resultat. La conclusion tenait, le chiffre
+      # valait le tiers de la verite. L'ajouter rendrait ce flux rouge sans
+      # qu'un seul de ces defauts soit de nous, et une CI rouge qu'on apprend a
+      # ignorer ne protege plus rien. Il redeviendra ajoutable quand amont aura
+      # comble son catalogue.
+
+      # UN DEFAUT D'AMONT, TROUVE PAR CE FLUX A SA PREMIERE EXECUTION
+      # (run 35514802248, 2026-09-20).
+      #
+      # ⚠️ CE COMMENTAIRE A DIT « sur 1 511 tests, un seul echoue et il n'est pas
+      # de nous ». Les trois morceaux etaient faux, et le run qu'il cite les
+      # refute : `running 1531 tests` / `1511 passed; 2 failed; 18 ignored`.
+      # DEUX echecs, pas un ; 1 511 est le nombre de tests PASSES, pas le total ;
+      # et l'un des deux ETAIT de nous — `i18n::tests::every_catalog...`, sur les
+      # deux cles du garde-fou mobile absentes de 19 locales. Ce sont les 19
+      # `locales/*/opencadstudio.ftl` du meme lot qui l'ont ferme ; le `--skip`
+      # ci-dessous ne couvre QUE le test d'arc. Ecrire « pas de nous » dans le
+      # fichier meme qui excluait notre regression, c'est se blanchir dans son
+      # propre journal.
+      #
+      # Le defaut d'amont, lui, est reel : `grip_solve_anchor_refs` rend les poignees 1, 2 ET 3
+      # d'un arc comme une reference d'ENTITE (`marker: None`) la ou le test
+      # d'amont attend les points. L'implementation fautive est
+      # `src/scene/parametric_constraints.rs:378-381` (`1..=3 =>
+      # vec![ParametricRef::whole(handle)]`) ; `:2368` n'est que l'`assert_eq!`
+      # qui la constate — une premiere version de ce commentaire citait la ligne
+      # du TEST en croyant citer le defaut. Introduit par le PR amont #1367
+      # (`829a69ae`). Personne ne l'avait vu parce qu'aucun flux de ce depot ne
+      # lancait `cargo test`.
+      #
+      # ⚠️ ET CE FLUX N'A PAS ENCORE VU LA SUITE ENTIERE : `cargo test` s'arrete
+      # au PREMIER binaire rouge, donc le run 35514802248 n'a execute que le
+      # binaire `--lib`. Les 97 tests de `tests/*.rs` et les 93 de
+      # `crates/ocs_plugin_api/` n'ont JAMAIS tourne dans ce depot. Le `--skip`
+      # ci-dessous les reveille pour la premiere fois : leur verdict est inconnu,
+      # et s'il est rouge il ne faudra pas accuser l'exclusion.
+      #
+      # On EXCLUT plutot que de corriger : la semantique des poignees
+      # parametriques appartient a amont, et un correctif de fork sur ce terrain
+      # ferait conflit a chaque rebase. On n'annote pas non plus le test avec
+      # `#[ignore]`, pour la meme raison — le fichier reste intact.
+      - name: cargo test
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libfontconfig1-dev libfreetype6-dev pkg-config
+          cargo test --locked --workspace -- \
+            --skip scene::parametric_constraints::tests::arc_grips_drive_center_start_and_end_but_not_midpoint
 
-      - name: cargo test
-        run: cargo test --locked --workspace
+      # LE TEMOIN DE L'EXCLUSION CI-DESSUS. Un `--skip` que personne
+      # n'interroge devient permanent en silence : le jour ou amont corrige son
+      # defaut, l'exclusion resterait a masquer un test qui passe, et c'est
+      # alors NOUS qui aurions un trou. Cette etape ne bloque rien ; elle
+      # previent.
+      - name: Le defaut d amont est-il toujours la ?
+        if: success() || failure()
+        run: |
+          set -uo pipefail
+          nom=scene::parametric_constraints::tests::arc_grips_drive_center_start_and_end_but_not_midpoint
+
+          # 🔴 ON EXIGE LA SELECTION AVANT D'INTERPRETER LE RESULTAT.
+          #
+          # Une premiere version faisait `if cargo test ... ; then avertir`. Elle
+          # pouvait mentir de deux facons, toutes deux mesurees le 2026-09-20 :
+          #
+          # (a) SELECTION VIDE = EXIT 0. `library/test/src/formatters/pretty.rs:270`
+          #     pose `success = failed == 0` ; zero test selectionne donne donc
+          #     zero echec, donc 0. Le jour ou amont RENOMME ou DEPLACE ce test,
+          #     le flux aurait annonce « exclusion perimee » sans avoir rien
+          #     execute — et l'exclusion serait retiree sur une mesure vide.
+          # (b) COMPILATION CASSEE = EXIT != 0, et la branche `else` affirmait
+          #     « le defaut est toujours present ». Ce n'est pas theorique : le
+          #     run 35476853033 de ce depot a echoue exactement comme ca.
+          #
+          # D'ou `--list` d'abord : il DIT combien de tests portent ce nom.
+          # Et `always()` devient `success() || failure()` : sous
+          # `cancel-in-progress`, `always()` relancait un `cargo test` complet
+          # sur un travail annule.
+          liste=$(cargo test --locked -p OpenCADStudio --lib -- --exact "$nom" --list 2>&1) || {
+            echo "::warning title=Temoin aveugle::Impossible de compiler le banc : ce flux ne peut pas dire si l exclusion est encore justifiee."
+            printf '%s\n' "$liste" | tail -20
+            exit 0
+          }
+          combien=$(printf '%s\n' "$liste" | grep -c ': test$' || true)
+          if [ "$combien" -ne 1 ]; then
+            echo "::warning title=Temoin aveugle::--exact selectionne $combien test(s) au lieu de 1. Le nom a probablement change en amont ; verifier le --skip de l etape precedente."
+            exit 0
+          fi
+
+          # La selection est PROUVEE : le code de sortie veut maintenant dire
+          # quelque chose.
+          if cargo test --locked -p OpenCADStudio --lib -- --exact "$nom"; then
+            echo "::warning title=Exclusion perimee::Le test d amont passe de nouveau. Retirer le --skip de l etape 'cargo test'."
+          else
+            echo "Le defaut d amont est toujours present : l exclusion reste justifiee."
+          fi

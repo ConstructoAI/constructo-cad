@@ -1072,7 +1072,7 @@ mod check_cell_tests {
 
     #[test]
     fn themed_check_cell_contrast_across_all_themes() {
-        for theme in iced::Theme::ALL {
+        for theme in crate::app::config::all_themes().iter() {
             let p = theme.palette();
             let bg_weak = p.background.weak.color;
             let bg_strong = p.background.strong.color;

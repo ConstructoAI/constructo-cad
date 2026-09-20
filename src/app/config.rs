@@ -1047,6 +1047,47 @@ mod tests {
     }
 
     #[test]
+    fn le_nom_du_theme_d_amont_est_celui_qu_iced_ecrit_vraiment() {
+        // `THEME_PAR_DEFAUT_AMONT` est une CHAINE, et rien ne la rattachait a
+        // `iced`. Les six autres tests fabriquent le nom depuis cette meme
+        // constante ou depuis le meme litteral : ils restent donc verts,
+        // coherents avec eux-memes, le jour ou `iced` renomme son affichage au
+        // prochain rebase.
+        //
+        // ⚠️ CE COMMENTAIRE A ANNONCE LA MAUVAISE CONSEQUENCE, et la mesure du
+        // 2026-09-20 la corrige. Il disait que « migrer_constructo ne
+        // reconnaitrait plus personne ». C'est faux : `:604` compare
+        // `self.theme.name` -- la chaine PERSISTEE, ecrite dans le fichier il y
+        // a des mois -- a la constante de CE fork. Un renommage chez `iced` ne
+        // touche ni l'une ni l'autre, et la migration continue de marcher.
+        //
+        // CE QUI CASSE VRAIMENT, c'est la RESOLUTION : `:158`
+        // `builtin_theme(&self.name).unwrap_or_else(fusion_white)`. Celui qui
+        // avait choisi Oxocarbon DELIBEREMENT se retrouve en Fusion White au
+        // demarrage suivant, en silence, sans que rien ne le lui dise. C'est
+        // cette assertion-ci qui le voit :
+        assert!(
+            builtin_theme(THEME_PAR_DEFAUT_AMONT).is_some(),
+            "le nom du theme d'amont ne se resout plus : toute config qui le \
+             porte basculera silencieusement sur Fusion White (config.rs:158)"
+        );
+        // Et celle-ci previent du renommage lui-meme.
+        //
+        // 🔴 SI ELLE ROUGIT, NE PAS METTRE LA CONSTANTE A JOUR. Elle ne decrit
+        // pas ce qu'`iced` affiche aujourd'hui : elle decrit CE QUE CONTIENNENT
+        // LES FICHIERS DE CONFIG DEJA ECRITS, une valeur historique et gelee.
+        // La changer casserait la migration pour toute la population existante,
+        // dont les fichiers portent l'ancien nom. Le bon geste est d'ajouter
+        // une seconde valeur reconnue, pas de remplacer celle-ci.
+        assert_eq!(
+            THEME_PAR_DEFAUT_AMONT,
+            iced::Theme::Oxocarbon.to_string(),
+            "iced a renomme son theme : AJOUTER le nouveau nom, ne pas \
+             remplacer la constante (voir le commentaire au-dessus)"
+        );
+    }
+
+    #[test]
     fn la_garde_suit_la_constante_et_non_un_litteral() {
         // `CONSTRUCTO_MIGRATION = 1` et la garde `< 1` portent le meme nombre par
         // COINCIDENCE DE FRAPPE : passer la constante a 2 laissait le banc vert.

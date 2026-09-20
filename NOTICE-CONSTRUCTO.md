@@ -9,7 +9,7 @@ Ce dépôt est une **œuvre dérivée d'Open CAD Studio**, distribué sous licen
 | Auteur amont | HakanSeven12 et les contributeurs d'Open CAD Studio |
 | Licence | GPL-3.0-or-later — **inchangée, et elle ne peut pas l'être** |
 | Révision de base du fork | `28e53047` (v2026.37 + 369 commits), clonée le 2026-09-19 |
-| But du fork | Brancher le moteur CAO DWG/DXF sur l'ERP Constructo AI : ouvrir et enregistrer les dessins dans les dossiers de l'ERP plutôt que sur le poste |
+| But du fork | Brancher le moteur CAD (DWG/DXF) sur l'ERP Constructo AI : ouvrir et enregistrer les dessins dans les dossiers de l'ERP plutôt que sur le poste |
 
 ## Ce que la GPL impose ici, en clair
 

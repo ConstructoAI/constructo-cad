@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn test_visual_style_dropdown_contrast_across_all_themes() {
-        for theme in iced::Theme::ALL {
+        for theme in crate::app::config::all_themes().iter() {
             let p = theme.palette();
             let bg = p.background.weak.color;
 
