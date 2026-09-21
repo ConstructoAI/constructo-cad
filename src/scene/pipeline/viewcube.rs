@@ -1508,11 +1508,45 @@ impl ViewCubePipeline {
         }
     }
 
+    /// The square the cube needs on screen, in physical pixels.
+    ///
+    /// The caller uses it to decide WHERE the cube goes — see
+    /// `crate::scene::view::render::viewcube_destination`. Exposing it is what
+    /// lets that decision be a pure, testable function instead of arithmetic
+    /// buried in a GPU pass no unit test can reach.
+    pub fn render_size(&self) -> Size<u32> {
+        Size::new(
+            self.depth_texture_size.width.max(1),
+            self.depth_texture_size.height.max(1),
+        )
+    }
+
+    /// Draws the cube into `dest`, which MUST be exactly `render_size()`.
+    ///
+    /// 🔴 LE RECTANGLE EST IMPOSE PAR L'APPELANT, ET C'EST UN CORRECTIF.
+    ///
+    /// Cette fonction calculait elle-meme sa destination :
+    ///
+    ///     let dest_width  = render_width.min(clip.width);
+    ///     let dest_height = render_height.min(clip.height);
+    ///
+    /// Les deux `min` sont INDEPENDANTS PAR AXE, et `viewcube_composite.wgsl`
+    /// dessine un quad plein NDC avec uv 0->1 : la texture CARREE est ETIREE
+    /// sur le rectangle. Borner un seul axe donne donc une mise a l'echelle non
+    /// uniforme — exactement le `a clamped cube would scale distortedly` que
+    /// l'ancien commentaire de l'appelant redoutait. Mesure du 2026-09-21 : un
+    /// viewport reduit a 40 px de large sur un canevas de 1920x1080 compositait
+    /// le cube en **40 x 177**, un rapport de 4,4:1.
+    ///
+    /// Le `min` n'etait donc pas la protection contre la deformation : il en
+    /// etait la CAUSE. Il est retire, et la decision « le cube tient-il ? » est
+    /// remontee chez l'appelant, ou une fonction PURE la prend et ou un test
+    /// peut l'exercer.
     pub fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
-        clip: Rectangle<u32>,
+        dest: Rectangle<u32>,
     ) {
         let render_width = self.depth_texture_size.width.max(1);
         let render_height = self.depth_texture_size.height.max(1);
@@ -1602,13 +1636,20 @@ impl ViewCubePipeline {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        let dest_width = render_width.min(clip.width);
-        let dest_height = render_height.min(clip.height);
+        // Aucun `min` ici : la destination vient de `viewcube_destination`, qui
+        // a deja refuse tout rectangle trop petit. Un `min` de plus rendrait la
+        // deformation possible a nouveau, en silence.
+        debug_assert_eq!(
+            (dest.width, dest.height),
+            (render_width, render_height),
+            "la destination du ViewCube doit valoir sa taille de rendu, sinon \
+             le quad NDC etire la texture carree",
+        );
         composite.set_viewport(
-            (clip.x + clip.width - dest_width) as f32,
-            clip.y as f32,
-            dest_width as f32,
-            dest_height as f32,
+            dest.x as f32,
+            dest.y as f32,
+            dest.width as f32,
+            dest.height as f32,
             0.0,
             1.0,
         );
