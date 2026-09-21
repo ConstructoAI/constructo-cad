@@ -1377,7 +1377,11 @@ retained_contributors={}",
             // partout ou il se dessinait, et se dessine desormais aussi la ou
             // il s'evanouissait. `pixel_placement_tests` l'epingle.
             if vp.show_viewcube {
-                inner.viewcube.render(encoder, target, surface_clip);
+                if let Some(dest) =
+                    viewcube_destination(surface_clip, inner.viewcube.render_size())
+                {
+                    inner.viewcube.render(encoder, target, dest);
+                }
             }
         }
         let render_ms = nav_render_started.elapsed().as_secs_f64() * 1000.0;
@@ -1550,6 +1554,46 @@ pub(in crate::scene) struct PhysicalViewport {
     uv_scale: [f32; 2],
 }
 
+/// Where the ViewCube composites inside `clip`, or `None` when it does not fit.
+///
+/// PURE, et c'est tout son objet : la decision vit ici plutot que dans une passe
+/// GPU qu'aucun test unitaire ne peut atteindre. Un banc peut l'exercer par
+/// EXECUTION au lieu d'en recopier la formule — et une recopie ne mesure que sa
+/// propre coherence avec elle-meme.
+///
+/// DEUX PROPRIETES, ET ELLES VONT EN SENS INVERSE :
+///
+/// 1. ELARGISSEMENT. L'ancienne garde exigeait `surface.size == placement.size`,
+///    une egalite EXACTE entre deux grandeurs arrondies par des chemins
+///    DIFFERENTS (`ceil(x+w) - floor(x)` d'un cote, `min(right, fenetre) -
+///    clamp(x)` de l'autre). Un debordement d'un SOUS-PIXEL — meme en bas ou a
+///    gauche, ou le cube ne se trouve pas — les separait d'une unite, et le cube
+///    disparaissait sans erreur ni trace. Ici, un tel debordement ne change
+///    rien : seul compte le fait que le carre TIENNE.
+///
+/// 2. RETRECISSEMENT, ET IL FERME UNE DEFORMATION. `ViewCubePipeline::render`
+///    bornait sa destination par deux `min` INDEPENDANTS PAR AXE, sur un quad
+///    NDC a uv 0->1 : un axe borne seul ETIRE la texture carree. Un viewport
+///    reduit a 40 px de large compositait le cube en 40x177. On refuse donc
+///    desormais, au lieu de dessiner un cube ecrase a l'arete du canevas.
+fn viewcube_destination(clip: Rectangle<u32>, cube: Size<u32>) -> Option<Rectangle<u32>> {
+    if cube.width == 0 || cube.height == 0 {
+        return None;
+    }
+    if clip.width < cube.width || clip.height < cube.height {
+        return None;
+    }
+    // Ancre en HAUT A DROITE du rectangle visible — pas du rectangle theorique.
+    // C'est la difference qui compte quand le viewport deborde le canevas : le
+    // cube suit le bord que l'utilisateur VOIT.
+    Some(Rectangle {
+        x: clip.x + clip.width - cube.width,
+        y: clip.y,
+        width: cube.width,
+        height: cube.height,
+    })
+}
+
 fn physical_viewport(rect: Rectangle, window: Size<u32>) -> PhysicalViewport {
     let x = rect.x.floor();
     let y = rect.y.floor();
@@ -1647,169 +1691,236 @@ mod pixel_placement_tests {
         assert_eq!(moved.surface.x, first.surface.x + 20);
     }
 
-    // ── Le cube de navigation ────────────────────────────────────────────
+    // ── Le cube de navigation ──────────────────────────────────
     //
-    // Signale invisible par l'utilisateur le 2026-09-20, capture a l'appui :
-    // les fleches et le selecteur WCS -- qui sont de l'interface `iced` --
-    // s'affichaient, le cube non. Or les trois sont pilotes par le MEME
-    // drapeau (`viewcube_visible`, `src/app/view/mod.rs:260`) : voir les
-    // fleches PROUVE que le drapeau etait vrai et que la panne etait en aval,
-    // dans le chemin GPU. Elle etait dans la garde ci-dessous.
+    // Signale invisible par l'utilisateur le 2026-09-20, capture a l'appui : les
+    // fleches de navigation et le selecteur WCS s'affichaient, le cube non. Les
+    // trois sont alimentes par `viewcube_visible` (`src/app/view/mod.rs:260`),
+    // donc voir les fleches prouve que ce drapeau etait vrai et que la panne
+    // etait EN AVAL.
+    //
+    // ⚠️ « EN AVAL » N'EST PAS « DANS LE CHEMIN GPU », et le commit d'origine
+    // faisait ce raccourci. Entre le drapeau et le dessin il reste cinq portes
+    // de Rust CPU, dont `show_viewcube: inst.active && show_viewcube`
+    // (`render.rs`, `build_viewport_for_pane`) que le chemin des fleches n'a
+    // PAS. Ce qui suit ferme deux defauts reels ; ca ne demontre pas qu'ils
+    // etaient les seuls.
 
-    /// Le cube etait conditionne a `placement.surface.size == placement.size`.
-    /// C'est une egalite EXACTE entre deux grandeurs arrondies par des chemins
-    /// DIFFERENTS. Un debordement d'un SOUS-PIXEL du viewport hors de la
-    /// fenetre les separe d'une unite -- et le cube disparaissait sans un mot.
+    /// LE DEFAUT 1 : une egalite EXACTE entre deux grandeurs arrondies par des
+    /// chemins DIFFERENTS. Un debordement d'un SOUS-PIXEL les separe d'une
+    /// unite, et l'ancienne garde en faisait un saut muet.
     #[test]
-    fn un_debordement_sous_pixel_faisait_disparaitre_le_cube() {
-        // 1287 px CSS a dpr 1.25 font 1608,75 px physiques : le canevas est
-        // arrondi vers le bas a 1608 pendant que le rectangle du viewport
-        // mesure encore 1608,75 de large.
+    fn un_debordement_sous_pixel_separe_les_deux_grandeurs() {
         let window = Size::new(1608, 905);
-        let rect = Rectangle {
-            x: 0.0,
-            y: 0.0,
-            width: 1608.75,
-            height: 905.0,
-        };
-        let placement = physical_viewport(rect, window);
+        let placement = physical_viewport(
+            Rectangle { x: 0.0, y: 0.0, width: 1608.75, height: 905.0 },
+            window,
+        );
         assert_eq!(placement.size.width, 1609, "ceil(0 + 1608,75)");
         assert_eq!(placement.surface.width, 1608, "borne au canevas");
         assert_ne!(
             placement.size.width, placement.surface.width,
             "c'est cette inegalite que l'ancienne garde transformait en saut muet",
         );
-        // Ce que le cube recoit desormais est sur le canevas et non vide : il
-        // se dessine.
+        // Et le rectangle VISIBLE, lui, reste parfaitement utilisable.
         assert!(placement.surface.width > 0 && placement.surface.height > 0);
     }
 
-    /// LE TEMOIN QUI EMPECHE LE TEST PRECEDENT DE NE RIEN DIRE. A dpr 1,0 et
-    /// 2,0 la largeur physique est toujours entiere, les deux grandeurs
-    /// coincident, et le cube passait -- c'est exactement ce qui rendait le
-    /// defaut invisible sur un poste de developpement.
+    /// LE TEMOIN. Sans lui, le cas precedent prouverait seulement que
+    /// l'instrument rend toujours « separe » — ce qui ne prouverait rien.
     #[test]
-    fn une_fenetre_a_largeur_entiere_ne_declenchait_rien() {
-        for (w, h, dpr) in [(1920u32, 1080u32, 1.0f32), (1920, 1080, 2.0)] {
-            let window = Size::new((w as f32 * dpr) as u32, (h as f32 * dpr) as u32);
+    fn une_largeur_physique_entiere_ne_separe_rien() {
+        for dpr in [1.0f32, 2.0] {
+            let w = (1920.0 * dpr) as u32;
+            let h = (1080.0 * dpr) as u32;
             let placement = physical_viewport(
-                Rectangle {
-                    x: 0.0,
-                    y: 0.0,
-                    width: w as f32 * dpr,
-                    height: h as f32 * dpr,
-                },
-                window,
+                Rectangle { x: 0.0, y: 0.0, width: w as f32, height: h as f32 },
+                Size::new(w, h),
             );
             assert_eq!(placement.surface.width, placement.size.width, "dpr {dpr}");
             assert_eq!(placement.surface.height, placement.size.height, "dpr {dpr}");
         }
     }
 
-    /// LA MESURE QUI A MOTIVE LE CORRECTIF, rejouable ici plutot que citee.
-    /// Combien de fenetres parfaitement ordinaires l'egalite exacte
-    /// rejetait-elle ? Reponse : quatre sur dix.
+    /// 🔴 CE TEST EXISTE POUR EMPECHER QU'ON RECITE UN POURCENTAGE.
+    ///
+    /// Le commit d'origine annoncait « 40 % des fenetres ordinaires ». Une QA
+    /// adversariale a montre que ce chiffre est ENTIEREMENT determine par une
+    /// hypothese non declaree : le balayage posait `fenetre = floor(css * dpr)`
+    /// pendant que le rectangle mesurait `css * dpr`. C'est cette seule ligne
+    /// qui fabrique le debordement.
+    ///
+    /// Ce qu'on epingle ici n'est donc PAS un taux de production — personne ne
+    /// l'a mesure sur une instance vivante — mais la DEPENDANCE elle-meme :
+    /// floor, round et ceil donnent trois reponses differentes. Un lecteur qui
+    /// voudra citer un chiffre tombera d'abord sur cette dependance.
     #[test]
-    fn l_ancienne_garde_rejetait_quatre_fenetres_ordinaires_sur_dix() {
-        let mut total = 0usize;
-        let mut sautes = 0usize;
-        for css_w in (1280..=1920).step_by(7) {
-            for css_h in (700..=1080).step_by(11) {
-                for dpr in [1.0f32, 1.25, 1.5, 1.75, 2.0] {
-                    let window = Size::new(
-                        (css_w as f32 * dpr).floor() as u32,
-                        (css_h as f32 * dpr).floor() as u32,
-                    );
-                    // Le viewport occupe tout sauf le ruban et la ligne de
-                    // commande, en pixels logiques.
-                    let placement = physical_viewport(
-                        Rectangle {
-                            x: 0.0,
-                            y: 120.0 * dpr,
-                            width: css_w as f32 * dpr,
-                            height: (css_h as f32 - 216.0) * dpr,
-                        },
-                        window,
-                    );
-                    total += 1;
-                    if placement.surface.width != placement.size.width
-                        || placement.surface.height != placement.size.height
-                    {
-                        sautes += 1;
-                    }
-                }
-            }
-        }
-        assert!(total > 10_000, "balayage trop maigre : {total}");
-        let part = sautes as f32 / total as f32;
-        assert!(
-            part > 0.3,
-            "l'ancienne garde ne sautait que {sautes}/{total} -- si ce chiffre \
-             tombe, c'est que `physical_viewport` a change et que le commentaire \
-             de la garde ment desormais",
-        );
-    }
-
-    /// 🔴 LA PROPRIETE QUI FAIT DU CORRECTIF UN ELARGISSEMENT ET NON UN
-    /// DEPLACEMENT. Partout ou l'ancienne garde dessinait le cube, le rectangle
-    /// qu'elle construisait (`vp_full_*`, c'est-a-dire `placement.surface`) et
-    /// celui qu'on passe desormais (`surface_clip`) sont IDENTIQUES. Un
-    /// correctif qui DEPLACERAIT le cube serait un autre defaut, pas une
-    /// correction -- et rien ne le dirait a l'ecran.
-    #[test]
-    fn le_rectangle_borne_egale_l_ancien_partout_ou_l_ancienne_garde_passait() {
-        let window = Size::new(1920, 1080);
-        let clip: Rectangle<u32> = Rectangle {
-            x: 0,
-            y: 0,
-            width: 1920,
-            height: 1080,
-        };
-        let clip_right = clip.x + clip.width;
-        let clip_bottom = clip.y + clip.height;
-        let mut passages = 0usize;
-        for x in [0.0f32, 7.0, 133.5, 900.25] {
-            for y in [0.0f32, 12.0, 120.5] {
-                for w in [64.0f32, 512.0, 1019.75] {
-                    for h in [64.0f32, 400.0, 959.5] {
+    fn le_taux_de_separation_depend_ENTIEREMENT_du_modele_d_arrondi() {
+        fn taux(arrondi: fn(f32) -> f32) -> (usize, usize) {
+            let (mut total, mut separes) = (0usize, 0usize);
+            for css_w in (1280..=1920).step_by(7) {
+                for css_h in (700..=1080).step_by(11) {
+                    for dpr in [1.0f32, 1.25, 1.5, 1.75, 2.0] {
+                        let window = Size::new(
+                            arrondi(css_w as f32 * dpr) as u32,
+                            arrondi(css_h as f32 * dpr) as u32,
+                        );
                         let placement = physical_viewport(
                             Rectangle {
-                                x,
-                                y,
-                                width: w,
-                                height: h,
+                                x: 0.0,
+                                y: 120.0 * dpr,
+                                width: css_w as f32 * dpr,
+                                height: (css_h as f32 - 216.0) * dpr,
                             },
                             window,
                         );
-                        let s = placement.surface;
-                        let left = s.x.max(clip.x);
-                        let top = s.y.max(clip.y);
-                        let surface_clip = Rectangle {
-                            x: left,
-                            y: top,
-                            width: (s.x + s.width).min(clip_right).saturating_sub(left),
-                            height: (s.y + s.height).min(clip_bottom).saturating_sub(top),
-                        };
-                        if surface_clip.width == 0 || surface_clip.height == 0 {
-                            continue;
+                        total += 1;
+                        if placement.surface.width != placement.size.width
+                            || placement.surface.height != placement.size.height
+                        {
+                            separes += 1;
                         }
-                        let ancienne_garde = s.width == placement.size.width
-                            && s.height == placement.size.height
-                            && s.x <= clip_right
-                            && s.y <= clip_bottom
-                            && s.x + s.width <= clip_right
-                            && s.y + s.height <= clip_bottom;
-                        if ancienne_garde {
-                            passages += 1;
-                            assert_eq!(surface_clip, s, "le cube a bouge");
+                    }
+                }
+            }
+            (separes, total)
+        }
+        let (bas, total) = taux(f32::floor);
+        let (pres, _) = taux(f32::round);
+        let (haut, _) = taux(f32::ceil);
+        assert!(total > 10_000, "balayage trop maigre : {total}");
+        // Trois modeles, trois reponses. C'EST le fait a retenir.
+        assert!(bas > pres, "floor={bas} round={pres} : la dependance a disparu");
+        assert!(pres > haut, "round={pres} ceil={haut} : la dependance a disparu");
+        assert_eq!(haut, 0, "avec `ceil`, la separation ne survient jamais");
+        // Et elle est REELLE sous au moins un modele : le defaut n'est pas
+        // qu'une vue de l'esprit, seul son taux est inconnu.
+        assert!(bas > 0);
+    }
+
+    /// LE DEFAUT 2, ET C'EST CELUI QUE MON PREMIER CORRECTIF A OUVERT.
+    ///
+    /// `ViewCubePipeline::render` bornait sa destination par deux `min`
+    /// INDEPENDANTS PAR AXE, sur un quad NDC a uv 0->1 : un axe borne seul
+    /// ETIRE la texture carree. J'avais affirme sans mesurer que « le composite
+    /// se borne deja lui-meme, donc la crainte du commentaire d'origine ne
+    /// s'applique pas ». C'etait faux, et l'ancienne garde — pour de mauvaises
+    /// raisons — fermait le cas que mon elargissement rouvrait : un cube ecrase
+    /// a 40 x 177, rapport 4,4:1, a l'arete du canevas.
+    #[test]
+    fn un_rectangle_trop_etroit_ne_recoit_AUCUN_cube() {
+        let cube = Size::new(177, 177);
+        for clip in [
+            Rectangle { x: 1880, y: 0, width: 40, height: 900 },   // bande a droite
+            Rectangle { x: 0, y: 0, width: 40, height: 900 },      // bande a gauche
+            Rectangle { x: 0, y: 0, width: 900, height: 40 },      // bande en haut
+            Rectangle { x: 0, y: 0, width: 176, height: 177 },     // un pixel de trop
+            Rectangle { x: 0, y: 0, width: 177, height: 176 },
+        ] {
+            assert_eq!(
+                viewcube_destination(clip, cube), None,
+                "un cube ecrase vaut moins qu'aucun cube : {clip:?}",
+            );
+        }
+    }
+
+    /// LA PROPRIETE QUI REND LA DEFORMATION STRUCTURELLEMENT IMPOSSIBLE : quand
+    /// le cube est dessine, sa destination vaut EXACTEMENT sa taille de rendu.
+    /// Jamais bornee, jamais etiree.
+    #[test]
+    fn la_destination_vaut_TOUJOURS_la_taille_du_cube() {
+        let cube = Size::new(177, 177);
+        let mut dessines = 0usize;
+        for x in [0u32, 7, 133, 900] {
+            for y in [0u32, 12, 120] {
+                for w in [40u32, 177, 512, 1920] {
+                    for h in [40u32, 176, 177, 1080] {
+                        let clip = Rectangle { x, y, width: w, height: h };
+                        if let Some(dest) = viewcube_destination(clip, cube) {
+                            dessines += 1;
+                            assert_eq!(dest.width, cube.width, "{clip:?}");
+                            assert_eq!(dest.height, cube.height, "{clip:?}");
+                            // Ancre en haut a DROITE du rectangle VISIBLE, et
+                            // entierement dedans.
+                            assert_eq!(dest.x + dest.width, clip.x + clip.width);
+                            assert_eq!(dest.y, clip.y);
+                            assert!(dest.x >= clip.x);
+                            assert!(dest.y + dest.height <= clip.y + clip.height);
                         }
                     }
                 }
             }
         }
-        // TEMOIN POSITIF : sans lui, une boucle qui ne compare RIEN passerait
-        // au vert et le cliquet ne garderait rien.
-        assert!(passages >= 20, "seulement {passages} cas ont exerce la garde");
+        // TEMOIN POSITIF : une fonction qui rendrait toujours `None` passerait
+        // cette boucle au vert sans avoir rien compare.
+        assert!(dessines >= 20, "seulement {dessines} cas ont dessine");
+    }
+
+    /// 🔴 L'ELARGISSEMENT, MESURE CONTRE LA VRAIE ANCIENNE GARDE.
+    ///
+    /// Partout ou l'ancienne garde passait, le rectangle qu'elle construisait
+    /// (`vp_full_*`, c'est-a-dire `placement.surface`) et celui qu'on borne
+    /// desormais (`surface_clip`) doivent etre IDENTIQUES : un correctif qui
+    /// DEPLACERAIT le cube serait un autre defaut, et rien ne le dirait a
+    /// l'ecran.
+    ///
+    /// ⚠️ LE CLIP N'EST PAS A L'ORIGINE, ET C'EST DELIBERE. La premiere
+    /// version de ce test figeait `clip = (0, 0, 1920, 1080)` et modelisait
+    /// l'ancienne garde par `s.x <= clip_right` — une borne SUPERIEURE la ou
+    /// l'original ecrivait `vp_full_x >= clip.x`, une borne INFERIEURE. Les
+    /// deux predicats divergent sur des centaines de cas des que `clip.x` n'est
+    /// pas nul ; a l'origine, les deux termes sont vides de sens. Le test
+    /// portait le bon nom et mesurait autre chose.
+    #[test]
+    fn le_rectangle_borne_egale_l_ancien_partout_ou_l_ancienne_garde_passait() {
+        let window = Size::new(1920, 1080);
+        let mut passages = 0usize;
+        for clip in [
+            Rectangle::<u32> { x: 0, y: 0, width: 1920, height: 1080 },
+            Rectangle::<u32> { x: 40, y: 24, width: 1600, height: 900 },
+            Rectangle::<u32> { x: 200, y: 100, width: 800, height: 600 },
+            Rectangle::<u32> { x: 7, y: 3, width: 1900, height: 1070 },
+        ] {
+            let clip_right = clip.x + clip.width;
+            let clip_bottom = clip.y + clip.height;
+            for x in [0.0f32, 7.0, 133.5, 250.0, 900.25] {
+                for y in [0.0f32, 12.0, 110.0, 120.5] {
+                    for w in [64.0f32, 512.0, 1019.75] {
+                        for h in [64.0f32, 400.0, 959.5] {
+                            let placement = physical_viewport(
+                                Rectangle { x, y, width: w, height: h }, window);
+                            let s = placement.surface;
+                            let left = s.x.max(clip.x);
+                            let top = s.y.max(clip.y);
+                            let surface_clip = Rectangle {
+                                x: left,
+                                y: top,
+                                width: (s.x + s.width).min(clip_right)
+                                    .saturating_sub(left),
+                                height: (s.y + s.height).min(clip_bottom)
+                                    .saturating_sub(top),
+                            };
+                            if surface_clip.width == 0 || surface_clip.height == 0 {
+                                continue;
+                            }
+                            // LA VRAIE ancienne garde, terme pour terme, bornes
+                            // INFERIEURES comprises.
+                            let ancienne = s.width == placement.size.width
+                                && s.height == placement.size.height
+                                && s.x as i32 >= clip.x as i32
+                                && s.y as i32 >= clip.y as i32
+                                && s.x as i32 + s.width as i32 <= clip_right as i32
+                                && s.y as i32 + s.height as i32 <= clip_bottom as i32;
+                            if ancienne {
+                                passages += 1;
+                                assert_eq!(surface_clip, s, "le cube a bouge");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(passages >= 100, "seulement {passages} cas ont exerce la garde");
     }
 
     #[test]
