@@ -1326,10 +1326,6 @@ retained_contributors={}",
             if surface_clip.width == 0 || surface_clip.height == 0 {
                 continue;
             }
-            let vp_full_x = surface_dest.x as i32;
-            let vp_full_y = surface_dest.y as i32;
-            let vp_full_w = surface_dest.width as i32;
-            let vp_full_h = surface_dest.height as i32;
             // `mesh_fill` is false for Wireframe 2D / Wireframe 3D — flip
             // the draw path so meshes use the wireframe pipeline + the
             // pre-built triangle-edge index buffer.
@@ -1345,26 +1341,43 @@ retained_contributors={}",
                 vp.hidden_line,
                 vp.show_3d_edges,
             );
-            // The ViewCube renders directly to the surface at the full
-            // viewport rect. Skip it when the viewport's top-right corner
-            // (where the cube sits) is off-canvas — wgpu's `set_viewport`
-            // rejects negative origins, and a clamped cube would scale
-            // distortedly. The active viewport is normally fully visible.
-            if vp.show_viewcube
-                && surface_dest.width == placement.size.width
-                && surface_dest.height == placement.size.height
-                && vp_full_x >= clip.x as i32
-                && vp_full_y >= clip.y as i32
-                && vp_full_x + vp_full_w <= clip_right as i32
-                && vp_full_y + vp_full_h <= clip_bottom as i32
-            {
-                let vp_clip = Rectangle {
-                    x: vp_full_x as u32,
-                    y: vp_full_y as u32,
-                    width: vp_full_w as u32,
-                    height: vp_full_h as u32,
-                };
-                inner.viewcube.render(encoder, target, vp_clip);
+            // The ViewCube composites a FIXED-SIZE square anchored to the
+            // top-right of the rect it is given, and clamps that square to the
+            // rect (`render_width.min(clip.width)` in `ViewCubePipeline::
+            // render`) — it never scales with the viewport. So all it needs
+            // is a rect that is on-canvas and non-empty. `surface_clip` is
+            // exactly that: intersected with the widget clip just above, and
+            // already proven non-empty by the `continue` that precedes it.
+            //
+            // 🔴 CE QUE LA GARDE PRECEDENTE EXIGEAIT, ET POURQUOI LE CUBE
+            // DISPARAISSAIT. Elle demandait `surface_dest.size ==
+            // placement.size` : une egalite EXACTE entre deux grandeurs
+            // arrondies par des chemins DIFFERENTS — `ceil(x+w) - floor(x)`
+            // d'un cote, `min(right, fenetre) - clamp(x)` de l'autre. Il suffit
+            // que le viewport deborde la fenetre d'un SOUS-PIXEL pour qu'elles
+            // different d'une unite, et le cube ne se dessinait plus. Aucune
+            // erreur, aucune trace : il manquait, c'est tout.
+            //
+            // Mesure du 2026-09-21, en rejouant `physical_viewport` sur 16 100
+            // mises en page realistes (largeur CSS 1280 -> 1920, hauteur 700 ->
+            // 1080, dpr 1.0 / 1.25 / 1.5 / 1.75 / 2.0) : 6 440 d'entre elles
+            // — 40 % — sautaient le cube. A dpr 1.25 le debordement apparait
+            // des que la largeur CSS n'est pas un multiple de 4 ; a dpr 1.5,
+            // des qu'elle est impaire. A dpr 1.0 et 2.0, jamais : c'est ce qui
+            // rendait le defaut invisible sur un poste de developpement.
+            //
+            // ⚠️ Et le debordement pouvait venir du BAS ou de la GAUCHE —
+            // deux cotes ou le cube ne se trouve meme pas.
+            //
+            // Ce changement est un ELARGISSEMENT PUR, pas un deplacement : dans
+            // tous les cas que l'ancienne garde laissait passer, elle imposait
+            // `vp_full_x >= clip.x` et `vp_full_x + vp_full_w <= clip_right`
+            // (idem en y), donc l'intersection `surface_clip` valait deja le
+            // rectangle entier. Le cube se dessine au MEME endroit qu'avant
+            // partout ou il se dessinait, et se dessine desormais aussi la ou
+            // il s'evanouissait. `pixel_placement_tests` l'epingle.
+            if vp.show_viewcube {
+                inner.viewcube.render(encoder, target, surface_clip);
             }
         }
         let render_ms = nav_render_started.elapsed().as_secs_f64() * 1000.0;
@@ -1632,6 +1645,171 @@ mod pixel_placement_tests {
         assert_eq!(first.size, moved.size);
         assert_eq!(first.uv_scale, moved.uv_scale);
         assert_eq!(moved.surface.x, first.surface.x + 20);
+    }
+
+    // ── Le cube de navigation ────────────────────────────────────────────
+    //
+    // Signale invisible par l'utilisateur le 2026-09-20, capture a l'appui :
+    // les fleches et le selecteur WCS -- qui sont de l'interface `iced` --
+    // s'affichaient, le cube non. Or les trois sont pilotes par le MEME
+    // drapeau (`viewcube_visible`, `src/app/view/mod.rs:260`) : voir les
+    // fleches PROUVE que le drapeau etait vrai et que la panne etait en aval,
+    // dans le chemin GPU. Elle etait dans la garde ci-dessous.
+
+    /// Le cube etait conditionne a `placement.surface.size == placement.size`.
+    /// C'est une egalite EXACTE entre deux grandeurs arrondies par des chemins
+    /// DIFFERENTS. Un debordement d'un SOUS-PIXEL du viewport hors de la
+    /// fenetre les separe d'une unite -- et le cube disparaissait sans un mot.
+    #[test]
+    fn un_debordement_sous_pixel_faisait_disparaitre_le_cube() {
+        // 1287 px CSS a dpr 1.25 font 1608,75 px physiques : le canevas est
+        // arrondi vers le bas a 1608 pendant que le rectangle du viewport
+        // mesure encore 1608,75 de large.
+        let window = Size::new(1608, 905);
+        let rect = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1608.75,
+            height: 905.0,
+        };
+        let placement = physical_viewport(rect, window);
+        assert_eq!(placement.size.width, 1609, "ceil(0 + 1608,75)");
+        assert_eq!(placement.surface.width, 1608, "borne au canevas");
+        assert_ne!(
+            placement.size.width, placement.surface.width,
+            "c'est cette inegalite que l'ancienne garde transformait en saut muet",
+        );
+        // Ce que le cube recoit desormais est sur le canevas et non vide : il
+        // se dessine.
+        assert!(placement.surface.width > 0 && placement.surface.height > 0);
+    }
+
+    /// LE TEMOIN QUI EMPECHE LE TEST PRECEDENT DE NE RIEN DIRE. A dpr 1,0 et
+    /// 2,0 la largeur physique est toujours entiere, les deux grandeurs
+    /// coincident, et le cube passait -- c'est exactement ce qui rendait le
+    /// defaut invisible sur un poste de developpement.
+    #[test]
+    fn une_fenetre_a_largeur_entiere_ne_declenchait_rien() {
+        for (w, h, dpr) in [(1920u32, 1080u32, 1.0f32), (1920, 1080, 2.0)] {
+            let window = Size::new((w as f32 * dpr) as u32, (h as f32 * dpr) as u32);
+            let placement = physical_viewport(
+                Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: w as f32 * dpr,
+                    height: h as f32 * dpr,
+                },
+                window,
+            );
+            assert_eq!(placement.surface.width, placement.size.width, "dpr {dpr}");
+            assert_eq!(placement.surface.height, placement.size.height, "dpr {dpr}");
+        }
+    }
+
+    /// LA MESURE QUI A MOTIVE LE CORRECTIF, rejouable ici plutot que citee.
+    /// Combien de fenetres parfaitement ordinaires l'egalite exacte
+    /// rejetait-elle ? Reponse : quatre sur dix.
+    #[test]
+    fn l_ancienne_garde_rejetait_quatre_fenetres_ordinaires_sur_dix() {
+        let mut total = 0usize;
+        let mut sautes = 0usize;
+        for css_w in (1280..=1920).step_by(7) {
+            for css_h in (700..=1080).step_by(11) {
+                for dpr in [1.0f32, 1.25, 1.5, 1.75, 2.0] {
+                    let window = Size::new(
+                        (css_w as f32 * dpr).floor() as u32,
+                        (css_h as f32 * dpr).floor() as u32,
+                    );
+                    // Le viewport occupe tout sauf le ruban et la ligne de
+                    // commande, en pixels logiques.
+                    let placement = physical_viewport(
+                        Rectangle {
+                            x: 0.0,
+                            y: 120.0 * dpr,
+                            width: css_w as f32 * dpr,
+                            height: (css_h as f32 - 216.0) * dpr,
+                        },
+                        window,
+                    );
+                    total += 1;
+                    if placement.surface.width != placement.size.width
+                        || placement.surface.height != placement.size.height
+                    {
+                        sautes += 1;
+                    }
+                }
+            }
+        }
+        assert!(total > 10_000, "balayage trop maigre : {total}");
+        let part = sautes as f32 / total as f32;
+        assert!(
+            part > 0.3,
+            "l'ancienne garde ne sautait que {sautes}/{total} -- si ce chiffre \
+             tombe, c'est que `physical_viewport` a change et que le commentaire \
+             de la garde ment desormais",
+        );
+    }
+
+    /// 🔴 LA PROPRIETE QUI FAIT DU CORRECTIF UN ELARGISSEMENT ET NON UN
+    /// DEPLACEMENT. Partout ou l'ancienne garde dessinait le cube, le rectangle
+    /// qu'elle construisait (`vp_full_*`, c'est-a-dire `placement.surface`) et
+    /// celui qu'on passe desormais (`surface_clip`) sont IDENTIQUES. Un
+    /// correctif qui DEPLACERAIT le cube serait un autre defaut, pas une
+    /// correction -- et rien ne le dirait a l'ecran.
+    #[test]
+    fn le_rectangle_borne_egale_l_ancien_partout_ou_l_ancienne_garde_passait() {
+        let window = Size::new(1920, 1080);
+        let clip: Rectangle<u32> = Rectangle {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let clip_right = clip.x + clip.width;
+        let clip_bottom = clip.y + clip.height;
+        let mut passages = 0usize;
+        for x in [0.0f32, 7.0, 133.5, 900.25] {
+            for y in [0.0f32, 12.0, 120.5] {
+                for w in [64.0f32, 512.0, 1019.75] {
+                    for h in [64.0f32, 400.0, 959.5] {
+                        let placement = physical_viewport(
+                            Rectangle {
+                                x,
+                                y,
+                                width: w,
+                                height: h,
+                            },
+                            window,
+                        );
+                        let s = placement.surface;
+                        let left = s.x.max(clip.x);
+                        let top = s.y.max(clip.y);
+                        let surface_clip = Rectangle {
+                            x: left,
+                            y: top,
+                            width: (s.x + s.width).min(clip_right).saturating_sub(left),
+                            height: (s.y + s.height).min(clip_bottom).saturating_sub(top),
+                        };
+                        if surface_clip.width == 0 || surface_clip.height == 0 {
+                            continue;
+                        }
+                        let ancienne_garde = s.width == placement.size.width
+                            && s.height == placement.size.height
+                            && s.x <= clip_right
+                            && s.y <= clip_bottom
+                            && s.x + s.width <= clip_right
+                            && s.y + s.height <= clip_bottom;
+                        if ancienne_garde {
+                            passages += 1;
+                            assert_eq!(surface_clip, s, "le cube a bouge");
+                        }
+                    }
+                }
+            }
+        }
+        // TEMOIN POSITIF : sans lui, une boucle qui ne compare RIEN passerait
+        // au vert et le cliquet ne garderait rien.
+        assert!(passages >= 20, "seulement {passages} cas ont exerce la garde");
     }
 
     #[test]
