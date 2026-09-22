@@ -3362,7 +3362,24 @@ fn start_page_content<'a>(
     action_width_out: std::sync::Arc<std::sync::atomic::AtomicU32>,
     active: super::StartSection,
 ) -> Element<'a, Message> {
-    let headline = text("Open CAD Studio").size(40).style(start_primary_style);
+    // FORK CONSTRUCTO : le titre « Open CAD Studio » de la page d'accueil est
+    // RETIRE (demande de Sylvain, 2026-09-20). Le moteur est ENCADRE par l'ERP,
+    // qui porte deja son propre en-tete : un second titre de 40 px annonce au
+    // client le nom d'un logiciel tiers a la place du sien, a chaque ouverture
+    // du module.
+    //
+    // ⚠️ SUPPRESSION FRANCHE, LE BINDING COMPRIS. Un widget `iced` laisse en
+    // place derriere `#[allow(unused_variables)]` ne compile PAS : son type
+    // generique ne peut pas etre infere (`error[E0283]: type annotations
+    // needed`). Le fork a deja paye cette lecon sur le bloc don/Reddit/sponsors,
+    // quelques lignes plus bas.
+    //
+    // CE QUE CELA NE TOUCHE PAS : l'attribution GPL. Elle ne tient pas a ce
+    // titre — qui est un nom de produit dans l'interface, pas une mention
+    // legale — mais a `LICENSE` (inchange), `NOTICE.txt` (qui nomme l'amont et
+    // declare l'oeuvre derivee, ce que §5(a) demande) et `SOURCES.txt`, tous
+    // trois servis A COTE du binaire, avec le cliquet de `constructo-web.yml`
+    // qui refuse de publier sans eux.
 
     // Plain outlined button (Open / New / Help / Contribute).
     let outline_btn = |label: String, msg: Message| {
@@ -3446,9 +3463,11 @@ fn start_page_content<'a>(
 
 
     let content = column![
+        // Les deux respirations (28 px au-dessus du titre, 22 px en dessous)
+        // encadraient un titre qui n'existe plus. Les garder toutes les deux
+        // laisserait 50 px de vide avant le premier bouton — le trou que le
+        // titre occupait, sans le titre.
         Space::new().height(iced::Length::Fixed(28.0)),
-        container(headline).center_x(Fill),
-        Space::new().height(iced::Length::Fixed(22.0)),
         container(primary_row).center_x(Fill),
         Space::new().height(iced::Length::Fixed(10.0)),
         container(secondary_row).center_x(Fill),
