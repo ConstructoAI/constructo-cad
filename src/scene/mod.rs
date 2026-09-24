@@ -182,9 +182,17 @@ impl Scene {
     /// edge centres as `EdgeMidpoint` hints (both from the tessellated edge
     /// list), plus face centres as `FaceCenter` hints (from the kernel B-rep
     /// faces). Empty for non-solids and for solids with no usable data.
-    pub(crate) fn solid_snap_points(
+    ///
+    /// `face_centers`, when given, must be [`Self::solid_face_centers`] for
+    /// this same entity and cached body; `None` computes them here. The wire
+    /// build computes them inside its parallel tessellation: for a solid
+    /// loaded from a drawing they re-parse the ACIS, and doing that in the
+    /// serial materialize loop was 98 % of the first wire build once the
+    /// history scan was gone (4.3 s of 4.4 s for 18 799 solids).
+    pub(crate) fn solid_snap_points_with(
         &self,
         handle: Handle,
+        face_centers: Option<Vec<glam::DVec3>>,
     ) -> Vec<(glam::DVec3, crate::scene::model::wire_model::SnapHint)> {
         use crate::scene::model::wire_model::SnapHint;
         let Some(entity) = self.document.get_entity(handle) else {
@@ -213,8 +221,11 @@ impl Scene {
                 out.push(((a + b) * 0.5, SnapHint::EdgeMidpoint));
             }
         }
-        out.extend(
+        let face_centers = face_centers.unwrap_or_else(|| {
             Self::solid_face_centers(entity, self.solid_models.get(&handle))
+        });
+        out.extend(
+            face_centers
                 .into_iter()
                 .map(|p| (p, SnapHint::FaceCenter)),
         );
@@ -255,8 +266,19 @@ impl Scene {
     /// Idempotent: a wire already carrying 3D snaps is skipped, so shared
     /// memo entries can pass through every assembly path safely.
     pub(crate) fn attach_solid_snaps(&self, handle: Handle, wires: &mut Vec<WireModel>) {
+        self.attach_solid_snaps_with(handle, wires, None);
+    }
+
+    /// [`Self::attach_solid_snaps`] with precomputed face centres (see
+    /// [`Self::solid_snap_points_with`]; `None` computes them).
+    fn attach_solid_snaps_with(
+        &self,
+        handle: Handle,
+        wires: &mut Vec<WireModel>,
+        face_centers: Option<Vec<glam::DVec3>>,
+    ) {
         use crate::scene::model::wire_model::SnapHint;
-        let points = self.solid_snap_points(handle);
+        let points = self.solid_snap_points_with(handle, face_centers);
         if points.is_empty() {
             return;
         }
@@ -10324,38 +10346,47 @@ impl Scene {
                 .collect();
             hits_ms = crate::perf::elapsed_ms(t_hits);
             let t_tess_miss = perf.then(iced::time::Instant::now);
-            let miss_pairs: Vec<(Handle, Arc<Vec<WireModel>>)> = misses
-                .par_iter()
-                .map(|e| {
-                    let e: &EntityType = e;
-                    let w = tessellate_entity(
-                        doc,
-                        sel,
-                        avp,
-                        bg,
-                        anno,
-                        annotation_scale_handle,
-                        e,
-                        Some(blk_ref),
-                        view_aabb,
-                        wpp,
-                        paper,
-                    );
-                    (e.common().handle, Arc::new(w))
-                })
-                .collect();
+            // A solid's face-centre snaps re-parse its ACIS when no kernel body
+            // is cached — the case of every solid read from a drawing. Compute
+            // them here, on every core, rather than in the serial materialize
+            // loop below (4.3 s for 18 799 loaded solids, measured).
+            let solid_models = &self.solid_models;
+            let miss_pairs: Vec<(Handle, Arc<Vec<WireModel>>, Option<Vec<glam::DVec3>>)> =
+                misses
+                    .par_iter()
+                    .map(|e| {
+                        let e: &EntityType = e;
+                        let w = tessellate_entity(
+                            doc,
+                            sel,
+                            avp,
+                            bg,
+                            anno,
+                            annotation_scale_handle,
+                            e,
+                            Some(blk_ref),
+                            view_aabb,
+                            wpp,
+                            paper,
+                        );
+                        let handle = e.common().handle;
+                        let face_centers = Self::is_solid_shell_entity(e)
+                            .then(|| Self::solid_face_centers(e, solid_models.get(&handle)));
+                        (handle, Arc::new(w), face_centers)
+                    })
+                    .collect();
             tess_ms = crate::perf::elapsed_ms(t_tess_miss);
             // Materialize new wires while the memo retains their shared source.
             let t_materialize = perf.then(iced::time::Instant::now);
             let mut out = hit_wires;
             {
                 let mut memo = memo_cell.borrow_mut();
-                for (h, a) in miss_pairs {
+                for (h, a, face_centers) in miss_pairs {
                     // Uniquely owned (just built above): enrich solid shells
                     // with B-rep vertex snaps before the memo/assembly split.
                     let mut wires =
                         Arc::try_unwrap(a).unwrap_or_else(|a| a.as_ref().clone());
-                    self.attach_solid_snaps(h, &mut wires);
+                    self.attach_solid_snaps_with(h, &mut wires, face_centers);
                     let a = Arc::new(wires);
                     out.extend(a.iter().cloned());
                     memo.insert(h, Arc::clone(&a));
@@ -13298,6 +13329,50 @@ mod layout_cache_tests {
             partitioned.circle_instances.len(),
             2,
             "Mixed polyline should have its 2 bulge arcs routed to analytical CircleGpu"
+        );
+    }
+}
+
+#[cfg(test)]
+mod solid_snap_face_centre_tests {
+    use super::*;
+    use crate::scene::model::wire_model::SnapHint;
+    use acadrust::entities::Solid3D;
+
+    fn keyed(points: Vec<(glam::DVec3, SnapHint)>) -> Vec<([u64; 3], String)> {
+        points
+            .into_iter()
+            .map(|(p, hint)| ([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()], format!("{hint:?}")))
+            .collect()
+    }
+
+    /// A solid read from a drawing has no cached kernel body, so its face
+    /// centres re-parse the ACIS. The wire build computes them in its
+    /// parallel pass and hands them to `attach_solid_snaps_with`; the snaps
+    /// must be exactly the ones the serial path computes. (The end-to-end
+    /// path through the wire build is `line_snaps_to_box_face_center`.)
+    #[test]
+    fn precomputed_face_centres_give_the_same_solid_snaps() {
+        let body = cadkernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let sat = crate::scene::convert::acis_export::solid_to_sat(&body).unwrap();
+        let mut solid = Solid3D::new();
+        solid.set_sat_document(&sat);
+        let mut scene = Scene::new();
+        let handle = scene.add_entity(EntityType::Solid3D(solid));
+        assert!(!scene.solid_models.contains_key(&handle), "must re-parse the ACIS");
+
+        let entity = scene.document.get_entity(handle).expect("solid");
+        assert!(Scene::is_solid_shell_entity(entity));
+        let centres = Scene::solid_face_centers(entity, scene.solid_models.get(&handle));
+        assert_eq!(centres.len(), 6, "a box has six face centres");
+
+        let serial = scene.solid_snap_points_with(handle, None);
+        assert!(serial
+            .iter()
+            .any(|(_, hint)| matches!(hint, SnapHint::FaceCenter)));
+        assert_eq!(
+            keyed(scene.solid_snap_points_with(handle, Some(centres))),
+            keyed(serial)
         );
     }
 }
