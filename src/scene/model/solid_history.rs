@@ -1,8 +1,8 @@
 use acadrust::entities::{EmbeddedEntity, Solid3D};
 use acadrust::objects::{
-    DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryChamfer,
-    SolidHistoryCone, SolidHistoryCylinder, SolidHistoryFillet, SolidHistoryLoft,
-    SolidHistoryLoftParameters, SolidHistoryNodeBase, SolidHistoryOperation,
+    DynamicBlockData, ObjectType, SolidHistory, SolidHistoryBox, SolidHistoryBrep,
+    SolidHistoryChamfer, SolidHistoryCone, SolidHistoryCylinder, SolidHistoryFillet,
+    SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase, SolidHistoryOperation,
     SolidHistoryPyramid, SolidHistoryRevolve, SolidHistorySphere, SolidHistorySweep,
     SolidHistoryTorus,
 };
@@ -128,17 +128,51 @@ fn compact_surface_number(mut value: String) -> String {
     value
 }
 
-fn history_flags(
+/// Root of `handle`'s solid-history graph (the `AcDbShHistory` object), read
+/// straight from the entity's own history handle.
+///
+/// It accepts exactly what `CadDocument::solid_history_graph` accepts — a
+/// Solid3D / Region / Body / Surface whose valid history handle names a
+/// `DynamicBlock` carrying `SolidHistory` data — and returns the same root.
+/// What it skips is the graph's NODE list: `solid_history_graph` collects the
+/// nodes by walking every object of the drawing (cadcodec `document.rs:2175`),
+/// so asking for one solid's flags cost O(objects).
+///
+/// The wire build asks once per visible solid (`scene/mod.rs`
+/// `tessellate_entity` → `loft_visible_history_entities`), which made the
+/// first wire build after an open O(visible solids × objects). Measured on
+/// the 2026.37 server engine, first `MOVE L` after `open`: 7 744 BOX solids
+/// (15 510 objects) 9.0 s wall / 33.7 s CPU; 18 797 visible solids
+/// (37 616 objects) 128 s wall / 496 s CPU — about 4 ms and 26 ms of CPU per
+/// visible solid, growing with the size of the drawing.
+pub(crate) fn history_root(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
-) -> Option<(bool, bool, i16)> {
-    let graph = document.solid_history_graph(handle)?;
-    let ObjectType::DynamicBlock(object) = document.objects.get(&graph.root)? else {
+) -> Option<(acadrust::Handle, &SolidHistory)> {
+    let root = match document.get_entity(handle)? {
+        EntityType::Solid3D(value) => value.history_handle,
+        EntityType::Region(value) => value.history_handle,
+        EntityType::Body(value) => value.history_handle,
+        EntityType::Surface(value) => value.history_handle,
+        _ => None,
+    }
+    .filter(|value| value.is_valid())?;
+    let ObjectType::DynamicBlock(object) = document.objects.get(&root)? else {
         return None;
     };
     let DynamicBlockData::SolidHistory(history) = &object.data else {
         return None;
     };
+    Some((root, history))
+}
+
+/// `(record_history, show_history, SHOWHIST)` for a history-bearing solid.
+/// Only the root is needed, so this stays O(1): see [`history_root`].
+fn history_flags(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+) -> Option<(bool, bool, i16)> {
+    let (_, history) = history_root(document, handle)?;
     Some((
         history.record_history,
         history.show_history,
@@ -4137,4 +4171,139 @@ pub fn chamfer_op(
         base_face,
         ..SolidHistoryChamfer::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `n` BOX solids carrying a history graph (root + one node each, as the
+    /// BOX command writes them), one solid WITHOUT history and one circle.
+    fn drawing(n: usize) -> (acadrust::CadDocument, Vec<acadrust::Handle>) {
+        let mut document = acadrust::CadDocument::new();
+        let mut handles = Vec::new();
+        for step in 0..n {
+            let handle = document
+                .add_entity(EntityType::Solid3D(Solid3D::new()))
+                .expect("add solid");
+            let operation = box_op(
+                glam::DMat4::IDENTITY.to_cols_array(),
+                1.0 + step as f64,
+                2.0,
+                3.0,
+            );
+            document
+                .create_solid_history(handle, operation)
+                .expect("history graph");
+            handles.push(handle);
+        }
+        handles.push(
+            document
+                .add_entity(EntityType::Solid3D(Solid3D::new()))
+                .expect("add solid without history"),
+        );
+        handles.push(
+            document
+                .add_entity(EntityType::Circle(acadrust::entities::Circle::new()))
+                .expect("add circle"),
+        );
+        (document, handles)
+    }
+
+    fn set_history_handle(
+        document: &mut acadrust::CadDocument,
+        solid: acadrust::Handle,
+        value: Option<acadrust::Handle>,
+    ) {
+        match document.get_entity_mut(solid) {
+            Some(EntityType::Solid3D(entity)) => entity.history_handle = value,
+            other => panic!("not a solid: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn history_root_names_the_same_root_as_the_history_graph() {
+        let (document, handles) = drawing(4);
+        let mut with_history = 0;
+        for &handle in &handles {
+            let expected = document.solid_history_graph(handle).map(|graph| graph.root);
+            assert_eq!(
+                history_root(&document, handle).map(|(root, _)| root),
+                expected,
+                "entity {handle:?}"
+            );
+            assert_eq!(history_flags(&document, handle).is_some(), expected.is_some());
+            with_history += usize::from(expected.is_some());
+        }
+        // The fixture must exercise both answers, or the parity above is empty.
+        assert_eq!(with_history, 4);
+    }
+
+    #[test]
+    fn history_root_refuses_what_the_history_graph_refuses() {
+        let (mut document, handles) = drawing(1);
+        let solid = handles[0];
+        let graph = document.solid_history_graph(solid).expect("fixture graph");
+        let node = graph.nodes[0];
+        for (label, target) in [
+            // A DynamicBlock, but a history NODE, not a SolidHistory root.
+            ("node", Some(node)),
+            ("missing object", Some(acadrust::Handle::new(0x7FFF_FFF0))),
+            ("null handle", Some(acadrust::Handle::new(0))),
+            ("no handle", None),
+        ] {
+            set_history_handle(&mut document, solid, target);
+            assert!(
+                document.solid_history_graph(solid).is_none(),
+                "{label}: fixture must be refused by the graph too"
+            );
+            assert!(history_root(&document, solid).is_none(), "{label}");
+            assert!(history_flags(&document, solid).is_none(), "{label}");
+        }
+        set_history_handle(&mut document, solid, Some(graph.root));
+        assert_eq!(history_root(&document, solid).map(|(root, _)| root), Some(graph.root));
+    }
+
+    #[test]
+    fn history_flags_reads_the_root_object_and_the_header() {
+        let (mut document, handles) = drawing(1);
+        let solid = handles[0];
+        assert_eq!(history_flags(&document, solid), Some((false, false, 1)));
+
+        let root = history_root(&document, solid).expect("root").0;
+        match document.objects.get_mut(&root) {
+            Some(ObjectType::DynamicBlock(object)) => match &mut object.data {
+                DynamicBlockData::SolidHistory(history) => {
+                    history.show_history = true;
+                    history.record_history = true;
+                }
+                other => panic!("root data: {other:?}"),
+            },
+            other => panic!("root object: {other:?}"),
+        }
+        document.header.show_solid_history = 7;
+        assert_eq!(history_flags(&document, solid), Some((true, true, 2)));
+        // Shown history of a BOX is not a loft: nothing extra to draw.
+        assert!(loft_visible_history_entities(&document, solid).is_empty());
+    }
+
+    /// Cliquet: the per-solid display path must not go back to
+    /// `solid_history_graph`, whose node collection walks every object of the
+    /// drawing — that walk, once per visible solid, is what made the first wire
+    /// build quadratic (128 s for 18 797 solids on the server engine).
+    #[test]
+    fn per_solid_history_flags_never_walk_the_object_table() {
+        let source = include_str!("solid_history.rs");
+        for function in ["fn history_root(", "fn history_flags("] {
+            let body = source
+                .split(function)
+                .nth(1)
+                .and_then(|rest| rest.split("\n}\n").next())
+                .unwrap_or_else(|| panic!("{function} moved — re-point this test"));
+            assert!(
+                !body.contains("solid_history_graph"),
+                "{function} walks the object table again"
+            );
+        }
+    }
 }
