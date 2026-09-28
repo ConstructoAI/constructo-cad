@@ -2463,12 +2463,21 @@ impl Scene {
         }
     }
 
+    pub fn add_hatch(
+        &mut self,
+        model: HatchModel,
+        layer: Option<&str>,
+        entity_style: Option<(acadrust::types::Color, acadrust::types::Transparency)>,
+    ) -> Handle {
+        self.add_hatch_weighted(model, layer, entity_style, None)
+    }
+
     /// Add a hatch built by a command. `entity_style` is its colour and
     /// transparency (an inherited hatch's, or the current ones), `line_weight`
     /// its lineweight: a new hatch takes the current properties like any other
     /// new object — it used to be left ByLayer whatever was current, so a grey
     /// poché came out in the layer's colour.
-    pub fn add_hatch(
+    pub fn add_hatch_weighted(
         &mut self,
         model: HatchModel,
         layer: Option<&str>,

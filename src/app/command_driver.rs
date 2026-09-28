@@ -3075,7 +3075,7 @@ impl OpenCADStudio {
                 let new_handle =
                     self.tabs[i]
                         .scene
-                        .add_hatch(hatch, Some(&layer), style, line_weight);
+                        .add_hatch_weighted(hatch, Some(&layer), style, line_weight);
                 if !new_handle.is_null() {
                     self.tabs[i].scene.select_entity(new_handle, true);
                 }
@@ -3098,7 +3098,7 @@ impl OpenCADStudio {
                 let pending = self.begin_undo(i, label, 1, true);
                 let layer = self.tabs[i].active_layer.clone();
                 let line_weight = Some(self.ribbon.active_lineweight);
-                let new_handle = self.tabs[i].scene.add_hatch(
+                let new_handle = self.tabs[i].scene.add_hatch_weighted(
                     hatch,
                     Some(&layer),
                     Some((color, transparency)),
@@ -3145,7 +3145,7 @@ impl OpenCADStudio {
                 let line_weight = Some(self.ribbon.active_lineweight);
                 let new_handle = self.tabs[i]
                     .scene
-                    .add_hatch(hatch, Some(&layer), style, line_weight);
+                    .add_hatch_weighted(hatch, Some(&layer), style, line_weight);
                 if !new_handle.is_null() {
                     self.tabs[i].scene.select_entity(new_handle, true);
                 }
@@ -3169,10 +3169,12 @@ impl OpenCADStudio {
                 let style = entity_style.or_else(|| Some(self.current_hatch_style(i)));
                 let line_weight = Some(self.ribbon.active_lineweight);
                 for hatch in hatches {
-                    let new_handle =
-                        self.tabs[i]
-                            .scene
-                            .add_hatch(hatch, Some(&layer), style.clone(), line_weight);
+                    let new_handle = self.tabs[i].scene.add_hatch_weighted(
+                        hatch,
+                        Some(&layer),
+                        style.clone(),
+                        line_weight,
+                    );
                     if !new_handle.is_null() {
                         self.tabs[i].scene.select_entity(new_handle, true);
                     }
