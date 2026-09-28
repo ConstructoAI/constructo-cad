@@ -1792,14 +1792,7 @@ where
     // `acis_interop::prepare_for_interchange`. A drawing saved by an earlier
     // engine is repaired here, on its next save.
     let interchange_started = iced::time::Instant::now();
-    let interchange = {
-        use crate::scene::convert::acis_interop::{prepare_for_interchange, InterchangeFormat};
-        let extension = path
-            .extension()
-            .map(|value| value.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        prepare_for_interchange(&mut doc, InterchangeFormat::from_extension(&extension))
-    };
+    let interchange = crate::scene::convert::acis_interop::prepare_for_interchange(&mut doc);
     let interchange_ms = interchange_started.elapsed().as_secs_f64() * 1000.0;
     let temp_path = save_temp_path(path);
     let ext = temp_path
@@ -1931,10 +1924,7 @@ pub fn save_to_bytes(
     let dimensions_ms = dimensions_started.elapsed().as_secs_f64() * 1000.0;
     // The same interchange preparation as a native save: the browser's download
     // must open in AutoCAD too.
-    crate::scene::convert::acis_interop::prepare_for_interchange(
-        &mut doc,
-        crate::scene::convert::acis_interop::InterchangeFormat::from_extension(ext),
-    );
+    crate::scene::convert::acis_interop::prepare_for_interchange(&mut doc);
     let write_started = iced::time::Instant::now();
     let result = match ext.to_lowercase().as_str() {
         "dxf" => DxfWriter::new(&doc).write_to_vec().map_err(|e| e.to_string()),

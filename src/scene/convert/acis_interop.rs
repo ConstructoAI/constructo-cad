@@ -628,25 +628,6 @@ pub fn conform_acis_data(acis: &mut AcisData) -> AcisConformity {
 // Saving
 // ---------------------------------------------------------------------------
 
-/// The file format a document is about to be written to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InterchangeFormat {
-    Dwg,
-    Dxf,
-}
-
-impl InterchangeFormat {
-    /// The format the engine's writers pick for this extension: DXF for
-    /// `dxf`, DWG for everything else (`src/io/mod.rs` does the same).
-    pub fn from_extension(extension: &str) -> Self {
-        if extension.eq_ignore_ascii_case("dxf") {
-            Self::Dxf
-        } else {
-            Self::Dwg
-        }
-    }
-}
-
 /// What [`prepare_for_interchange`] did to a document about to be written.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InterchangeReport {
@@ -707,26 +688,26 @@ fn clear_history(entity: &mut EntityType) {
 ///    ([`conform_acis_data`]). This is what repairs a drawing saved by an
 ///    earlier engine: its solids come back from the file as the unconformed
 ///    SAB they were written as, and the next save rewrites them.
-/// 2. DXF only: every solid history whose root names the solid itself as the
-///    object it owns is left out, and the solid written without history — the
-///    form AutoCAD writes with `SOLIDHIST` off. acadrust's
-///    `create_solid_history` sets the root's owned-object handle (DXF 360) to
-///    the solid, where AutoCAD's root owns an evaluation graph: the solid owns
-///    the root, which owns the solid. Measured 2026-09-28: once the solid's
-///    ACIS is readable, ODA File Converter dies of a stack overflow (exit
-///    0xC00000FD) on the DXF of any such solid, and reads the solid again as
-///    soon as the history is gone. From a DWG, ODA reads the same solids and
-///    their histories without complaint (it drops the history, silently), and
-///    the engine's own history features — grip edits, rebuilds — need them
-///    after a reload, so the DWG keeps them. A history recorded by AutoCAD
-///    (whose root owns something else) is always kept.
+/// 2. Every solid history whose root names the solid itself as the object it
+///    owns is left out, and the solid written without history — the form
+///    AutoCAD writes with `SOLIDHIST` off. acadrust's `create_solid_history`
+///    sets the root's owned-object handle (DXF 360) to the solid, where
+///    AutoCAD's root owns an evaluation graph: the solid owns the root, which
+///    owns the solid. Measured 2026-09-28, once the ACIS itself is readable:
+///    * DXF: ODA File Converter dies of a stack overflow (exit 0xC00000FD) on
+///      any such solid;
+///    * DWG: a CONE, and the 3DROTATEd cylinders of the production drawing
+///      CAD-000018 (1A6, 1A7, 1F1), still stop ODA with `Object improperly
+///      read: AcDb3dSolid ... Out of memory` — the WHOLE drawing then fails to
+///      open. The same solids written without their history read cleanly.
+///    Nothing in the ERP's drawing flow uses a solid's history: a solid
+///    reopened without one is lifted from its ACIS (`restore_solid_models`
+///    already falls back to it). A history recorded by AutoCAD (whose root
+///    owns something else) is always kept.
 ///
 /// Only the entities concerned are copied out of their shared `Arc`s; the
 /// header checks that select them read a few bytes each.
-pub fn prepare_for_interchange(
-    document: &mut CadDocument,
-    format: InterchangeFormat,
-) -> InterchangeReport {
+pub fn prepare_for_interchange(document: &mut CadDocument) -> InterchangeReport {
     let mut report = InterchangeReport::default();
 
     let unconformed: Vec<Handle> = document
@@ -748,9 +729,7 @@ pub fn prepare_for_interchange(
         }
     }
 
-    if format == InterchangeFormat::Dxf {
-        report.histories_removed = drop_self_owned_histories(document);
-    }
+    report.histories_removed = drop_self_owned_histories(document);
     report
 }
 
@@ -1106,12 +1085,12 @@ mod tests {
     }
 
     #[test]
-    fn a_dxf_save_conforms_legacy_solids_and_drops_self_owned_histories() {
+    fn saving_conforms_legacy_solids_and_drops_self_owned_histories() {
         let (mut document, handle) = document_with_legacy_solid();
         let graph = with_engine_history(&mut document, handle);
         assert!(document.objects.contains_key(&graph.root));
 
-        let report = prepare_for_interchange(&mut document, InterchangeFormat::Dxf);
+        let report = prepare_for_interchange(&mut document);
         assert_eq!(report.acis_conformed, 1);
         assert_eq!(report.acis_refused, 0);
         assert_eq!(report.histories_removed, 1);
@@ -1127,30 +1106,11 @@ mod tests {
         assert_eq!((version, bodies, product), (700, 1, KERNEL_PRODUCT));
 
         // A second save finds nothing left to do.
-        assert_eq!(
-            prepare_for_interchange(&mut document, InterchangeFormat::Dxf),
-            InterchangeReport::default()
-        );
+        assert_eq!(prepare_for_interchange(&mut document), InterchangeReport::default());
     }
 
     #[test]
-    fn a_dwg_save_conforms_legacy_solids_and_keeps_the_engine_s_histories() {
-        let (mut document, handle) = document_with_legacy_solid();
-        let graph = with_engine_history(&mut document, handle);
-
-        let report = prepare_for_interchange(&mut document, InterchangeFormat::Dwg);
-        assert_eq!(report.acis_conformed, 1);
-        assert_eq!(report.histories_removed, 0);
-        assert!(document.objects.contains_key(&graph.root));
-        let Some(EntityType::Solid3D(solid)) = document.get_entity(handle) else {
-            panic!("solid gone");
-        };
-        assert_eq!(solid.history_handle, Some(graph.root));
-        assert!(document.solid_history_operations(handle).is_some());
-    }
-
-    #[test]
-    fn a_history_that_owns_something_else_is_kept_even_in_dxf() {
+    fn a_history_that_owns_something_else_is_kept() {
         let (mut document, handle) = document_with_legacy_solid();
         let graph = with_engine_history(&mut document, handle);
         // AutoCAD's root owns its evaluation graph, not the solid.
@@ -1159,24 +1119,32 @@ mod tests {
                 history.owner = graph.nodes[0];
             }
         }
-        let report = prepare_for_interchange(&mut document, InterchangeFormat::Dxf);
+        let report = prepare_for_interchange(&mut document);
         assert_eq!(report.histories_removed, 0);
         assert!(document.objects.contains_key(&graph.root));
+        let Some(EntityType::Solid3D(solid)) = document.get_entity(handle) else {
+            panic!("solid gone");
+        };
+        assert_eq!(solid.history_handle, Some(graph.root));
     }
 
     #[test]
-    fn the_format_follows_the_extension_like_the_writers_do() {
-        assert_eq!(InterchangeFormat::from_extension("dxf"), InterchangeFormat::Dxf);
-        assert_eq!(InterchangeFormat::from_extension("DXF"), InterchangeFormat::Dxf);
-        assert_eq!(InterchangeFormat::from_extension("dwg"), InterchangeFormat::Dwg);
-        assert_eq!(InterchangeFormat::from_extension("sv$"), InterchangeFormat::Dwg);
-        assert_eq!(InterchangeFormat::from_extension(""), InterchangeFormat::Dwg);
+    fn only_the_snapshot_loses_its_histories() {
+        // `save_owned_as_version_inner` hands the writer a CLONE; the live
+        // document keeps its history for the engine's own features.
+        let (mut live, handle) = document_with_legacy_solid();
+        let graph = with_engine_history(&mut live, handle);
+        let mut snapshot = live.clone();
+        prepare_for_interchange(&mut snapshot);
+        assert!(live.objects.contains_key(&graph.root));
+        assert!(live.solid_history_operations(handle).is_some());
+        assert!(!snapshot.objects.contains_key(&graph.root));
     }
 
     #[test]
     fn a_saved_dwg_carries_conformed_acis_and_reopens_with_the_same_solid() {
         let (mut document, handle) = document_with_legacy_solid();
-        prepare_for_interchange(&mut document, InterchangeFormat::Dwg);
+        prepare_for_interchange(&mut document);
         let mut bytes = std::io::Cursor::new(Vec::new());
         acadrust::DwgWriter::write_to_writer(&mut bytes, &document).expect("write DWG");
         let reopened = acadrust::DwgReader::from_stream(std::io::Cursor::new(bytes.into_inner()))
