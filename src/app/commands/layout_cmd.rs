@@ -35,7 +35,7 @@
 use crate::app::{Message, OpenCADStudio};
 use crate::io::paper_catalog::{self, PaperSize, PaperUnits};
 use acadrust::objects::{Layout, ObjectType};
-use acadrust::{CadDocument, EntityType, Handle};
+use acadrust::{CadDocument, EntityType};
 use iced::Task;
 use serde_json::{json, Value};
 
@@ -479,95 +479,6 @@ fn fit_sheet_viewport(scene: &mut crate::scene::Scene, layout_name: &str) {
     scene.bump_entities(&[(sheet, crate::scene::ChangeKind::Modified)]);
 }
 
-fn is_paper_space_block_name(name: &str) -> bool {
-    const PREFIX: &str = "*Paper_Space";
-    name.get(..PREFIX.len())
-        .is_some_and(|head| head.eq_ignore_ascii_case(PREFIX))
-        && name[PREFIX.len()..].chars().all(|c| c.is_ascii_digit())
-}
-
-/// Keep the paper-space block records the way the file format and
-/// `CadDocument::add_layout` expect them: one `*Paper_Space` (the drawing's
-/// primary paper space, which the DWG header and block table point at) and the
-/// other layouts' blocks numbered `*Paper_Space0`, `*Paper_Space1`, … without
-/// a gap.
-///
-/// Two ways the numbering broke before: deleting the layout that owned
-/// `*Paper_Space` left the header and the block table pointing at nothing,
-/// and deleting any other layout left a gap, so the next `add_layout` — which
-/// names its block `*Paper_Space<count - 1>` — collided with a survivor and
-/// failed.
-pub(crate) fn normalize_paper_space_blocks(document: &mut CadDocument) {
-    let mut owned: Vec<(i16, Handle)> = document
-        .objects
-        .values()
-        .filter_map(|object| match object {
-            ObjectType::Layout(layout)
-                if layout.name != "Model" && !layout.block_record.is_null() =>
-            {
-                Some((layout.tab_order, layout.block_record))
-            }
-            _ => None,
-        })
-        .collect();
-    owned.sort_by_key(|(order, handle)| (*order, handle.value()));
-    let blocks: Vec<(Handle, String, Handle)> = owned
-        .iter()
-        .filter_map(|(_, handle)| {
-            document
-                .block_records
-                .iter()
-                .find(|block| block.handle == *handle)
-                .filter(|block| is_paper_space_block_name(&block.name))
-                .map(|block| (block.handle, block.name.clone(), block.block_entity_handle))
-        })
-        .collect();
-    let Some(first) = blocks.first() else {
-        return;
-    };
-    let primary = blocks
-        .iter()
-        .find(|(_, name, _)| name.eq_ignore_ascii_case("*Paper_Space"))
-        .map(|(handle, _, _)| *handle)
-        .unwrap_or(first.0);
-    let mut next = 0;
-    let targets: Vec<(Handle, String, String, Handle)> = blocks
-        .iter()
-        .map(|(handle, name, marker)| {
-            let target = if *handle == primary {
-                "*Paper_Space".to_string()
-            } else {
-                let target = format!("*Paper_Space{next}");
-                next += 1;
-                target
-            };
-            (*handle, name.clone(), target, *marker)
-        })
-        .filter(|(_, name, target, _)| name != target)
-        .collect();
-    // Two passes through unique temporary names, so no rename meets a name
-    // another block is about to give up.
-    let mut staged = Vec::new();
-    for (handle, name, target, marker) in targets {
-        let temporary = format!("*Paper_Space_renumber_{:X}", handle.value());
-        if document.block_records.rename(&name, temporary.clone()).is_ok() {
-            staged.push((temporary, target, marker));
-        }
-    }
-    for (temporary, target, marker) in staged {
-        let final_name = if document.block_records.rename(&temporary, target.clone()).is_ok() {
-            target
-        } else {
-            temporary
-        };
-        // The block marker carries the name the writers emit.
-        if let Some(EntityType::Block(block)) = document.get_entity_mut(marker) {
-            block.name = final_name;
-        }
-    }
-    document.header.paper_space_block_handle = primary;
-}
-
 fn format_number(value: f64) -> String {
     let rounded = (value * 10_000.0).round() / 10_000.0;
     if (rounded - rounded.round()).abs() < 1e-9 {
@@ -831,7 +742,7 @@ impl OpenCADStudio {
             None
         };
         self.push_undo_snapshot(i, "LAYOUT NEW");
-        normalize_paper_space_blocks(&mut self.tabs[i].scene.document);
+        crate::io::paper_space::normalize_paper_space_blocks(&mut self.tabs[i].scene.document, None);
         if let Err(error) = self.tabs[i].scene.document.add_layout(&name) {
             self.command_line.push_error(&format!("LAYOUT N: {error}"));
             return;
@@ -975,7 +886,7 @@ impl OpenCADStudio {
         };
         if self.tabs[i].scene.delete_layout(&name) {
             let scene = &mut self.tabs[i].scene;
-            normalize_paper_space_blocks(&mut scene.document);
+            crate::io::paper_space::normalize_paper_space_blocks(&mut scene.document, None);
             let order: Vec<String> = scene.layout_names().into_iter().skip(1).collect();
             scene.set_layout_tab_order(&order);
             self.layout_rename_state = None;
@@ -1673,6 +1584,24 @@ mod tests {
                 .count(),
             1
         );
+        // Saved in Model space, A-001 kept *Paper_Space: its entities were
+        // written in paper mode (1), A-101's as owned (0) — as the reference
+        // application writes them, and what a plain ODA read needs to keep
+        // the A-101 viewports active (see `io/paper_space.rs`).
+        let a001 = find_layout(document, "A-001").unwrap();
+        let modes = |block: acadrust::Handle| -> Vec<Option<u8>> {
+            document
+                .entities()
+                .filter(|entity| entity.common().owner_handle == block)
+                .map(|entity| entity.common().entity_mode)
+                .collect()
+        };
+        let secondary = modes(a101.block_record);
+        assert_eq!(secondary.len(), 4, "{secondary:?}");
+        assert!(secondary.iter().all(|mode| *mode == Some(0)), "{secondary:?}");
+        let primary = modes(a001.block_record);
+        assert!(!primary.is_empty());
+        assert!(primary.iter().all(|mode| *mode == Some(1)), "{primary:?}");
         drop(app);
         let sidecar = path.with_file_name(format!(
             ".{}.ocs.lock",

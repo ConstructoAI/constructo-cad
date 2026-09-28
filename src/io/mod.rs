@@ -23,6 +23,7 @@ pub mod linetypes;
 pub mod patterns;
 pub mod update_check;
 pub mod paper_catalog;
+pub(crate) mod paper_space;
 pub mod plot_device;
 pub mod windows_media;
 pub mod thumbnail;
@@ -1782,6 +1783,14 @@ where
     let perf = crate::perf::enabled();
     let total_started = iced::time::Instant::now();
     doc.version = version;
+    // Paper-space blocks and entity modes the way DWG readers expect them, on
+    // this snapshot only (see `paper_space.rs`).
+    if !path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("dxf"))
+    {
+        paper_space::prepare_paper_space_for_dwg(&mut doc);
+    }
     let styles_started = iced::time::Instant::now();
     sync_current_styles_on_save(&mut doc);
     let styles_ms = styles_started.elapsed().as_secs_f64() * 1000.0;
@@ -1906,6 +1915,9 @@ pub fn save_to_bytes(
     let mut doc = doc.clone();
     let clone_ms = clone_started.elapsed().as_secs_f64() * 1000.0;
     doc.version = version;
+    if !ext.eq_ignore_ascii_case("dxf") {
+        paper_space::prepare_paper_space_for_dwg(&mut doc);
+    }
     let styles_started = iced::time::Instant::now();
     sync_current_styles_on_save(&mut doc);
     let styles_ms = styles_started.elapsed().as_secs_f64() * 1000.0;
