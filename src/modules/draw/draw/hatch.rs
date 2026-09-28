@@ -206,6 +206,9 @@ pub struct HatchCommand {
         acadrust::types::Transparency,
     )>,
     plane: WorkingPlane,
+    /// Patterns come from the imperial catalog (acad.pat), for a drawing in
+    /// inches or feet; the metric one (acadiso.pat) otherwise.
+    imperial_patterns: bool,
 }
 
 impl HatchCommand {
@@ -254,12 +257,21 @@ impl HatchCommand {
                 .unwrap_or(acadrust::entities::HatchStyleType::Normal),
             inherited,
             plane,
+            imperial_patterns: false,
         };
         command.set_object_selection(selected_objects);
         command
     }
 
     pub fn with_origin(mut self, origin: [f64; 2]) -> Self { self.default_origin = origin; self }
+
+    /// Take patterns from the catalog of the drawing's units (see
+    /// `hatch_patterns::catalog_for`): ANSI31 lines 1/8" apart in a drawing in
+    /// inches, not 3.175".
+    pub fn with_imperial_patterns(mut self, imperial: bool) -> Self {
+        self.imperial_patterns = imperial;
+        self
+    }
 
     fn set_object_selection(&mut self, handles: Vec<Handle>) {
         let mut segments = Vec::new();
@@ -410,7 +422,8 @@ impl HatchCommand {
         }
         // Default: ANSI31 from catalog; fallback to a single 45° family.
         let pat_name = "ANSI31";
-        let default_pattern = crate::scene::model::hatch_patterns::find(pat_name)
+        let default_pattern =
+            crate::scene::model::hatch_patterns::find_for(pat_name, self.imperial_patterns)
             .and_then(|e| {
                 if let HatchPattern::Pattern(f) = &e.gpu {
                     Some(HatchPattern::Pattern(f.clone()))
@@ -829,7 +842,9 @@ impl CadCommand for HatchCommand {
         if let Some(rest) = upper.strip_prefix('P') {
             let name = rest.trim();
             if !name.is_empty() {
-                if let Some(entry) = crate::scene::model::hatch_patterns::find(name) {
+                if let Some(entry) =
+                    crate::scene::model::hatch_patterns::find_for(name, self.imperial_patterns)
+                {
                     self.pattern_override = Some((entry.name.clone(), entry.gpu.clone()));
                 }
             }

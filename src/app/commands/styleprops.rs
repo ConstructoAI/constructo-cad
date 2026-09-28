@@ -1376,6 +1376,8 @@ impl OpenCADStudio {
                         .then(|| value.as_deref()?.parse::<i16>().ok())
                         .flatten()
                         .filter(|value| (0..=3).contains(value));
+                    let previous_insertion_units =
+                        self.tabs[i].scene.document.header.insertion_units;
                     let outcome: Result<(String, bool), String> = {
                         let h = &mut self.tabs[i].scene.document.header;
                         match name.as_str() {
@@ -2440,6 +2442,17 @@ impl OpenCADStudio {
                                     self.tabs[i].dirty = true;
                                 }
                                 if name == "FILLMODE" {
+                                    self.tabs[i].scene.bump_geometry();
+                                }
+                                // The standard linetypes follow the drawing
+                                // into its units system: acad.lin lengths in
+                                // inches, the metric catalog otherwise.
+                                if name == "INSUNITS"
+                                    && crate::io::linetypes::follow_insertion_units(
+                                        &mut self.tabs[i].scene.document,
+                                        previous_insertion_units,
+                                    ) > 0
+                                {
                                     self.tabs[i].scene.bump_geometry();
                                 }
                                 if matches!(name.as_str(), "PSLTSCALE" | "PLIMCHECK") {

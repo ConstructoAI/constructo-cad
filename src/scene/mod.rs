@@ -11124,6 +11124,13 @@ vis_index={:.1} visible_probe={:.1}",
 
     pub fn invalidate_dim_style_dependencies_many(&mut self, names: &[String]) {
         let targets = self.dependency_targets(DependencyKind::DimStyle, names);
+        // An edited style regenerates the dimensions drawn with it: linear
+        // and aligned text nobody moved goes where the new DIMTXT, DIMGAP,
+        // DIMSCALE or DIMTAD puts it. The same pass runs on undo and redo, so
+        // the text lands back where the restored style puts it.
+        for handle in &targets.source_handles {
+            crate::entities::dimension::replace_automatic_text(&mut self.document, *handle);
+        }
         self.invalidate_dependency_targets(targets);
     }
 

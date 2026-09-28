@@ -2512,6 +2512,16 @@ impl OpenCADStudio {
                 if !self.apply_viewport_dimension_measurement(i, &mut entity) {
                     return Task::none();
                 }
+                // Linear and aligned text goes where the style puts it (DIMTAD,
+                // DIMGAP and DIMTXT × DIMSCALE), not at the fixed offset the
+                // commands store. The style name is final here, current or
+                // inherited.
+                if let acadrust::EntityType::Dimension(dimension) = &mut entity {
+                    crate::entities::dimension::place_automatic_text(
+                        dimension,
+                        &self.tabs[i].scene.document,
+                    );
+                }
                 // Projected points cannot use direct paper-space source inference.
                 let association_allowed = self.dimension_association_allowed(i);
                 let inherited_dimension = if preserve_base_style {
@@ -2668,6 +2678,12 @@ impl OpenCADStudio {
                             &self.tabs[i].scene.document,
                             &mut entity,
                         );
+                        if let acadrust::EntityType::Dimension(dimension) = &mut entity {
+                            crate::entities::dimension::place_automatic_text(
+                                dimension,
+                                &self.tabs[i].scene.document,
+                            );
+                        }
                         let exploded = crate::modules::draw::modify::explode::explode_entity(
                             &entity,
                             &self.tabs[i].scene.document,
@@ -2692,6 +2708,15 @@ impl OpenCADStudio {
                         let Some(handle) = self.commit_entity_handle(entity) else {
                             continue;
                         };
+                        // The creation style is applied by the commit itself.
+                        if crate::entities::dimension::replace_automatic_text(
+                            &mut self.tabs[i].scene.document,
+                            handle,
+                        ) {
+                            self.tabs[i]
+                                .scene
+                                .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+                        }
                         made += 1;
                         if association_mode != 2 {
                             continue;
@@ -6946,12 +6971,18 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
+                            let imperial_patterns = crate::io::linetypes::document_is_imperial(
+                                &self.tabs[i].scene.document,
+                            );
                             if let Some(acadrust::EntityType::Hatch(hatch)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 if !name.is_empty() && name != hatch.pattern.name {
                                     if let Some(entry) =
-                                        crate::scene::model::hatch_patterns::find(&name)
+                                        crate::scene::model::hatch_patterns::find_for(
+                                            &name,
+                                            imperial_patterns,
+                                        )
                                     {
                                         let mut pattern =
                                             crate::scene::model::hatch_patterns::build_dxf_pattern(
