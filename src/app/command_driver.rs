@@ -7905,6 +7905,17 @@ impl OpenCADStudio {
     }
 }
 
+/// Distance from a typed point to a planar curve that does not lie in a plan
+/// view — a sweep path or a profile drawn in a vertical UCS — measured in 3D
+/// through the curve's own plane. The plan-view test only knows curves whose
+/// plane faces Z, so such a curve could never be picked by a typed point.
+fn typed_pick_distance_3d(entity: &acadrust::EntityType, point: glam::DVec3) -> Option<f64> {
+    let planar = crate::entities::curve::entity_curve(entity)?;
+    let uv = planar.plane.project(point.to_array())?;
+    let nearest = cadkernel::geom2d::closest_point(&planar.curve, uv);
+    Some((glam::DVec3::from_array(planar.plane.point_at(nearest.point)) - point).length())
+}
+
 /// The whitespace-separated tokens of a command line — the same split as
 /// `str::split_whitespace` — each with the byte offset where it starts, so the
 /// verbatim remainder of the line (`&line[start..]`) can be recovered for the
@@ -7953,6 +7964,7 @@ fn entity_at_typed_point(
             .max((bounds.max.y - bounds.min.y).abs());
         let Some(distance) =
             crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point)
+                .or_else(|| typed_pick_distance_3d(entity, point))
         else {
             continue;
         };

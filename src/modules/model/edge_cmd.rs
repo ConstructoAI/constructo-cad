@@ -297,6 +297,25 @@ impl SolidEdgeCommand {
         CmdResult::NeedPoint
     }
 
+    /// The solid a coordinate typed at "Select an edge" designates: the one
+    /// in hand once an edge is picked, otherwise the solid whose edge lies
+    /// nearest to the point. Without a screen, a typed point on the edge is
+    /// the only way to name it (`FILLETEDGE R 2 10,0,5`).
+    fn typed_edge_owner(&self, point: DVec3) -> Option<Handle> {
+        self.bodies
+            .iter()
+            .filter(|(handle, _)| self.pick_allowed(*handle))
+            .filter_map(|(handle, body)| {
+                crate::scene::model::solid_model::nearest_edge_with_distance(
+                    body,
+                    point.to_array(),
+                )
+                .map(|(_, distance)| (*handle, distance))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(handle, _)| handle)
+    }
+
     fn finish(&self) -> CmdResult {
         let Some(handle) = self.handle else {
             return CmdResult::Cancel;
@@ -498,7 +517,20 @@ impl CadCommand for SolidEdgeCommand {
         CmdResult::NeedPoint
     }
 
+    /// A coordinate typed at "Select an edge" picks the edge nearest to it
+    /// (see [`SolidEdgeCommand::typed_edge_owner`]); it used to be ignored,
+    /// which left FILLETEDGE and CHAMFEREDGE without effect on a script.
+    fn entity_pick_accepts_points(&self) -> bool {
+        self.needs_entity_pick()
+    }
+
     fn on_point(&mut self, point: DVec3) -> CmdResult {
+        if matches!(self.step, EdgeStep::Selecting | EdgeStep::PickingLoop) {
+            return match self.typed_edge_owner(point) {
+                Some(handle) => self.on_entity_pick(handle, point),
+                None => CmdResult::NeedPoint,
+            };
+        }
         if !matches!(
             self.step,
             EdgeStep::Radius | EdgeStep::ChamferDistance1 | EdgeStep::ChamferDistance2
@@ -662,6 +694,24 @@ impl CadCommand for SolidEdgeCommand {
                 .unwrap_or(CmdResult::NeedPoint),
             (_, EdgeStep::Expression) => CmdResult::NeedPoint,
             _ => CmdResult::Cancel,
+        }
+    }
+
+    /// A one-line FILLETEDGE / CHAMFEREDGE (`FILLETEDGE R 2 10,0,5 10,10,5`)
+    /// is complete: its edges are picked, its values given, so the line's end
+    /// applies it — Enter alone would only show the preview and wait.
+    fn on_line_end(&mut self) -> CmdResult {
+        match self.step {
+            EdgeStep::LoopConfirm => {
+                let _ = self.accept_loop();
+                self.finish()
+            }
+            EdgeStep::Selecting | EdgeStep::PickingLoop | EdgeStep::PreviewConfirm
+                if !self.selected_edges.is_empty() =>
+            {
+                self.finish()
+            }
+            _ => self.on_enter(),
         }
     }
 

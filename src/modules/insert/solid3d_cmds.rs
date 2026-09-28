@@ -1787,6 +1787,17 @@ impl CadCommand for SweepCommand {
         self.step == SweepStep::PickPath
     }
 
+    /// A coordinate typed at "Select sweep path" picks the curve lying there,
+    /// as a click would (`SWEEP L 50,0`: the profile drawn last, then a point
+    /// on the path). Without it the path could only be clicked.
+    fn entity_pick_accepts_points(&self) -> bool {
+        self.step == SweepStep::PickPath
+    }
+
+    fn typed_point_picks_entity(&self) -> bool {
+        true
+    }
+
     fn entity_pick_highlights_hover(&self) -> bool {
         self.step == SweepStep::PickPath
     }

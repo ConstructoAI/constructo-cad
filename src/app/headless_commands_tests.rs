@@ -342,6 +342,60 @@ fn trim_takes_a_typed_point_on_the_piece_to_remove() {
     }));
 }
 
+// ── 3D: an edge or a path named by a typed point (constats C-04, C-05) ──────
+
+/// Face count of each solid's B-rep, in drawing order.
+fn solid_face_counts(app: &mut OpenCADStudio) -> Vec<usize> {
+    let i = app.active_tab;
+    let handles: Vec<_> = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .filter(|entity| matches!(entity, EntityType::Solid3D(_)))
+        .map(|entity| entity.common().handle)
+        .collect();
+    app.tabs[i].scene.restore_solid_models(&handles);
+    handles
+        .iter()
+        .filter_map(|handle| app.tabs[i].scene.solid_models.get(handle))
+        .map(|body| body.face_keys().count())
+        .collect()
+}
+
+#[test]
+fn filletedge_takes_a_typed_point_on_its_edge() {
+    // Production: the edge could only be clicked — typed, FILLETEDGE was
+    // accepted and did nothing.
+    let mut app = app();
+    run_done(&mut app, "BOX 0,0,0 10,10,0 10");
+    assert_eq!(solid_face_counts(&mut app), vec![6]);
+    run_done(&mut app, "FILLETEDGE R 1 10,5,10");
+    assert_eq!(solid_face_counts(&mut app), vec![7], "one edge rounded");
+}
+
+#[test]
+fn chamferedge_takes_a_typed_point_on_its_edge() {
+    let mut app = app();
+    run_done(&mut app, "BOX 0,0,0 10,10,0 10");
+    run_done(&mut app, "CHAMFEREDGE D 1 1 10,5,10");
+    assert_eq!(solid_face_counts(&mut app), vec![7], "one edge chamfered");
+}
+
+#[test]
+fn sweep_takes_its_path_from_a_typed_point() {
+    // Production: the path could only be clicked. The profile is the last
+    // object drawn; a point on the path names the path.
+    let mut app = app();
+    run_done(&mut app, "LINE 0,0 0,50");
+    run_done(&mut app, "CIRCLE 0,0 2");
+    run_done(&mut app, "SWEEP L 0,25");
+    assert_eq!(
+        count(&app, |e| matches!(e, EntityType::Solid3D(_) | EntityType::Surface(_))),
+        1,
+        "the swept solid"
+    );
+}
+
 // ── Current colour / lineweight, set the way the ERP sets them ──────────────
 
 static REQUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
