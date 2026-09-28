@@ -343,6 +343,14 @@ impl CadCommand for QdimCommand {
         }
     }
 
+    /// A one-line QDIM places its dimensions at the line's position point
+    /// (`QDIM ALL 25,-10`), which ends the command. A line that ends before
+    /// any position has nothing left to place: Enter would only move on to
+    /// "Specify dimension line position" and leave a scripted line open.
+    fn on_line_end(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
     fn on_preview_wires(&mut self, point: DVec3) -> Vec<WireModel> {
         if self.step == Step::Place { return self.preview_dimensions(point); }
         if self.step == Step::Edit {

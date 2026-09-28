@@ -681,6 +681,16 @@ impl CadCommand for OffsetCommand {
         matches!(self.step, Step::SelectObject { .. })
     }
 
+    /// A coordinate typed at "Select object to offset" picks the object under
+    /// it, as a click there would (`OFFSET 2 50,5 60,0` on a one-line script).
+    fn entity_pick_accepts_points(&self) -> bool {
+        matches!(self.step, Step::SelectObject { .. })
+    }
+
+    fn typed_point_picks_entity(&self) -> bool {
+        true
+    }
+
     fn inject_before_entity_pick(&self) -> bool {
         true
     }

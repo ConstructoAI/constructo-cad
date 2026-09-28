@@ -2463,11 +2463,17 @@ impl Scene {
         }
     }
 
+    /// Add a hatch built by a command. `entity_style` is its colour and
+    /// transparency (an inherited hatch's, or the current ones), `line_weight`
+    /// its lineweight: a new hatch takes the current properties like any other
+    /// new object — it used to be left ByLayer whatever was current, so a grey
+    /// poché came out in the layer's colour.
     pub fn add_hatch(
         &mut self,
         model: HatchModel,
         layer: Option<&str>,
         entity_style: Option<(acadrust::types::Color, acadrust::types::Transparency)>,
+        line_weight: Option<acadrust::types::LineWeight>,
     ) -> Handle {
         let mut dxf = DxfHatch::new();
         dxf.style = model.style;
@@ -2681,6 +2687,9 @@ impl Scene {
             entity.common_mut().transparency = transparency;
         } else {
             entity.common_mut().transparency = self.document.current_entity_transparency();
+        }
+        if let Some(line_weight) = line_weight {
+            entity.common_mut().line_weight = line_weight;
         }
 
         self.add_entity(entity)

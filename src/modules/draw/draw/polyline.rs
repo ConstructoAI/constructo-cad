@@ -911,10 +911,18 @@ impl CadCommand for PlineCommand {
         // bulge just computed above already describes the closing segment
         // (#421). Line mode needs two real segments first so a doubled-back
         // line isn't "closed"; an arc segment closes from two vertices.
+        //
+        // The test is made in the drawing plane, like every other test of
+        // this command. It used to compare WORLD X and Y: in a UCS standing
+        // on edge (UCS 3P through a wall, a glass panel, a stair stringer),
+        // two distinct points share their world X and Y whenever they sit on
+        // the same vertical, so the polyline closed there and dropped every
+        // point after — a rectangle drawn in a vertical plane came out as a
+        // triangle, without a word.
         if let Some(first) = self.vertices.first() {
             let enough = self.vertices.len() >= 3
                 || (self.vertices.len() == 2 && matches!(self.mode, SegMode::Arc));
-            let d2 = (pt.x - first.x).powi(2) + (pt.y - first.y).powi(2);
+            let d2 = (p - self.local2(*first)).length_squared();
             if enough && d2 < 1e-12 {
                 self.widths[last_idx] = self.cur_width;
                 return self.sync_live(true, true);

@@ -211,6 +211,7 @@ impl super::OpenCADStudio {
             state.screen_anchor = p;
         }
         self.text_inline = Some(state);
+        self.text_editor_openings = self.text_editor_openings.wrapping_add(1);
     }
 
     /// Commit the editor: create a new TEXT entity or update the edited slot.

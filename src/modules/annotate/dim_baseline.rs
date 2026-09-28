@@ -456,6 +456,14 @@ impl CadCommand for DimBaselineCommand {
         }
     }
 
+    /// A one-line DIMBASELINE is complete once its points are placed. Its
+    /// first Enter only returns to "Select base dimension", which left a
+    /// scripted line open — and, headless, every request after it refused
+    /// with `command_busy`. The dimensions already placed stay.
+    fn on_line_end(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
     fn wants_text_input(&self) -> bool {
         self.base.is_some()
     }
