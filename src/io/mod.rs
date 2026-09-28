@@ -1831,7 +1831,7 @@ where
     }
     if perf {
         crate::perf_record!(
-            "[perf] save total={:.1}ms clone={:.1} styles={:.1} dimensions={:.1} interchange={:.1} (acis {} conformed, {} refused, {} histories) write={:.1} entities={} objects={} path={}",
+            "[perf] save total={:.1}ms clone={:.1} styles={:.1} dimensions={:.1} interchange={:.1} (acis {} conformed, {} refused, {} histories, {} wire caches) write={:.1} entities={} objects={} path={}",
             total_started.elapsed().as_secs_f64() * 1000.0,
             clone_ms,
             styles_ms,
@@ -1840,6 +1840,7 @@ where
             interchange.acis_conformed,
             interchange.acis_refused,
             interchange.histories_removed,
+            interchange.wire_caches_removed,
             write_started.elapsed().as_secs_f64() * 1000.0,
             doc.entities().count(),
             doc.objects.len(),

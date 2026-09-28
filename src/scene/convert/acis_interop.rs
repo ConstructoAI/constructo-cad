@@ -655,8 +655,10 @@ pub struct InterchangeReport {
     /// Kernel payloads left as they were because the rewrite was not proven
     /// safe. They stay unreadable to ODA; the drawing still saves.
     pub acis_refused: usize,
-    /// Self-owned solid histories removed.
+    /// Self-owned solid histories removed (DXF).
     pub histories_removed: usize,
+    /// Wireframe caches (wires, silhouettes) left out of the file (DWG).
+    pub wire_caches_removed: usize,
 }
 
 fn acis_of(entity: &EntityType) -> Option<&AcisData> {
@@ -700,6 +702,38 @@ fn clear_history(entity: &mut EntityType) {
     }
 }
 
+fn has_wire_cache(entity: &EntityType) -> bool {
+    match entity {
+        EntityType::Solid3D(value) => !value.wires.is_empty() || !value.silhouettes.is_empty(),
+        EntityType::Region(value) => !value.wires.is_empty() || !value.silhouettes.is_empty(),
+        EntityType::Body(value) => !value.wires.is_empty() || !value.silhouettes.is_empty(),
+        EntityType::Surface(value) => !value.wires.is_empty() || !value.silhouettes.is_empty(),
+        _ => false,
+    }
+}
+
+fn clear_wire_cache(entity: &mut EntityType) {
+    match entity {
+        EntityType::Solid3D(value) => {
+            value.wires.clear();
+            value.silhouettes.clear();
+        }
+        EntityType::Region(value) => {
+            value.wires.clear();
+            value.silhouettes.clear();
+        }
+        EntityType::Body(value) => {
+            value.wires.clear();
+            value.silhouettes.clear();
+        }
+        EntityType::Surface(value) => {
+            value.wires.clear();
+            value.silhouettes.clear();
+        }
+        _ => {}
+    }
+}
+
 /// Prepares a document SNAPSHOT for writing. Call it on the copy the writer
 /// receives, never on the live document.
 ///
@@ -720,6 +754,21 @@ fn clear_history(entity: &mut EntityType) {
 ///    the engine's own history features — grip edits, rebuilds — need them
 ///    after a reload, so the DWG keeps them. A history recorded by AutoCAD
 ///    (whose root owns something else) is always kept.
+/// 3. DWG only: the wireframe cache of every ACIS entity the kernel wrote (its
+///    `wires` and `silhouettes`, the edges the engine caches for display) is
+///    left out of the file, which then carries the geometry alone — a form
+///    AutoCAD writes too, and every reader rebuilds its display from the
+///    ACIS. The cache is what ODA misreads. Measured 2026-09-28 on the build
+///    that drops the histories from DWG too (run 36495995252): a CONE at the
+///    origin (five sizes), a 1 x 1 CYLINDER at the origin and the 3DROTATEd
+///    cylinders of CAD-000018 still stop ODA with `Object improperly read:
+///    AcDb3dSolid ... Out of memory` — history or not — while 24 other shapes
+///    pass. The same cone, reopened from its DXF (no cache) and saved to DWG
+///    by the same engine, reads cleanly, with a byte-identical SAB. acadrust
+///    writes the R2013+ cache inside the data-store layout its own reader
+///    calls unverified against AutoCAD ("never really exercised",
+///    `object_reader/entities.rs`), and reads it back the same way, so the
+///    engine never noticed. The live document keeps its cache.
 ///
 /// Only the entities concerned are copied out of their shared `Arc`s; the
 /// header checks that select them read a few bytes each.
@@ -748,10 +797,43 @@ pub fn prepare_for_interchange(
         }
     }
 
-    if format == InterchangeFormat::Dxf {
-        report.histories_removed = drop_self_owned_histories(document);
+    match format {
+        InterchangeFormat::Dxf => report.histories_removed = drop_self_owned_histories(document),
+        InterchangeFormat::Dwg => report.wire_caches_removed = drop_wire_caches(document),
     }
     report
+}
+
+/// Was this payload written by the engine's kernel? A cheap header look, as
+/// in [`looks_like_unconformed_kernel_acis`], conformed or not.
+fn written_by_the_kernel(acis: &AcisData) -> bool {
+    let header = if acis.is_binary {
+        sab_header(&acis.sab_data)
+    } else {
+        sat_text_header(&acis.sat_data)
+    };
+    header.is_some_and(|(_, _, product)| product == KERNEL_PRODUCT)
+}
+
+/// Empties the wireframe cache of every ACIS entity the kernel wrote that has
+/// one. Returns how many entities lost theirs. The engine rebuilds those edges
+/// from the ACIS on reload, as it does for any DXF. A foreign solid keeps its
+/// cache: the kernel may not lift its ACIS, and the cache is then all the
+/// engine can display of it.
+fn drop_wire_caches(document: &mut CadDocument) -> usize {
+    let cached: Vec<Handle> = document
+        .entities()
+        .filter(|entity| {
+            has_wire_cache(entity) && acis_of(entity).is_some_and(written_by_the_kernel)
+        })
+        .map(|entity| entity.common().handle)
+        .collect();
+    for handle in &cached {
+        if let Some(entity) = document.get_entity_mut(*handle) {
+            clear_wire_cache(entity);
+        }
+    }
+    cached.len()
 }
 
 /// Removes every solid history whose root owns the solid it hangs from, with
@@ -1141,6 +1223,7 @@ mod tests {
         let report = prepare_for_interchange(&mut document, InterchangeFormat::Dwg);
         assert_eq!(report.acis_conformed, 1);
         assert_eq!(report.histories_removed, 0);
+        assert_eq!(report.wire_caches_removed, 0);
         assert!(document.objects.contains_key(&graph.root));
         let Some(EntityType::Solid3D(solid)) = document.get_entity(handle) else {
             panic!("solid gone");
@@ -1196,5 +1279,109 @@ mod tests {
         let expected = volume(&make::cuboid([0.0; 3], [10.0, 20.0, 30.0]).unwrap());
         assert!((volume(&body) - expected).abs() < 1e-6 * expected);
         let _ = handle;
+    }
+
+    /// A solid as the engine holds it when a save starts: conformed ACIS, plus
+    /// the edge cache `sync_solid_models_for_save` fills, plus one silhouette.
+    fn document_with_cached_solid(body: &Body) -> (CadDocument, Handle) {
+        let mut document = CadDocument::new();
+        let mut solid = acadrust::entities::Solid3D::new();
+        solid.set_sat_document(
+            &crate::scene::convert::acis_export::solid_to_sat(body).expect("ACIS"),
+        );
+        solid.wires = crate::scene::model::solid_model::edge_wires(body);
+        let mut silhouette = acadrust::entities::Silhouette::new(1);
+        silhouette.has_wires = true;
+        silhouette.wires = solid.wires.clone();
+        solid.silhouettes.push(silhouette);
+        let handle = document
+            .add_entity(EntityType::Solid3D(solid))
+            .expect("add solid");
+        (document, handle)
+    }
+
+    fn wire_cache(document: &CadDocument, handle: Handle) -> (usize, usize) {
+        match document.get_entity(handle) {
+            Some(EntityType::Solid3D(solid)) => (solid.wires.len(), solid.silhouettes.len()),
+            _ => panic!("solid gone"),
+        }
+    }
+
+    #[test]
+    fn a_dwg_save_leaves_the_wireframe_cache_out_of_the_snapshot_only() {
+        // The cone at the origin is the smallest case ODA refused.
+        let cone = make::cone([0.0; 3], 5.0, 30.0).unwrap();
+        let (live, handle) = document_with_cached_solid(&cone);
+        let cached = wire_cache(&live, handle);
+        assert!(cached.0 > 0 && cached.1 == 1, "{cached:?}");
+
+        // What the save path does: the writer receives a clone.
+        let mut snapshot = live.clone();
+        let report = prepare_for_interchange(&mut snapshot, InterchangeFormat::Dwg);
+        assert_eq!(report.wire_caches_removed, 1);
+        assert_eq!(wire_cache(&snapshot, handle), (0, 0));
+        // The live document keeps the edges it displays.
+        assert_eq!(wire_cache(&live, handle), cached);
+        // A second save finds nothing left to do.
+        assert_eq!(
+            prepare_for_interchange(&mut snapshot, InterchangeFormat::Dwg),
+            InterchangeReport::default()
+        );
+    }
+
+    #[test]
+    fn a_foreign_solid_keeps_its_cache_in_dwg() {
+        let cuboid = make::cuboid([0.0; 3], [1.0; 3]).unwrap();
+        let (mut document, handle) = document_with_cached_solid(&cuboid);
+        let mut foreign = legacy_document(&cuboid);
+        foreign.header.product_id = "ezdxf v1.4.4 ACIS Builder".to_string();
+        if let Some(EntityType::Solid3D(solid)) = document.get_entity_mut(handle) {
+            solid.acis_data = AcisData::from_sat(&foreign.to_sat_string());
+        }
+        let cached = wire_cache(&document, handle);
+        let report = prepare_for_interchange(&mut document, InterchangeFormat::Dwg);
+        assert_eq!(report.wire_caches_removed, 0);
+        assert_eq!(wire_cache(&document, handle), cached);
+    }
+
+    #[test]
+    fn a_dxf_save_leaves_the_cache_alone_since_dxf_carries_none() {
+        let (mut document, handle) =
+            document_with_cached_solid(&make::cuboid([0.0; 3], [1.0; 3]).unwrap());
+        let cached = wire_cache(&document, handle);
+        let report = prepare_for_interchange(&mut document, InterchangeFormat::Dxf);
+        assert_eq!(report.wire_caches_removed, 0);
+        assert_eq!(wire_cache(&document, handle), cached);
+    }
+
+    #[test]
+    fn every_primitive_saved_to_dwg_reopens_without_cache_and_with_its_volume() {
+        for (name, body) in primitives() {
+            let (mut document, _) = document_with_cached_solid(&body);
+            prepare_for_interchange(&mut document, InterchangeFormat::Dwg);
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            acadrust::DwgWriter::write_to_writer(&mut bytes, &document).expect("write DWG");
+            let reopened =
+                acadrust::DwgReader::from_stream(std::io::Cursor::new(bytes.into_inner()))
+                    .read()
+                    .expect("read DWG");
+            let solid = reopened
+                .entities()
+                .find_map(|entity| match entity {
+                    EntityType::Solid3D(solid) => Some(solid),
+                    _ => None,
+                })
+                .expect("the solid survives");
+            assert!(
+                solid.wires.is_empty() && solid.silhouettes.is_empty(),
+                "{name}: the file still carries a cache"
+            );
+            let expected = volume(&body);
+            let reread = volume(&only_body(&solid.acis_data.parse().expect("ACIS")));
+            assert!(
+                (reread - expected).abs() <= 1e-6 * expected.abs(),
+                "{name}: {reread} vs {expected}"
+            );
+        }
     }
 }
