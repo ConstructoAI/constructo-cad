@@ -7,9 +7,19 @@ use acadrust::entities::acis::{SabReader, SabWriter, SatDocument};
 use cadkernel::brep::Body;
 
 /// Returns `None` when the body contains an unsupported record form.
+///
+/// The document is brought to the ACIS 7.0 layout other readers require
+/// ([`super::acis_interop::conform_kernel_sat`]) before it is validated, so
+/// what is checked — lifted back from its SAT text and from its SAB — is
+/// exactly what callers store and what the DWG and DXF writers emit.
 pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
     let mut document = SatDocument::new();
     append(body, &mut document).ok()?;
+    let mut document = SatDocument::parse(&document.to_sat_string()).ok()?;
+    super::acis_interop::conform_kernel_sat(&mut document);
+    // Callers keep the TEXT (`set_sat_document` / `AcisData::from_sat`) and
+    // re-parse it later: validate and return that parse, not the in-memory
+    // tokens the conformity pass appended to.
     let document = SatDocument::parse(&document.to_sat_string()).ok()?;
     let valid = |candidate: &SatDocument| {
         let (restored, loss) = cadkernel::acis::lift(candidate);

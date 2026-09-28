@@ -1788,6 +1788,19 @@ where
     let dimensions_started = iced::time::Instant::now();
     crate::modules::draw::modify::explode::bake_dimension_blocks(&mut doc);
     let dimensions_ms = dimensions_started.elapsed().as_secs_f64() * 1000.0;
+    // Solids other programs can read, on the snapshot only — see
+    // `acis_interop::prepare_for_interchange`. A drawing saved by an earlier
+    // engine is repaired here, on its next save.
+    let interchange_started = iced::time::Instant::now();
+    let interchange = {
+        use crate::scene::convert::acis_interop::{prepare_for_interchange, InterchangeFormat};
+        let extension = path
+            .extension()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        prepare_for_interchange(&mut doc, InterchangeFormat::from_extension(&extension))
+    };
+    let interchange_ms = interchange_started.elapsed().as_secs_f64() * 1000.0;
     let temp_path = save_temp_path(path);
     let ext = temp_path
         .extension()
@@ -1818,11 +1831,15 @@ where
     }
     if perf {
         crate::perf_record!(
-            "[perf] save total={:.1}ms clone={:.1} styles={:.1} dimensions={:.1} write={:.1} entities={} objects={} path={}",
+            "[perf] save total={:.1}ms clone={:.1} styles={:.1} dimensions={:.1} interchange={:.1} (acis {} conformed, {} refused, {} histories) write={:.1} entities={} objects={} path={}",
             total_started.elapsed().as_secs_f64() * 1000.0,
             clone_ms,
             styles_ms,
             dimensions_ms,
+            interchange_ms,
+            interchange.acis_conformed,
+            interchange.acis_refused,
+            interchange.histories_removed,
             write_started.elapsed().as_secs_f64() * 1000.0,
             doc.entities().count(),
             doc.objects.len(),
@@ -1912,6 +1929,12 @@ pub fn save_to_bytes(
     let dimensions_started = iced::time::Instant::now();
     crate::modules::draw::modify::explode::bake_dimension_blocks(&mut doc);
     let dimensions_ms = dimensions_started.elapsed().as_secs_f64() * 1000.0;
+    // The same interchange preparation as a native save: the browser's download
+    // must open in AutoCAD too.
+    crate::scene::convert::acis_interop::prepare_for_interchange(
+        &mut doc,
+        crate::scene::convert::acis_interop::InterchangeFormat::from_extension(ext),
+    );
     let write_started = iced::time::Instant::now();
     let result = match ext.to_lowercase().as_str() {
         "dxf" => DxfWriter::new(&doc).write_to_vec().map_err(|e| e.to_string()),
