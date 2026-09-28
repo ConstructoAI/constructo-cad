@@ -606,9 +606,9 @@ impl OpenCADStudio {
     ///   (`TEXT J MC 5,5 2.5 0 Centred note`, `MTEXT 0,0 40,-10 Note`);
     /// - a command that asks for free text (LEADER's annotation) gets the rest
     ///   of the line as one string ([`CadCommand::takes_rest_of_line`]);
-    /// - a value (point or number) typed at a "Select objects" prompt that
-    ///   already holds objects ends the selection, as the Enter a person types
-    ///   there would, and then answers the next prompt (`MOVE L 0,0 0,5`).
+    /// - a point typed at a "Select objects" prompt that already holds objects
+    ///   ends the selection, as the Enter a person types there would, and then
+    ///   answers the next prompt (`MOVE L 0,0 0,5`).
     pub(super) fn finish_active_command(&mut self, line: &str) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].active_cmd.is_none() {
@@ -665,9 +665,10 @@ impl OpenCADStudio {
         Task::batch(tasks)
     }
 
-    /// A value typed at a "Select objects" prompt that already holds objects:
-    /// a point or a number is not a way of selecting, so on a one-line
-    /// command it means the selection is over.
+    /// A point typed at a "Select objects" prompt that already holds objects:
+    /// a coordinate is not a way of selecting, so on a one-line command it
+    /// means the selection is over. Only a coordinate: a bare number can be an
+    /// object handle there (DRAWORDER takes `DRAWORDER UNDER 63`).
     fn value_ends_selection(&self, i: usize, token: &str) -> bool {
         let gathering = self.tabs[i]
             .active_cmd
@@ -677,7 +678,6 @@ impl OpenCADStudio {
             return false;
         }
         super::helpers::parse_coord(token).is_some()
-            || crate::entities::common::parse_length(token).is_some()
     }
 
     /// The rest of a one-line TEXT is the text: type it into the in-place
