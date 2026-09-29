@@ -571,6 +571,11 @@ impl OpenCADStudio {
         if tokens.len() <= 1 {
             return self.dispatch_command(cmd);
         }
+        // Layout and viewport lines read their arguments together (quoted
+        // names, options after the MVIEW corners): see `layout_cmd.rs`.
+        if self.command_line_is_whole(&tokens) {
+            return self.dispatch_command(cmd);
+        }
         // Plugin commands parse their own inline arguments from the whole line
         // (e.g. `HC_PIPE 2B 2C 1.25 0.013`), so offer the full command to plugin
         // dispatch first. A built-in interactive tool matches only its bare name

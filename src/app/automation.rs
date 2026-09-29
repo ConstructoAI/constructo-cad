@@ -366,6 +366,7 @@ impl OpenCADStudio {
                 })
             }
             "entities" => self.entity_summary(),
+            "layouts" => self.layouts_summary(),
             "query" => self.entity_query(&req),
             "records" => self.record_query(&req),
             "record_schema" => self.record_schema(&req),

@@ -23,6 +23,7 @@ pub mod linetypes;
 pub mod patterns;
 pub mod update_check;
 pub mod paper_catalog;
+pub(crate) mod paper_space;
 pub mod plot_device;
 pub mod windows_media;
 pub mod thumbnail;
@@ -34,9 +35,7 @@ pub(crate) mod web_recent;
 use crate::scene::DerivedCaches;
 use acadrust::entities::EntityType;
 use acadrust::io::dwg::DwgReader;
-use acadrust::{
-    CadDocument, DwgReadOptions, DwgWriter, DxfReader, DxfReaderConfiguration, DxfWriter,
-};
+use acadrust::{CadDocument, DwgReadOptions, DwgWriter, DxfReader, DxfReaderConfiguration};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
@@ -1782,6 +1781,14 @@ where
     let perf = crate::perf::enabled();
     let total_started = iced::time::Instant::now();
     doc.version = version;
+    // Paper-space blocks and entity modes the way DWG readers expect them, on
+    // this snapshot only (see `paper_space.rs`).
+    if !path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("dxf"))
+    {
+        paper_space::prepare_paper_space_for_dwg(&mut doc);
+    }
     let styles_started = iced::time::Instant::now();
     sync_current_styles_on_save(&mut doc);
     let styles_ms = styles_started.elapsed().as_secs_f64() * 1000.0;
@@ -1795,9 +1802,13 @@ where
         .unwrap_or_default();
     let write_started = iced::time::Instant::now();
     let result = match ext.as_str() {
-        "dxf" => DxfWriter::new(&doc)
-            .write_to_file(&temp_path)
-            .map_err(|e| SaveFailure::other(e.to_string())),
+        // The viewports get the state a DXF reader needs (see
+        // `paper_space::patch_dxf_viewports`).
+        "dxf" => paper_space::write_dxf(&doc)
+            .map_err(SaveFailure::other)
+            .and_then(|bytes| {
+                std::fs::write(&temp_path, bytes).map_err(|e| SaveFailure::other(e.to_string()))
+            }),
         _ => DwgWriter::write_to_file(&temp_path, &doc)
             .map_err(|e| SaveFailure::other(e.to_string())),
     };
@@ -1906,6 +1917,9 @@ pub fn save_to_bytes(
     let mut doc = doc.clone();
     let clone_ms = clone_started.elapsed().as_secs_f64() * 1000.0;
     doc.version = version;
+    if !ext.eq_ignore_ascii_case("dxf") {
+        paper_space::prepare_paper_space_for_dwg(&mut doc);
+    }
     let styles_started = iced::time::Instant::now();
     sync_current_styles_on_save(&mut doc);
     let styles_ms = styles_started.elapsed().as_secs_f64() * 1000.0;
@@ -1914,7 +1928,7 @@ pub fn save_to_bytes(
     let dimensions_ms = dimensions_started.elapsed().as_secs_f64() * 1000.0;
     let write_started = iced::time::Instant::now();
     let result = match ext.to_lowercase().as_str() {
-        "dxf" => DxfWriter::new(&doc).write_to_vec().map_err(|e| e.to_string()),
+        "dxf" => paper_space::write_dxf(&doc),
         _ => {
             let mut buf = std::io::Cursor::new(Vec::new());
             DwgWriter::write_to_writer(&mut buf, &doc).map_err(|e| e.to_string())?;
