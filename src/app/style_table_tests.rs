@@ -260,7 +260,7 @@ fn the_architectural_tick_is_set_by_name_and_drawn_heavy() {
     run_ok(&mut app, "DIMSTYLE SET ARCH-8 dimblk _ARCHTICK");
     let style = dim_style(&app, "ARCH-8");
     let doc = &app.tabs[app.active_tab].scene.document;
-    let block = doc.block_records.get("_ArchTick").expect("_ArchTick made");
+    let block = doc.block_records.get("_ArchTick").expect("_ArchTick made").clone();
     assert_eq!(style.dimblk, block.handle);
     assert_eq!((style.dimblk1, style.dimblk2), (block.handle, block.handle));
     assert!(!style.dimsah);
