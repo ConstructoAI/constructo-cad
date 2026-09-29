@@ -721,17 +721,51 @@ impl OpenCADStudio {
     }
 
     /// Count of entities in the active document, total and by type.
+    /// `total` and `by_type` count every entity the document holds, block
+    /// definitions included — after a reopen, the pictures (`*D` blocks) of
+    /// the dimensions too. `in_spaces` counts only what the model and the
+    /// sheets hold, as a reader lists it (T3, m3: 16 → 42 for 2 lines added);
+    /// `in_blocks` the rest, block markers aside.
     fn entity_summary(&self) -> Value {
         let i = self.active_tab;
+        let document = &self.tabs[i].scene.document;
+        let spaces: std::collections::HashSet<acadrust::Handle> = document
+            .objects
+            .values()
+            .filter_map(|object| match object {
+                acadrust::objects::ObjectType::Layout(layout)
+                    if !layout.block_record.is_null() =>
+                {
+                    Some(layout.block_record)
+                }
+                _ => None,
+            })
+            .collect();
         let mut by_type: std::collections::BTreeMap<String, u64> = Default::default();
         let mut total = 0u64;
-        for e in self.tabs[i].scene.document.entities() {
+        let mut in_spaces = 0u64;
+        let mut in_blocks = 0u64;
+        for e in document.entities() {
             *by_type
                 .entry(crate::entities::names::ui_name(e).to_string())
                 .or_default() += 1;
             total += 1;
+            if matches!(e, acadrust::EntityType::Block(_) | acadrust::EntityType::BlockEnd(_)) {
+                continue;
+            }
+            if spaces.contains(&e.common().owner_handle) {
+                in_spaces += 1;
+            } else {
+                in_blocks += 1;
+            }
         }
-        json!({ "ok": true, "total": total, "by_type": by_type })
+        json!({
+            "ok": true,
+            "total": total,
+            "by_type": by_type,
+            "in_spaces": in_spaces,
+            "in_blocks": in_blocks,
+        })
     }
 }
 

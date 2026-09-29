@@ -81,6 +81,17 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 
+# FORK CONSTRUCTO — acadrust (the cadcodec crate, also cadkernel's) comes from
+# a branch of THIS repository. Here `deps/cadcodec-7ea4247-transparence`:
+# cadcodec 7ea4247134af60c8c1617426849d4fa8233660c8 as is, then one fix (an
+# explicit transparency is written in a DWG with method 2, as AutoCAD and ODA
+# do). The integration branch uses `deps/cadcodec-7ea4247-constructo`, which
+# carries the same fix on top of its own (8833fa31): when merging, keep that
+# one. A git source, not a path: the plugin gate fingerprints acadrust by the
+# commit hash of its Cargo.lock source.
+[patch."https://github.com/HakanSeven12/cadcodec.git"]
+acadrust = { git = "https://github.com/ConstructoAI/constructo-cad.git", rev = "1ed3cdca3070dc0d011d7e75eac6ed218466b99f" }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "0.3"
 ocs_plugin_api = { path = "crates/ocs_plugin_api", features = ["host"] }

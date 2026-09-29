@@ -2213,9 +2213,43 @@ pub(crate) fn sync_dimension_text_styles(doc: &mut CadDocument) {
     }
 }
 
+/// Give a handle to every table entry that has none, on the copy handed to
+/// the writers. The writers identify a table entry by its handle: two entries
+/// with the NULL handle collapse into one in the DWG, the DXF writes handle 0
+/// (ezdxf then refuses the whole file), and a current style pointed at a NULL
+/// handle falls back to Standard ($DIMSTYLE, T3 M1). Commands allocate one at
+/// creation; this catches whatever still comes without (a file, a plugin).
+pub(crate) fn ensure_table_handles(doc: &mut CadDocument) {
+    use acadrust::TableEntry;
+    macro_rules! ensure {
+        ($table:ident) => {{
+            let missing: Vec<String> = doc
+                .$table
+                .iter()
+                .filter(|entry| entry.handle().is_null())
+                .map(|entry| entry.name().to_string())
+                .collect();
+            for name in missing {
+                let handle = doc.allocate_handle();
+                if let Some(entry) = doc.$table.get_mut(&name) {
+                    entry.set_handle(handle);
+                }
+            }
+        }};
+    }
+    ensure!(layers);
+    ensure!(line_types);
+    ensure!(text_styles);
+    ensure!(dim_styles);
+    ensure!(app_ids);
+    ensure!(views);
+    ensure!(ucss);
+}
+
 fn sync_current_styles_on_save(doc: &mut CadDocument) {
     use acadrust::objects::ObjectType;
 
+    ensure_table_handles(doc);
     sync_dimension_text_styles(doc);
 
     let th = doc

@@ -1204,9 +1204,13 @@ where
 }
 
 fn replace_table_entry<T: TableEntry>(table: &mut Table<T>, handle: acadrust::Handle, edited: T) {
+    // By handle AND name: a table keeps one entry per name, while a NULL
+    // handle (a style made by a command that gave it none) could be shared by
+    // several — the edit of the second new dimension style replaced the first.
+    let name = edited.name().to_string();
     let target = table
         .iter_mut()
-        .find(|entry| entry.handle() == handle)
+        .find(|entry| entry.handle() == handle && entry.name().eq_ignore_ascii_case(&name))
         .expect("validated table entry");
     *target = edited;
 }
