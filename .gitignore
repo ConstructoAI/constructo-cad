@@ -1,0 +1,33 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+/test_files/
+/samples/
+
+*.dxf
+*.dxb
+*.dwg
+*.dwl
+*.dwl2
+*.dmp
+/crash_report.txt
+
+
+# Documentation
+/docs/site/
+
