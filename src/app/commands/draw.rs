@@ -817,7 +817,7 @@ impl OpenCADStudio {
                 let new_cmd =
                     HatchCommand::new(outlines, boundary_sources, selected, inherited, plane)
                         .with_origin(self.tabs[i].scene.document.hatch_origin())
-                        .with_imperial_patterns(crate::io::linetypes::document_is_imperial(
+                        .with_imperial_patterns(crate::io::linetypes::document_uses_imperial_catalog(
                             &self.tabs[i].scene.document,
                         ));
                 self.command_line.push_info(&new_cmd.prompt());

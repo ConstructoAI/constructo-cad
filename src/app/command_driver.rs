@@ -6971,7 +6971,7 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
-                            let imperial_patterns = crate::io::linetypes::document_is_imperial(
+                            let imperial_patterns = crate::io::linetypes::document_uses_imperial_catalog(
                                 &self.tabs[i].scene.document,
                             );
                             if let Some(acadrust::EntityType::Hatch(hatch)) =

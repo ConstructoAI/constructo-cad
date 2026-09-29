@@ -31,6 +31,26 @@ fn hidden(app: &OpenCADStudio) -> Vec<f64> {
         .collect()
 }
 
+/// One request on the control channel, as `control::tests::request` does.
+fn control(app: &mut OpenCADStudio, mut req: Value) -> Value {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SERIAL: AtomicU64 = AtomicU64::new(0);
+    let state = app.control_state();
+    req["protocol"] = json!(1);
+    req["document_id"] = state["document_id"].clone();
+    req["revision"] = state["revision"].clone();
+    req["client_id"] = json!("test");
+    req["request_id"] = json!(format!("units-{}", SERIAL.fetch_add(1, Ordering::Relaxed)));
+    let (response, task) = app.control_request(req.clone());
+    app.drive_headless_task(task).unwrap();
+    if matches!(response["status"].as_str(), Some("accepted" | "running")) {
+        app.control_request(json!({"op":"operation","request_id":req["request_id"]}))
+            .0
+    } else {
+        response
+    }
+}
+
 fn close(a: &[f64], b: &[f64]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9)
 }
@@ -74,8 +94,11 @@ fn a_new_drawing_in_inches_gets_the_imperial_linetypes() {
 }
 
 /// CAD-000019 was made before the fix: a drawing in inches whose standard
-/// linetypes are metric, compensated by LTSCALE 0.472441. Reopened and sent
-/// INSUNITS 1 again, as the ERP does on every call, it keeps both.
+/// linetypes are metric, compensated by LTSCALE 0.472441, and whose hatches
+/// are scaled by 1/25.4. Reopened and sent INSUNITS 1 again, as the ERP does
+/// on every call, it keeps both, and a new hatch still comes from the metric
+/// catalog: the compensation stays the one fix. `INSUNITS 4`, `INSUNITS 1`
+/// and `LTSCALE 12` move it to the imperial catalog with the same look.
 #[test]
 fn a_drawing_that_compensated_with_ltscale_is_left_alone() {
     let mut app = fresh_app();
@@ -97,6 +120,17 @@ fn a_drawing_that_compensated_with_ltscale_is_left_alone() {
     run_ok(&mut reopened, "INSUNITS 1");
     assert!(close(&hidden(&reopened), &[6.35, -3.175]), "{:?}", hidden(&reopened));
     assert!((ltscale(&reopened) - 0.472441).abs() < 1e-9);
+    run_ok(&mut reopened, "HATCH PANSI31 S 0,0 100,0 100,100 0,100");
+    let spacing = first_hatch_spacing(&reopened);
+    assert!((spacing - 3.175).abs() < 1e-5, "metric, as its script expects: {spacing}");
+
+    // The migration: the linetypes cross over, LTSCALE × 25.4 keeps the look.
+    run_ok(&mut reopened, "INSUNITS 4");
+    run_ok(&mut reopened, "INSUNITS 1");
+    run_ok(&mut reopened, "LTSCALE 12");
+    assert!(close(&hidden(&reopened), &[0.25, -0.125]), "{:?}", hidden(&reopened));
+    let dash = hidden(&reopened)[0] * ltscale(&reopened);
+    assert!((dash - 6.35 * 0.472441).abs() < 1e-4, "same dash on paper: {dash}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -151,7 +185,19 @@ fn truetype_styles_are_made_and_saved_without_a_screen() {
         assert_eq!(doc.header.current_text_style_name, "ARCH-GRAS");
         assert_eq!(doc.header.current_text_style_handle, bold.handle);
     }
-    run_ok(&mut app, "TEXT 0,0 1.25 0 MARCHE SUR LIMON");
+    // TEXT through the control channel, as the ERP drives it: no ST token,
+    // the current style applies.
+    for step in [
+        json!({"op":"start","cmd":"TEXT"}),
+        json!({"op":"input","kind":"point","point":[0.0,0.0,0.0],"space":"wcs"}),
+        json!({"op":"input","kind":"token","text":"1.25"}),
+        json!({"op":"input","kind":"token","text":"0"}),
+        json!({"op":"action","name":"text_input","value":"MARCHE SUR LIMON"}),
+        json!({"op":"action","name":"text_commit"}),
+    ] {
+        let response = control(&mut app, step.clone());
+        assert_ne!(response["ok"], false, "{step}: {response}");
+    }
     let style_of_text = |app: &OpenCADStudio| {
         app.tabs[app.active_tab]
             .scene

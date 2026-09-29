@@ -56,13 +56,15 @@ pub fn find_for(name: &str, imperial: bool) -> Option<&'static PatternEntry> {
         .find(|e| e.name.eq_ignore_ascii_case(name))
 }
 
-/// A pattern as a drawing in its own units uses it: imperial for a drawing in
-/// inches or feet (INSUNITS), metric otherwise.
+/// A pattern as the drawing uses it: imperial for a drawing in inches or feet
+/// (INSUNITS), metric otherwise — and metric for a drawing made in inches
+/// before the catalogs followed the units, whose script compensates (see
+/// `linetypes::document_uses_imperial_catalog`).
 pub fn find_in(
     document: &acadrust::CadDocument,
     name: &str,
 ) -> Option<&'static PatternEntry> {
-    find_for(name, crate::io::linetypes::document_is_imperial(document))
+    find_for(name, crate::io::linetypes::document_uses_imperial_catalog(document))
 }
 
 // ── DXF export ────────────────────────────────────────────────────────────
@@ -185,5 +187,19 @@ mod units_tests {
         doc.header.insertion_units = 1;
         let inches = find_in(&doc, "ansi31").unwrap();
         assert!((inches.pat_lines[0].dy - 0.125).abs() < 1e-7);
+        crate::io::linetypes::populate_document(&mut doc);
+        let inches = find_in(&doc, "ANSI31").unwrap();
+        assert!((inches.pat_lines[0].dy - 0.125).abs() < 1e-7, "acad.lin HIDDEN");
+    }
+
+    /// A drawing made in inches before the fix holds the metric HIDDEN: its
+    /// script scales its hatches by 1/25.4, so its new hatches stay metric.
+    #[test]
+    fn a_drawing_made_before_the_fix_keeps_the_metric_patterns() {
+        let mut doc = acadrust::CadDocument::new();
+        crate::io::linetypes::populate_document(&mut doc);
+        doc.header.insertion_units = 1;
+        let legacy = find_in(&doc, "ANSI31").unwrap();
+        assert!((legacy.pat_lines[0].dy - 3.175).abs() < 1e-5);
     }
 }

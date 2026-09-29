@@ -281,6 +281,31 @@ pub fn document_is_imperial(doc: &CadDocument) -> bool {
     imperial_units(doc.header.insertion_units)
 }
 
+/// Whether the new linetypes and hatches of `doc` come from the imperial
+/// catalog: a drawing in imperial units, unless it still holds the metric
+/// HIDDEN of the catalog. That one is a drawing made in inches before the
+/// catalogs followed the units (CAD-000019): the script that drew it already
+/// compensated its dashes and hatches (LTSCALE 12/25.4, hatch scale / 25.4),
+/// so it keeps the metric catalog and the compensation stays the one fix.
+/// A drawing from another program holds acad.lin's HIDDEN (1/4") and takes
+/// the imperial catalog like a new one.
+pub fn document_uses_imperial_catalog(doc: &CadDocument) -> bool {
+    document_is_imperial(doc) && !holds_metric_catalog(doc)
+}
+
+/// The drawing's HIDDEN is exactly the metric catalog's (6.35, -3.175).
+fn holds_metric_catalog(doc: &CadDocument) -> bool {
+    let Some(metric) = catalog_linetypes(false)
+        .iter()
+        .find(|lt| lt.name.eq_ignore_ascii_case("HIDDEN"))
+    else {
+        return false;
+    };
+    doc.line_types
+        .get("HIDDEN")
+        .is_some_and(|lt| same_pattern(lt, metric))
+}
+
 /// Definitions that acad.lin and acad.pat give in millimetres, as acadiso
 /// does: the ISO 128 line families are sized for a 1 mm pen and scaled by the
 /// pen width, and the JIS patterns carry their spacing in their names
@@ -384,9 +409,9 @@ pub fn follow_insertion_units(doc: &mut CadDocument, previous: i16) -> usize {
 // ── Public API ────────────────────────────────────────────────────────────
 
 /// Add all standard OpenCADStudio linetypes to `doc`, skipping existing ones,
-/// in the units system of the drawing (see [`imperial_units`]).
+/// from the catalog of the drawing (see [`document_uses_imperial_catalog`]).
 pub fn populate_document(doc: &mut CadDocument) {
-    let imperial = document_is_imperial(doc);
+    let imperial = document_uses_imperial_catalog(doc);
     for standard in catalog_linetypes(imperial) {
         if !doc.line_types.contains(&standard.name) {
             let mut lt = standard.clone();
@@ -769,8 +794,8 @@ mod header_tests {
 #[cfg(test)]
 mod units_tests {
     use super::{
-        catalog_linetypes, follow_insertion_units, imperial_units, metric_in_both_catalogs,
-        populate_document,
+        catalog_linetypes, document_uses_imperial_catalog, follow_insertion_units,
+        imperial_units, metric_in_both_catalogs, populate_document,
     };
     use acadrust::tables::linetype::{LineType, LineTypeElement};
     use acadrust::{CadDocument, TableEntry};
@@ -835,11 +860,36 @@ mod units_tests {
     fn a_drawing_in_inches_is_populated_in_inches() {
         let mut doc = CadDocument::new();
         doc.header.insertion_units = 1;
+        assert!(document_uses_imperial_catalog(&doc));
         populate_document(&mut doc);
         assert!(close(&lengths(&doc, "HIDDEN"), &[0.25, -0.125]));
+        assert!(document_uses_imperial_catalog(&doc));
         let mut doc = CadDocument::new();
         populate_document(&mut doc);
         assert!(close(&lengths(&doc, "HIDDEN"), &[6.35, -3.175]));
+        assert!(!document_uses_imperial_catalog(&doc));
+    }
+
+    /// CAD-000019: in inches, with the metric HIDDEN of the old engine. It
+    /// keeps the metric catalog — for the linetypes added when it is opened
+    /// too — since its script compensates; `INSUNITS 4` then `INSUNITS 1`
+    /// moves it to the imperial one.
+    #[test]
+    fn a_drawing_made_before_the_fix_keeps_its_catalog() {
+        let mut doc = CadDocument::new();
+        populate_document(&mut doc);
+        doc.header.insertion_units = 1;
+        assert!(!document_uses_imperial_catalog(&doc));
+        doc.line_types.remove("DASHED");
+        populate_document(&mut doc);
+        assert!(close(&lengths(&doc, "DASHED"), &[12.7, -6.35]), "added in its catalog");
+
+        doc.header.insertion_units = 4;
+        assert_eq!(follow_insertion_units(&mut doc, 1), 0, "already metric");
+        doc.header.insertion_units = 1;
+        assert!(follow_insertion_units(&mut doc, 4) > 30);
+        assert!(close(&lengths(&doc, "HIDDEN"), &[0.25, -0.125]));
+        assert!(document_uses_imperial_catalog(&doc));
     }
 
     /// The ERP's sequence: a unitless new drawing, then INSUNITS 1. The

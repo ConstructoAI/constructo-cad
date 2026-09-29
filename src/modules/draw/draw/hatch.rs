@@ -207,7 +207,8 @@ pub struct HatchCommand {
     )>,
     plane: WorkingPlane,
     /// Patterns come from the imperial catalog (acad.pat), for a drawing in
-    /// inches or feet; the metric one (acadiso.pat) otherwise.
+    /// inches or feet; the metric one (acadiso.pat) otherwise (see
+    /// `linetypes::document_uses_imperial_catalog`).
     imperial_patterns: bool,
 }
 
