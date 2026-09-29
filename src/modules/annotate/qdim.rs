@@ -184,8 +184,36 @@ impl QdimCommand {
                         .map(|point| point.sources.clone())
                         .unwrap_or_default(),
                 };
-                points.iter().filter(|point| point.point.distance(datum) > tolerance)
-                    .map(|point| self.linear_dimension(&datum_candidate, point, place, horizontal)).collect()
+                // Baseline dimensions stack, the shortest nearest the geometry,
+                // each one dimension-line spacing (DIMDLI x DIMSCALE) further
+                // out, as in AutoCAD; they used to share one dimension line,
+                // drawn over each other.
+                let along = |point: DVec3| if horizontal { point.x } else { point.y };
+                let across = |point: DVec3| if horizontal { point.y } else { point.x };
+                let mut others: Vec<&Candidate> = points
+                    .iter()
+                    .filter(|point| point.point.distance(datum) > tolerance)
+                    .collect();
+                others.sort_by(|first, second| {
+                    (along(first.point) - along(datum))
+                        .abs()
+                        .total_cmp(&(along(second.point) - along(datum)).abs())
+                });
+                others
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, point)| {
+                        let middle = (across(datum) + across(point.point)) * 0.5;
+                        let side = if across(place) >= middle { 1.0 } else { -1.0 };
+                        let offset = index as f64 * self.dim_spacing * side;
+                        let shifted = if horizontal {
+                            DVec3::new(place.x, place.y + offset, 0.0)
+                        } else {
+                            DVec3::new(place.x + offset, place.y, 0.0)
+                        };
+                        self.linear_dimension(&datum_candidate, point, shifted, horizontal)
+                    })
+                    .collect()
             }
             Mode::Ordinate => points.iter().map(|point| self.ordinate_dimension(point, place, horizontal)).collect(),
             Mode::Radius | Mode::Diameter => Vec::new(),

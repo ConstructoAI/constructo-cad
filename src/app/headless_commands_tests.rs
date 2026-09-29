@@ -268,6 +268,76 @@ fn qdim_selects_then_places_on_one_line() {
     assert_eq!(response["added"], 0, "no position: nothing placed, command closed");
 }
 
+// ── Stacked dimensions: DIMDLI x DIMSCALE ───────────────────────────────────
+
+/// The current dimension style set up for a 1/4" = 1'-0" plan: DIMSCALE 48 and
+/// a 3/8" spacing between stacked dimension lines, as the ERP's ARCH-48 style.
+fn arch48(app: &mut OpenCADStudio) {
+    let i = app.active_tab;
+    let name = app.tabs[i].scene.document.header.current_dimstyle_name.clone();
+    let style = app.tabs[i]
+        .scene
+        .document
+        .dim_styles
+        .get_mut(&name)
+        .expect("the current dimension style");
+    style.dimscale = 48.0;
+    style.dimdli = 0.375;
+}
+
+/// `(measurement, y of the dimension line)` of each linear dimension.
+fn linear_dimension_lines(app: &OpenCADStudio) -> Vec<(f64, f64)> {
+    entities(app)
+        .into_iter()
+        .filter_map(|entity| match entity {
+            EntityType::Dimension(acadrust::entities::Dimension::Linear(dimension)) => Some((
+                dimension.base.actual_measurement,
+                dimension.definition_point.y,
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn dimbaseline_stacks_its_lines_dimdli_times_dimscale_apart() {
+    // Production stacked them at the raw DIMDLI: 3/8" apart on a plan at
+    // 1/4" = 1'-0", drawn over each other. AutoCAD: DIMDLI x DIMSCALE = 18".
+    let mut app = app();
+    arch48(&mut app);
+    run_done(&mut app, "LINE 0,0 300,0");
+    run_done(&mut app, "DIMLINEAR 0,0 100,0 50,-24");
+    run_done(&mut app, "DIMBASELINE 200,0 300,0");
+    let mut lines: Vec<f64> = linear_dimension_lines(&app).iter().map(|(_, y)| *y).collect();
+    lines.sort_by(|a, b| b.total_cmp(a));
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(
+        close(lines[0], -24.0) && close(lines[1], -42.0) && close(lines[2], -60.0),
+        "18 apart: {lines:?}"
+    );
+}
+
+#[test]
+fn qdim_baseline_stacks_its_dimensions_shortest_first() {
+    // Production put every baseline dimension of QDIM on the same line.
+    let mut app = app();
+    arch48(&mut app);
+    for x in [0, 20, 50, 90] {
+        run_done(&mut app, &format!("LINE {x},0 {x},10"));
+    }
+    run_done(&mut app, "QDIM ALL B 45,-24");
+    let mut dimensions = linear_dimension_lines(&app);
+    dimensions.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert_eq!(dimensions.len(), 3, "{dimensions:?}");
+    let expected = [(20.0, -24.0), (50.0, -42.0), (90.0, -60.0)];
+    for ((measurement, line), (want_measurement, want_line)) in dimensions.iter().zip(expected) {
+        assert!(
+            close(*measurement, want_measurement) && close(*line, want_line),
+            "shortest nearest the geometry, 18 apart: {dimensions:?}"
+        );
+    }
+}
+
 // ── Modifying on L: a value ends the selection ──────────────────────────────
 
 #[test]
