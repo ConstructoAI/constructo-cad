@@ -86,6 +86,10 @@ pub fn conform_kernel_sat(document: &mut SatDocument) -> bool {
     if !is_kernel_document(document) {
         return false;
     }
+    // M-2: a document the passes cannot complete is left whole, never half done.
+    if unconformable_record(document).is_some() {
+        return false;
+    }
     // Directions first: the pass recognises a straight curve by its kernel
     // shape, which `complete_records` then extends.
     let mut changed = unit_line_directions(document);
@@ -441,6 +445,10 @@ fn complete_header(document: &mut SatDocument) -> bool {
 // Entity ACIS payloads
 // ---------------------------------------------------------------------------
 
+/// The reason a NURBS payload is refused (see [`unconformable_record`]).
+const NURBS_REFUSED: &str = "courbe ou surface NURBS (intcurve, spline, pcurve) : \
+                             la mise en conformite ne sait pas la completer";
+
 /// What happened to one entity's ACIS payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AcisConformity {
@@ -453,6 +461,46 @@ pub enum AcisConformity {
     /// Written by the kernel, but conforming it could not be proven safe —
     /// see the reason. The payload is left exactly as it was.
     Refused(&'static str),
+}
+
+/// The record types the conformity brings to the ACIS 7.0 layout: the
+/// topology, the transform, and the ANALYTIC curves and surfaces that
+/// `complete_records` completes. Measured 2026-09-28 on every 3D drawing of the
+/// ERP (CAD-000004 to CAD-000018) and on each primitive of the engine: nothing
+/// else occurs — except the NURBS of a SWEEP along an arc or a bent polyline
+/// (`intcurve-curve`, `spline-surface`, `pcurve`; CAD-000005, solid 2B6).
+const CONFORMABLE_RECORDS: &[&str] = &[
+    "body",
+    "lump",
+    "shell",
+    "face",
+    "loop",
+    "coedge",
+    "edge",
+    "vertex",
+    "point",
+    "transform",
+    "straight-curve",
+    "ellipse-curve",
+    "plane-surface",
+    "cone-surface",
+    "sphere-surface",
+    "torus-surface",
+];
+
+/// The first record type the conformity cannot complete, if any.
+///
+/// M-2 (T2, 2026-09-28): a NURBS solid came out « conformed » — its header and
+/// its other records had changed — while its `intcurve`, `spline` and `pcurve`
+/// records kept the kernel's incomplete layout: ODA refused the whole drawing
+/// (« Empty ACIS not allowed »), and the kernel's own geometry check could not
+/// see it. Such a payload is now left exactly as it was and counted REFUSED.
+fn unconformable_record(document: &SatDocument) -> Option<&str> {
+    document
+        .records
+        .iter()
+        .map(|record| record.entity_type.as_str())
+        .find(|kind| !CONFORMABLE_RECORDS.contains(kind))
 }
 
 /// The first line and product id of a SAT text payload, read without
@@ -591,6 +639,9 @@ pub fn conform_acis_data(acis: &mut AcisData) -> AcisConformity {
         if SabWriter::write(&document) != acis.sab_data[..consumed] {
             return AcisConformity::Refused("aller-retour SAB inexact");
         }
+        if unconformable_record(&document).is_some() {
+            return AcisConformity::Refused(NURBS_REFUSED);
+        }
         let before = lifted(&document);
         if !conform_kernel_sat(&mut document) {
             return AcisConformity::AlreadyConforming;
@@ -608,6 +659,9 @@ pub fn conform_acis_data(acis: &mut AcisData) -> AcisConformity {
         let Ok(mut document) = SatDocument::parse(&acis.sat_data) else {
             return AcisConformity::Refused("SAT illisible");
         };
+        if unconformable_record(&document).is_some() {
+            return AcisConformity::Refused(NURBS_REFUSED);
+        }
         let before = lifted(&document);
         if !conform_kernel_sat(&mut document) {
             return AcisConformity::AlreadyConforming;
@@ -776,24 +830,44 @@ pub fn prepare_for_interchange(
     document: &mut CadDocument,
     format: InterchangeFormat,
 ) -> InterchangeReport {
+    use crate::par::prelude::*;
     let mut report = InterchangeReport::default();
 
-    let unconformed: Vec<Handle> = document
+    // M-1 (T2, 2026-09-28): the 18 796 solids of CAD-000011 were conformed one
+    // after the other — 7,1 s on an idle machine, 17,8 s under load, on the
+    // first save of an old drawing. A payload is conformed from a copy and
+    // depends on nothing else: the work fans out across the cores (`crate::par`,
+    // sequential on the web), then the results are applied one by one, and only
+    // the entities actually rewritten leave their shared `Arc`s.
+    let unconformed: Vec<(Handle, &AcisData)> = document
         .entities()
-        .filter(|entity| acis_of(entity).is_some_and(looks_like_unconformed_kernel_acis))
-        .map(|entity| entity.common().handle)
+        .filter_map(|entity| {
+            let acis = acis_of(entity)?;
+            looks_like_unconformed_kernel_acis(acis).then(|| (entity.common().handle, acis))
+        })
         .collect();
-    for handle in unconformed {
-        let Some(acis) = document.get_entity_mut(handle).and_then(acis_of_mut) else {
-            continue;
-        };
-        match conform_acis_data(acis) {
-            AcisConformity::Conformed => report.acis_conformed += 1,
-            AcisConformity::Refused(reason) => {
+    let outcomes: Vec<(Handle, AcisConformity, Option<AcisData>)> = unconformed
+        .par_iter()
+        .map(|(handle, acis)| {
+            let mut copy = AcisData::clone(acis);
+            let outcome = conform_acis_data(&mut copy);
+            let rewritten = (outcome == AcisConformity::Conformed).then_some(copy);
+            (*handle, outcome, rewritten)
+        })
+        .collect();
+    for (handle, outcome, rewritten) in outcomes {
+        match (outcome, rewritten) {
+            (AcisConformity::Conformed, Some(acis)) => {
+                if let Some(slot) = document.get_entity_mut(handle).and_then(acis_of_mut) {
+                    *slot = acis;
+                    report.acis_conformed += 1;
+                }
+            }
+            (AcisConformity::Refused(reason), _) => {
                 report.acis_refused += 1;
                 log::warn!("acis: payload of {handle:?} left as is ({reason})");
             }
-            AcisConformity::Foreign | AcisConformity::AlreadyConforming => {}
+            _ => {}
         }
     }
 
@@ -813,6 +887,40 @@ fn written_by_the_kernel(acis: &AcisData) -> bool {
         sat_text_header(&acis.sat_data)
     };
     header.is_some_and(|(_, _, product)| product == KERNEL_PRODUCT)
+}
+
+/// The display data an ACIS entity read back WITHOUT its wireframe cache lacks:
+/// its edges and its world bounds, derived from its ACIS. `None` when the entity
+/// still has a cache (nothing to derive), carries no ACIS, or when the kernel
+/// cannot lift it.
+///
+/// D-11 (T4, 2026-09-28): the DWG no longer carries the cache (see
+/// [`prepare_for_interchange`], point 3), and a reopened solid kept empty
+/// `wires` and a degenerate `bounding_box()` — `query` then reported 0 edges
+/// and no box for 369 solids out of 369, even after `REGEN`. The kernel lifts
+/// the same ACIS the display is built from, so the edges are those the engine
+/// draws.
+pub fn derived_display(
+    entity: &EntityType,
+) -> Option<(Vec<acadrust::entities::Wire>, [f64; 3], [f64; 3])> {
+    use crate::scene::convert::solid3d_tess::kernel_acis_body;
+    let body = match entity {
+        EntityType::Solid3D(value) if value.wires.is_empty() => {
+            kernel_acis_body(&value.acis_data)
+        }
+        EntityType::Region(value) if value.wires.is_empty() => kernel_acis_body(&value.acis_data),
+        EntityType::Body(value) if value.wires.is_empty() => kernel_acis_body(&value.acis_data),
+        EntityType::Surface(value) if value.wires.is_empty() => {
+            kernel_acis_body(&value.acis_data)
+        }
+        _ => None,
+    }?;
+    let bounds = cadkernel::brep::body_bounds(&body)?;
+    Some((
+        crate::scene::model::solid_model::edge_wires(&body),
+        bounds.min,
+        bounds.max,
+    ))
 }
 
 /// Empties the wireframe cache of every ACIS entity the kernel wrote that has
@@ -1382,6 +1490,121 @@ mod tests {
                 (reread - expected).abs() <= 1e-6 * expected.abs(),
                 "{name}: {reread} vs {expected}"
             );
+        }
+    }
+
+    fn reopened_through_dwg(document: &CadDocument) -> CadDocument {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        acadrust::DwgWriter::write_to_writer(&mut bytes, document).expect("write DWG");
+        acadrust::DwgReader::from_stream(std::io::Cursor::new(bytes.into_inner()))
+            .read()
+            .expect("read DWG")
+    }
+
+    #[test]
+    fn a_solid_reopened_without_its_cache_derives_its_edges_and_box_from_its_acis() {
+        // D-11 (T4): 0 edges and no box for 369 solids out of 369 after a reopen.
+        for (name, body) in primitives() {
+            let (mut document, _) = document_with_cached_solid(&body);
+            prepare_for_interchange(&mut document, InterchangeFormat::Dwg);
+            let reopened = reopened_through_dwg(&document);
+            let entity = reopened
+                .entities()
+                .find(|entity| matches!(entity, EntityType::Solid3D(_)))
+                .expect("the solid survives");
+            let (wires, min, max) = derived_display(entity).expect(name);
+            let expected = cadkernel::brep::body_bounds(&body).unwrap();
+            let span = (0..3)
+                .map(|axis| expected.max[axis] - expected.min[axis])
+                .fold(1.0_f64, f64::max);
+            for axis in 0..3 {
+                assert!((min[axis] - expected.min[axis]).abs() <= 1e-6 * span, "{name}");
+                assert!((max[axis] - expected.max[axis]).abs() <= 1e-6 * span, "{name}");
+            }
+            assert_eq!(
+                wires.len(),
+                crate::scene::model::solid_model::edge_wires(&body).len(),
+                "{name}: the derived edges are the kernel's edges"
+            );
+        }
+    }
+
+    #[test]
+    fn a_solid_that_keeps_its_cache_derives_nothing() {
+        let (document, handle) =
+            document_with_cached_solid(&make::cuboid([0.0; 3], [1.0; 3]).unwrap());
+        assert!(derived_display(document.get_entity(handle).unwrap()).is_none());
+    }
+
+    fn with_a_nurbs_record(body: &Body) -> SatDocument {
+        let mut document = legacy_document(body);
+        let curve = document
+            .records
+            .iter_mut()
+            .find(|record| record.entity_type == "ellipse-curve")
+            .expect("a curve");
+        curve.entity_type = "intcurve-curve".to_string();
+        document
+    }
+
+    #[test]
+    fn a_nurbs_payload_is_refused_and_left_whole_text_and_binary() {
+        // M-2 (T2): it came out « conformed » while ODA refused the drawing.
+        let nurbs = with_a_nurbs_record(&make::cone([0.0; 3], 5.0, 30.0).unwrap());
+        assert_eq!(unconformable_record(&nurbs), Some("intcurve-curve"));
+
+        let mut untouched = nurbs.clone();
+        assert!(!conform_kernel_sat(&mut untouched));
+        assert_eq!(untouched.to_sat_string(), nurbs.to_sat_string());
+
+        let mut text = AcisData::from_sat(&nurbs.to_sat_string());
+        let payload = text.sat_data.clone();
+        assert_eq!(conform_acis_data(&mut text), AcisConformity::Refused(NURBS_REFUSED));
+        assert_eq!(text.sat_data, payload);
+
+        let mut binary = AcisData::from_sab(SabWriter::write(&nurbs));
+        let payload = binary.sab_data.clone();
+        assert_eq!(conform_acis_data(&mut binary), AcisConformity::Refused(NURBS_REFUSED));
+        assert_eq!(binary.sab_data, payload);
+    }
+
+    #[test]
+    fn a_nurbs_solid_is_counted_refused_at_save_never_conformed() {
+        let nurbs = with_a_nurbs_record(&make::cone([0.0; 3], 5.0, 30.0).unwrap());
+        let mut document = CadDocument::new();
+        let mut solid = acadrust::entities::Solid3D::new();
+        solid.acis_data = AcisData::from_sab(SabWriter::write(&nurbs));
+        document.add_entity(EntityType::Solid3D(solid)).expect("add solid");
+        let report = prepare_for_interchange(&mut document, InterchangeFormat::Dwg);
+        assert_eq!((report.acis_conformed, report.acis_refused), (0, 1));
+    }
+
+    #[test]
+    fn the_parallel_conformity_is_the_sequential_one() {
+        // M-1: many solids at once, each rewritten exactly as alone.
+        let mut document = CadDocument::new();
+        let mut expected = Vec::new();
+        for round in 0..8 {
+            for (_, body) in primitives() {
+                let legacy = legacy_document(&body);
+                let mut alone = AcisData::from_sab(SabWriter::write(&legacy));
+                assert_eq!(conform_acis_data(&mut alone), AcisConformity::Conformed);
+                let mut solid = acadrust::entities::Solid3D::new();
+                solid.acis_data = AcisData::from_sab(SabWriter::write(&legacy));
+                let handle = document
+                    .add_entity(EntityType::Solid3D(solid))
+                    .expect("add solid");
+                expected.push((handle, alone.sab_data));
+            }
+            let _ = round;
+        }
+        let report = prepare_for_interchange(&mut document, InterchangeFormat::Dxf);
+        assert_eq!(report.acis_conformed, expected.len());
+        for (handle, sab) in expected {
+            let Some(EntityType::Solid3D(solid)) = document.get_entity(handle) else {
+                panic!("solid gone");
+            };
+            assert_eq!(solid.acis_data.sab_data, sab);
         }
     }
 }
