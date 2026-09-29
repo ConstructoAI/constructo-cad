@@ -90,13 +90,14 @@ impl Transparency {
     pub const T_80: Self = Self::Explicit(204);
     pub const T_90: Self = Self::Explicit(230);
 
-    /// Encode the DWG packed form.
+    /// Encode the DWG packed form: the same as the DXF one. The high byte is
+    /// the method — 0 ByLayer, 1 ByBlock, 2 an explicit amount in the low
+    /// byte — in a DWG as in a DXF: AutoCAD and ODA write 0x02 for a value.
+    /// A 0x03 read back through ODA as DXF group 440 carries the ByBlock bit,
+    /// and ezdxf (with every reader that tests that bit) takes the entity for
+    /// opaque. 0x03 is still READ as an explicit amount (`from_alpha_value`).
     pub fn to_alpha_value(&self) -> i32 {
-        match self {
-            Self::ByLayer => 0,
-            Self::ByBlock => (1u32 << 24) as i32,
-            Self::Explicit(alpha) => ((3u32 << 24) | (255 - *alpha) as u32) as i32,
-        }
+        self.to_dxf_value()
     }
 
     /// Encode the DXF packed form.
@@ -176,6 +177,20 @@ mod tests {
                 value
             );
         }
+    }
+
+    /// An explicit amount is written with method 2, in a DWG as in a DXF;
+    /// method 3, written here before, still reads as the same amount.
+    #[test]
+    fn explicit_amounts_are_written_with_method_2() {
+        let glass = Transparency::from_alpha_value(0x0200_0059);
+        assert_eq!(glass, Transparency::Explicit(255 - 0x59));
+        assert_eq!(glass.to_alpha_value() as u32, 0x0200_0059);
+        assert_eq!(glass.to_dxf_value() as u32, 0x0200_0059);
+        assert_eq!(Transparency::from_alpha_value(0x0300_0059), glass);
+        assert_eq!(Transparency::BY_BLOCK.to_alpha_value() as u32, 0x0100_0000);
+        assert_eq!(Transparency::BY_LAYER.to_alpha_value(), 0);
+        assert_eq!(Transparency::OPAQUE.to_alpha_value() as u32, 0x0200_00FF);
     }
 
     #[cfg(feature = "serde")]
