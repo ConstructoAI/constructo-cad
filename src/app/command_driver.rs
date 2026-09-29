@@ -415,7 +415,7 @@ impl OpenCADStudio {
             }
         }
         let i = self.active_tab;
-        let default_start = matches!(&input, StepInput::Enter)
+        let default_start = matches!(&input, StepInput::Enter | StepInput::LineEnd)
             && self.tabs[i]
                 .active_cmd
                 .as_ref()
@@ -544,6 +544,7 @@ impl OpenCADStudio {
                 StepInput::Tangent(o, p) => Some(cmd.on_tangent_point(o, p)),
                 StepInput::EditorClosed(c) => Some(cmd.on_editor_closed(c)),
                 StepInput::Enter => Some(cmd.on_enter()),
+                StepInput::LineEnd => Some(cmd.on_line_end()),
                 StepInput::Escape => Some(cmd.on_escape()),
             }
         };
@@ -576,8 +577,7 @@ impl OpenCADStudio {
         // (`LINE`), so the full line is not a plugin command and falls through to
         // the first-word + fed-tokens path below. (#162)
         if crate::plugin::try_dispatch(self, i, cmd) {
-            let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
-            return self.finish_active_command(&toks);
+            return self.finish_active_command(cmd);
         }
         if tokens[0].eq_ignore_ascii_case("BACKGROUND")
             || tokens[0].eq_ignore_ascii_case("COLORSCHEME")
@@ -589,29 +589,119 @@ impl OpenCADStudio {
             // Not an interactive tool — an inline-argument command (`PDMODE 3`).
             return self.dispatch_command(cmd);
         }
-        let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
-        let finish_task = self.finish_active_command(&toks);
+        let finish_task = self.finish_active_command(cmd);
         Task::batch([start_task, finish_task])
     }
 
-    /// Feed `tokens[1..]` to the active interactive command as points / option
-    /// keywords, then terminate it as if Enter were pressed. No-op when no
-    /// command is active.
-    pub(super) fn finish_active_command(&mut self, tokens: &[String]) -> Task<Message> {
+    /// Feed the tokens after the command word of `line` to the active
+    /// interactive command as points / option keywords, then end the line
+    /// ([`StepInput::LineEnd`], a plain Enter unless the command finishes
+    /// differently at the end of a line). No-op when no command is active.
+    ///
+    /// A one-line command is complete, so three things read the rest of the
+    /// line rather than one token (they matter most without a screen, where
+    /// nothing else will ever answer the prompt the line left open):
+    /// - a TEXT or MTEXT editor the command opened on this line takes what is
+    ///   left of the line, spaces included, as its text and commits it
+    ///   (`TEXT J MC 5,5 2.5 0 Centred note`, `MTEXT 0,0 40,-10 Note`);
+    /// - a command that asks for free text (LEADER's annotation) gets the rest
+    ///   of the line as one string ([`CadCommand::takes_rest_of_line`]);
+    /// - a point typed at a "Select objects" prompt that already holds objects
+    ///   ends the selection, as the Enter a person types there would, and then
+    ///   answers the next prompt (`MOVE L 0,0 0,5`).
+    pub(super) fn finish_active_command(&mut self, line: &str) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].active_cmd.is_none() {
             return Task::none();
         }
         self.last_point = None;
+        let tokens = line_tokens(line);
+        let text_editors_before = self.text_editor_openings;
+        let mtext_editors_before = self.mtext_editor_openings;
         let mut tasks = Vec::new();
-        for tok in &tokens[1..] {
+        let mut next = 1;
+        while next < tokens.len() {
+            let (start, token) = tokens[next];
             if self.tabs[i].active_cmd.is_none() {
+                // The command handed the line over to a text editor it opened
+                // on this very line: what is left of the line is the text.
+                let rest = line[start..].trim_end();
+                if self.text_inline.is_some() && self.text_editor_openings != text_editors_before {
+                    tasks.push(self.commit_line_text(rest));
+                } else if self.mtext_editor.is_some()
+                    && self.mtext_editor_openings != mtext_editors_before
+                {
+                    tasks.push(self.commit_line_mtext(rest));
+                }
                 break;
             }
-            tasks.push(self.feed_active_cmd(tok));
+            let rest_is_text = self.tabs[i]
+                .active_cmd
+                .as_mut()
+                .is_some_and(|command| command.takes_rest_of_line(token));
+            if rest_is_text {
+                let rest = line[start..].trim_end().to_string();
+                tasks.push(self.feed_command(StepInput::Text(rest)));
+                break;
+            }
+            if self.value_ends_selection(i, token) {
+                tasks.push(self.feed_command(StepInput::Enter));
+                let still_gathering = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|command| command.is_selection_gathering());
+                if !still_gathering {
+                    // The gathered objects went to the command they were
+                    // collected for; the same token answers its first prompt.
+                    continue;
+                }
+            }
+            tasks.push(self.feed_active_cmd(token));
+            next += 1;
         }
-        tasks.push(self.feed_command(StepInput::Enter));
+        if self.tabs[i].active_cmd.is_some() {
+            tasks.push(self.feed_command(StepInput::LineEnd));
+        }
         Task::batch(tasks)
+    }
+
+    /// A point typed at a "Select objects" prompt that already holds objects:
+    /// a coordinate is not a way of selecting, so on a one-line command it
+    /// means the selection is over. Only a coordinate: a bare number can be an
+    /// object handle there (DRAWORDER takes `DRAWORDER UNDER 63`).
+    fn value_ends_selection(&self, i: usize, token: &str) -> bool {
+        let gathering = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.is_selection_gathering());
+        if !gathering || self.tabs[i].scene.selected.is_empty() {
+            return false;
+        }
+        super::helpers::parse_coord(token).is_some()
+    }
+
+    /// The rest of a one-line TEXT is the text: type it into the in-place
+    /// editor and commit it. TEXT then opens the next line's editor, as it
+    /// does after every committed line; an empty commit closes it and ends
+    /// the command, exactly as the empty Enter a person types there.
+    fn commit_line_text(&mut self, text: &str) -> Task<Message> {
+        let mut tasks = vec![
+            self.update(Message::TextInlineInput(text.to_string())),
+            self.update(Message::TextInlineOk),
+        ];
+        if self.text_inline.is_some() {
+            tasks.push(self.update(Message::TextInlineInput(String::new())));
+            tasks.push(self.update(Message::TextInlineOk));
+        }
+        Task::batch(tasks)
+    }
+
+    /// The rest of a one-line MTEXT is its content (`\P` breaks a paragraph):
+    /// type it into the editor the command opened and commit it.
+    fn commit_line_mtext(&mut self, text: &str) -> Task<Message> {
+        let insert = self.update(Message::MTextInsert(text.to_string()));
+        let commit = self.update(Message::MTextOk);
+        Task::batch([insert, commit])
     }
 
     /// Classify one typed token into a [`StepInput`] and route it through the
@@ -670,30 +760,22 @@ impl OpenCADStudio {
         }
 
         let add: Vec<Handle> = match kw.as_str() {
-            // Every selectable object of the current space.
-            "ALL" => self.tabs[i]
-                .scene
-                .entity_wires()
-                .iter()
-                .filter_map(|w| crate::scene::Scene::handle_from_wire_name(&w.name))
-                .collect(),
+            // Every selectable object of the current space — the set SELECTALL
+            // takes. Read from the drawing, not from the tessellated wires: a
+            // hatch has no wire and is still an object, and nothing has to be
+            // tessellated to answer (building every wire of a large 3D model
+            // made the first `MOVE L` cost minutes).
+            "ALL" => self.tabs[i].scene.selectable_handles(),
             "P" | "PREVIOUS" => self.tabs[i]
                 .prev_selection
                 .iter()
                 .copied()
                 .filter(|&h| self.tabs[i].scene.document.get_entity(h).is_some())
                 .collect(),
-            // Highest handle among the selectable wires of the current space —
+            // Highest handle among the selectable objects of the current space —
             // handles are handed out monotonically, so that is the most
             // recently created object.
-            "L" | "LAST" => self.tabs[i]
-                .scene
-                .entity_wires()
-                .iter()
-                .filter_map(|w| crate::scene::Scene::handle_from_wire_name(&w.name))
-                .max_by_key(|h| h.value())
-                .into_iter()
-                .collect(),
+            "L" | "LAST" => self.tabs[i].scene.last_selectable_handle().into_iter().collect(),
             _ => return None,
         };
         if add.is_empty() {
@@ -787,7 +869,23 @@ impl OpenCADStudio {
                     return Task::none();
                 }
             }
-            if let Ok(v) = u64::from_str_radix(token.trim_start_matches("0x"), 16) {
+            // The Last selection keyword answers an object prompt too
+            // (`OFFSET 2 L 60,0`): the most recently created object is picked.
+            // The command saw the token first, so an L option of its own wins.
+            let last = matches!(token.trim().to_ascii_uppercase().as_str(), "L" | "LAST");
+            let parsed = if last {
+                match self.tabs[i].scene.last_selectable_handle() {
+                    Some(handle) => Some(handle.value()),
+                    None => {
+                        self.command_line
+                            .push_info(crate::t!("No last object.").as_ref());
+                        return Task::none();
+                    }
+                }
+            } else {
+                u64::from_str_radix(token.trim_start_matches("0x"), 16).ok()
+            };
+            if let Some(v) = parsed {
                 let handle = Handle::new(v);
                 let pt = self.tabs[i]
                     .scene
@@ -2972,7 +3070,12 @@ impl OpenCADStudio {
                 let label = self.history_label_from_active_cmd(i, "HATCH");
                 let pending = self.begin_undo(i, label, 1, true);
                 let layer = self.tabs[i].active_layer.clone();
-                let new_handle = self.tabs[i].scene.add_hatch(hatch, Some(&layer), None);
+                let style = Some(self.current_hatch_style(i));
+                let line_weight = Some(self.ribbon.active_lineweight);
+                let new_handle =
+                    self.tabs[i]
+                        .scene
+                        .add_hatch_weighted(hatch, Some(&layer), style, line_weight);
                 if !new_handle.is_null() {
                     self.tabs[i].scene.select_entity(new_handle, true);
                 }
@@ -2994,10 +3097,13 @@ impl OpenCADStudio {
                 let label = self.history_label_from_active_cmd(i, "HATCH");
                 let pending = self.begin_undo(i, label, 1, true);
                 let layer = self.tabs[i].active_layer.clone();
-                let new_handle =
-                    self.tabs[i]
-                        .scene
-                        .add_hatch(hatch, Some(&layer), Some((color, transparency)));
+                let line_weight = Some(self.ribbon.active_lineweight);
+                let new_handle = self.tabs[i].scene.add_hatch_weighted(
+                    hatch,
+                    Some(&layer),
+                    Some((color, transparency)),
+                    line_weight,
+                );
                 if !new_handle.is_null() {
                     self.tabs[i].scene.select_entity(new_handle, true);
                 }
@@ -3035,9 +3141,11 @@ impl OpenCADStudio {
                 }
                 hatch.boundary_sources = Some(std::sync::Arc::new(sources));
                 let layer = self.tabs[i].active_layer.clone();
+                let style = entity_style.or_else(|| Some(self.current_hatch_style(i)));
+                let line_weight = Some(self.ribbon.active_lineweight);
                 let new_handle = self.tabs[i]
                     .scene
-                    .add_hatch(hatch, Some(&layer), entity_style);
+                    .add_hatch_weighted(hatch, Some(&layer), style, line_weight);
                 if !new_handle.is_null() {
                     self.tabs[i].scene.select_entity(new_handle, true);
                 }
@@ -3058,11 +3166,15 @@ impl OpenCADStudio {
                 let label = self.history_label_from_active_cmd(i, "HATCH");
                 let pending = self.begin_undo(i, label, hatches.len(), true);
                 let layer = self.tabs[i].active_layer.clone();
+                let style = entity_style.or_else(|| Some(self.current_hatch_style(i)));
+                let line_weight = Some(self.ribbon.active_lineweight);
                 for hatch in hatches {
-                    let new_handle =
-                        self.tabs[i]
-                            .scene
-                            .add_hatch(hatch, Some(&layer), entity_style.clone());
+                    let new_handle = self.tabs[i].scene.add_hatch_weighted(
+                        hatch,
+                        Some(&layer),
+                        style.clone(),
+                        line_weight,
+                    );
                     if !new_handle.is_null() {
                         self.tabs[i].scene.select_entity(new_handle, true);
                     }
@@ -7769,6 +7881,18 @@ impl OpenCADStudio {
         out
     }
 
+    /// The colour and transparency a new hatch takes: the current ones, as
+    /// every other new object (CECOLOR / CETRANSPARENCY).
+    fn current_hatch_style(
+        &self,
+        i: usize,
+    ) -> (acadrust::types::Color, acadrust::types::Transparency) {
+        (
+            self.ribbon.active_color,
+            self.tabs[i].scene.document.current_entity_transparency(),
+        )
+    }
+
     fn restore_pre_cmd_tangent(&mut self) {
         if let Some(was_on) = self.pre_cmd_tangent.take() {
             if !was_on {
@@ -7781,6 +7905,39 @@ impl OpenCADStudio {
             self.polar_mode = false;
         }
     }
+}
+
+/// Distance from a typed point to a planar curve that does not lie in a plan
+/// view — a sweep path or a profile drawn in a vertical UCS — measured in 3D
+/// through the curve's own plane. The plan-view test only knows curves whose
+/// plane faces Z, so such a curve could never be picked by a typed point.
+fn typed_pick_distance_3d(entity: &acadrust::EntityType, point: glam::DVec3) -> Option<f64> {
+    let planar = crate::entities::curve::entity_curve(entity)?;
+    let uv = planar.plane.project(point.to_array())?;
+    let nearest = cadkernel::geom2d::closest_point(&planar.curve, uv);
+    Some((glam::DVec3::from_array(planar.plane.point_at(nearest.point)) - point).length())
+}
+
+/// The whitespace-separated tokens of a command line — the same split as
+/// `str::split_whitespace` — each with the byte offset where it starts, so the
+/// verbatim remainder of the line (`&line[start..]`) can be recovered for the
+/// steps that take free text.
+fn line_tokens(line: &str) -> Vec<(usize, &str)> {
+    let mut tokens = Vec::new();
+    let mut start = None;
+    for (index, ch) in line.char_indices() {
+        if ch.is_whitespace() {
+            if let Some(begin) = start.take() {
+                tokens.push((begin, &line[begin..index]));
+            }
+        } else if start.is_none() {
+            start = Some(index);
+        }
+    }
+    if let Some(begin) = start {
+        tokens.push((begin, &line[begin..]));
+    }
+    tokens
 }
 
 /// Clone one captured xdictionary subtree into `doc` with fresh handles,
@@ -7809,6 +7966,7 @@ fn entity_at_typed_point(
             .max((bounds.max.y - bounds.min.y).abs());
         let Some(distance) =
             crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point)
+                .or_else(|| typed_pick_distance_3d(entity, point))
         else {
             continue;
         };

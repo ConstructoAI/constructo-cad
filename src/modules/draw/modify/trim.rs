@@ -2488,6 +2488,18 @@ impl CadCommand for TrimCommand {
         )
     }
 
+    /// A coordinate typed at an object prompt picks the object under it, at
+    /// that point, as a click there would: `TRIM 115,0` removes the segment
+    /// of the object lying at 115,0 (a one-line script has no other way to
+    /// say which piece goes).
+    fn entity_pick_accepts_points(&self) -> bool {
+        self.needs_entity_pick()
+    }
+
+    fn typed_point_picks_entity(&self) -> bool {
+        true
+    }
+
     fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
@@ -3181,6 +3193,16 @@ impl CadCommand for ExtendCommand {
 
     fn needs_entity_pick(&self) -> bool {
         matches!(self.mode, TrimMode::Pick | TrimMode::SelectEdges)
+    }
+
+    /// A coordinate typed at an object prompt picks the object under it, at
+    /// that point, as a click there would (`EXTEND 102,0`).
+    fn entity_pick_accepts_points(&self) -> bool {
+        self.needs_entity_pick()
+    }
+
+    fn typed_point_picks_entity(&self) -> bool {
+        true
     }
 
     fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {

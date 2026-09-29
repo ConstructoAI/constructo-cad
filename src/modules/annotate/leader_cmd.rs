@@ -83,6 +83,12 @@ impl LeaderCommand {
         }
     }
 
+    /// The typed annotation lines as MText content. `\P` is MText's paragraph
+    /// break; a raw newline is not one, and used to reach the drawing as is.
+    fn annotation_text(&self) -> String {
+        self.annotation_lines.join("\\P")
+    }
+
     fn finish(&self, annotation: Option<&str>, open_editor: bool) -> CmdResult {
         if self.verts.len() < 2 {
             return CmdResult::Cancel;
@@ -297,7 +303,7 @@ impl CadCommand for LeaderCommand {
                 self.step = Step::AnnotationOptions;
                 CmdResult::NeedPoint
             } else {
-                let text = self.annotation_lines.join("\n");
+                let text = self.annotation_text();
                 self.finish(Some(&text), false)
             }
         } else if self.step == Step::AnnotationOptions {
@@ -305,6 +311,43 @@ impl CadCommand for LeaderCommand {
         } else {
             self.step = Step::Annotation;
             CmdResult::NeedPoint
+        }
+    }
+
+    /// A one-line LEADER is complete: `LEADER 0,0 10,10 See detail 3` places
+    /// the leader with its note, `LEADER 0,0 10,10` places it without one.
+    /// Enter only moves to the next prompt here (annotation, then its
+    /// options), which left a scripted line waiting forever.
+    fn on_line_end(&mut self) -> CmdResult {
+        match self.step {
+            Step::Points | Step::Format | Step::AnnotationOptions => self.finish(None, false),
+            Step::Annotation if self.annotation_lines.is_empty() => self.finish(None, false),
+            Step::Annotation => {
+                let text = self.annotation_text();
+                self.finish(Some(&text), false)
+            }
+        }
+    }
+
+    /// On a one-line LEADER the note is the rest of the line, spaces included:
+    /// after the `A` keyword, or as soon as a word that is neither a point nor
+    /// an option follows the leader's points.
+    fn takes_rest_of_line(&mut self, token: &str) -> bool {
+        match self.step {
+            Step::Annotation => true,
+            Step::Points if self.verts.len() >= 2 => {
+                let keyword = token.trim().to_ascii_uppercase();
+                let option = matches!(
+                    keyword.as_str(),
+                    "A" | "ANNOTATION" | "F" | "FORMAT" | "U" | "UNDO"
+                );
+                if option || crate::app::helpers::parse_coord(token).is_some() {
+                    return false;
+                }
+                self.step = Step::Annotation;
+                true
+            }
+            _ => false,
         }
     }
 

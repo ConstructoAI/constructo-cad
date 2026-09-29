@@ -159,6 +159,17 @@ impl Scene {
     }
 
     pub fn select_all_visible(&mut self) -> usize {
+        let selected = self.selectable_handles().into_iter().collect();
+        self.replace_selection(selected);
+        self.selected.len()
+    }
+
+    /// Every selectable object of the space being edited, in drawing order:
+    /// what SELECTALL takes, and what the ALL / LAST selection keywords choose
+    /// from. Read from the drawing itself rather than from the tessellated
+    /// wires, so a fill (hatch), which draws no wire, is an object too, and
+    /// nothing has to be tessellated to answer.
+    pub fn selectable_handles(&self) -> Vec<Handle> {
         let block = self.interaction_block_handle();
         let frozen: Option<HashSet<Handle>> = self
             .interaction_viewport_frozen_layers()
@@ -172,7 +183,7 @@ impl Scene {
             .find(|record| record.handle == block)
             .map(|record| record.entity_handles.clone())
             .unwrap_or_default();
-        let selected = handles
+        handles
             .into_iter()
             .filter(|handle| self.passes_selection_filter(*handle))
             .filter(|handle| {
@@ -186,9 +197,16 @@ impl Scene {
                     )
                 })
             })
-            .collect();
-        self.replace_selection(selected);
-        self.selected.len()
+            .collect()
+    }
+
+    /// The most recently created selectable object of the space being edited
+    /// — the LAST selection keyword. Handles are handed out in increasing
+    /// order, so it is the highest one.
+    pub fn last_selectable_handle(&self) -> Option<Handle> {
+        self.selectable_handles()
+            .into_iter()
+            .max_by_key(|handle| handle.value())
     }
 
     #[cfg(any(test, not(target_arch = "wasm32")))]

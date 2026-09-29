@@ -99,9 +99,11 @@ struct BaselineState {
 pub struct DimBaselineCommand {
     base: Option<BaselineState>,
     injected: Option<EntityType>,
-    dimdli_by_style: HashMap<String, f64>,
+    /// Distance between stacked dimension lines, per style (lower-case name):
+    /// DIMDLI already multiplied by the style's DIMSCALE.
+    spacing_by_style: HashMap<String, f64>,
     current_style_name: String,
-    fallback_dimdli: f64,
+    fallback_spacing: f64,
     preserve_base_style: bool,
     committed: usize,
 }
@@ -109,17 +111,17 @@ pub struct DimBaselineCommand {
 impl DimBaselineCommand {
     pub fn new(
         recent: Option<EntityType>,
-        dimdli_by_style: HashMap<String, f64>,
+        spacing_by_style: HashMap<String, f64>,
         current_style_name: String,
-        fallback_dimdli: f64,
+        fallback_spacing: f64,
         preserve_base_style: bool,
     ) -> Self {
         let mut command = Self {
             base: None,
             injected: None,
-            dimdli_by_style,
+            spacing_by_style,
             current_style_name,
-            fallback_dimdli,
+            fallback_spacing,
             preserve_base_style,
             committed: 0,
         };
@@ -135,11 +137,11 @@ impl DimBaselineCommand {
         } else {
             &self.current_style_name
         };
-        self.dimdli_by_style
+        self.spacing_by_style
             .get(&style_name.to_ascii_lowercase())
             .copied()
             .filter(|value| value.is_finite() && value.abs() > 1.0e-9)
-            .unwrap_or(self.fallback_dimdli)
+            .unwrap_or(self.fallback_spacing)
             .abs()
     }
 
@@ -454,6 +456,14 @@ impl CadCommand for DimBaselineCommand {
         } else {
             CmdResult::Cancel
         }
+    }
+
+    /// A one-line DIMBASELINE is complete once its points are placed. Its
+    /// first Enter only returns to "Select base dimension", which left a
+    /// scripted line open — and, headless, every request after it refused
+    /// with `command_busy`. The dimensions already placed stay.
+    fn on_line_end(&mut self) -> CmdResult {
+        CmdResult::Cancel
     }
 
     fn wants_text_input(&self) -> bool {

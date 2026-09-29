@@ -17,6 +17,19 @@ fn selected_edge_body(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handl
     }
 }
 
+/// Distance between stacked dimension lines (DIMBASELINE, QDIM): DIMDLI
+/// times the overall scale DIMSCALE, like every size of a dimension. A style
+/// scaled to the layout or annotative (DIMSCALE 0) takes the current annotation
+/// scale instead — the rule DIMSPACE follows too.
+fn dimension_line_spacing(style: &acadrust::tables::DimStyle, annotation_multiplier: f64) -> f64 {
+    let scale = if style.dimscale.is_finite() && style.dimscale > 1.0e-9 {
+        style.dimscale
+    } else {
+        annotation_multiplier.max(1.0e-9)
+    };
+    style.dimdli.abs() * scale
+}
+
 fn solid_edge_sources(
     app: &mut OpenCADStudio,
     tab: usize,
@@ -702,13 +715,23 @@ impl OpenCADStudio {
                     .filter(|handle| scene.entity_belongs_to_active_space(*handle))
                     .and_then(|handle| scene.document.get_entity(handle))
                     .cloned();
-                let dimdli_by_style = scene
+                // Baseline dimensions stack DIMDLI apart, scaled by the style's
+                // DIMSCALE like every size of a dimension (AutoCAD). The raw
+                // DIMDLI put them 3/8" apart on a 1/4" = 1'-0" style instead of
+                // 18", one on top of the other.
+                let annotation_multiplier = scene.creation_annotation_multiplier();
+                let spacing_by_style = scene
                     .document
                     .dim_styles
                     .iter()
-                    .map(|style| (style.name.to_ascii_lowercase(), style.dimdli))
+                    .map(|style| {
+                        (
+                            style.name.to_ascii_lowercase(),
+                            dimension_line_spacing(style, annotation_multiplier),
+                        )
+                    })
                     .collect();
-                let fallback_dimdli = if scene.document.header.measurement == 1 {
+                let fallback_spacing = if scene.document.header.measurement == 1 {
                     3.75
                 } else {
                     0.38
@@ -716,9 +739,9 @@ impl OpenCADStudio {
                 let current_style_name = scene.document.header.current_dimstyle_name.clone();
                 let cmd = DimBaselineCommand::new(
                     recent,
-                    dimdli_by_style,
+                    spacing_by_style,
                     current_style_name,
-                    fallback_dimdli,
+                    fallback_spacing,
                     self.dimension_continue_mode == 1,
                 );
                 self.command_line.push_info(&cmd.prompt());
@@ -727,6 +750,7 @@ impl OpenCADStudio {
 
             "QDIM" => {
                 use crate::modules::annotate::qdim::QdimCommand;
+                let annotation_multiplier = self.tabs[i].scene.creation_annotation_multiplier();
                 let document = &self.tabs[i].scene.document;
                 let dim_spacing = document
                     .dim_styles
@@ -736,7 +760,8 @@ impl OpenCADStudio {
                             .name
                             .eq_ignore_ascii_case(&document.header.current_dimstyle_name)
                     })
-                    .map(|style| style.dimdli)
+                    .map(|style| dimension_line_spacing(style, annotation_multiplier))
+                    .filter(|spacing| *spacing > 1.0e-9)
                     .unwrap_or_else(|| {
                         if document.header.measurement == 1 {
                             3.75
