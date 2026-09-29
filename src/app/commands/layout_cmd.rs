@@ -1747,7 +1747,8 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .flat_map(|layout| layout["viewports"].as_array().unwrap().iter())
+            // Model has no viewports list.
+            .flat_map(|layout| layout["viewports"].as_array().into_iter().flatten())
             .collect();
         assert_eq!(listed.len(), 29, "{summary}");
         assert!(listed.iter().all(|v| v["on"] == true && v["locked"] == true), "{summary}");
