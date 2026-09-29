@@ -7,7 +7,8 @@ use crate::types::{BoundingBox3D, Color, Handle, LineWeight, Transparency, Vecto
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ViewportStatusFlags {
-    /// Viewport is on (visible)
+    /// Viewport is on (visible). In group 90 a viewport is OFF only when
+    /// bit 0x20000 is set (and, in a DXF, when its group-68 status is 0).
     pub is_on: bool,
     /// Perspective mode active
     pub perspective: bool,
@@ -51,8 +52,12 @@ impl ViewportStatusFlags {
     }
 
     /// Create from the DWG/DXF viewport status bit-coded flags (group 90).
-    /// The low bits run perspective(0x1) … iso_pair_right(0x2000); the two high
-    /// bits are viewport-locked(0x4000) and viewport-on/visible(0x8000).
+    /// The low bits run perspective(0x1) … iso_pair_right(0x2000), then
+    /// viewport-locked(0x4000). Per the DXF reference, 0x8000 is "currently
+    /// always enabled" and carries no meaning, and 0x20000 turns the viewport
+    /// OFF. AutoCAD always sets 0x8000; ezdxf, and ODA fed from one of its
+    /// DXFs, leave it clear — reading it as "on" hid every viewport of such
+    /// drawings, and ignoring 0x20000 showed viewports switched off.
     pub fn from_bits(bits: i32) -> Self {
         Self {
             perspective: (bits & (1 << 0)) != 0,
@@ -70,13 +75,14 @@ impl ViewportStatusFlags {
             iso_pair_top: (bits & (1 << 12)) != 0,
             iso_pair_right: (bits & (1 << 13)) != 0,
             locked: (bits & (1 << 14)) != 0,
-            is_on: (bits & (1 << 15)) != 0,
+            is_on: (bits & (1 << 17)) == 0,
         }
     }
 
-    /// Convert to the DWG/DXF viewport status bit-coded flags (group 90).
+    /// Convert to the DWG/DXF viewport status bit-coded flags (group 90):
+    /// 0x8000 always, as AutoCAD writes it, and 0x20000 for a viewport off.
     pub fn to_bits(&self) -> i32 {
-        let mut bits = 0;
+        let mut bits = 1 << 15;
         if self.perspective {
             bits |= 1 << 0;
         }
@@ -122,8 +128,8 @@ impl ViewportStatusFlags {
         if self.locked {
             bits |= 1 << 14;
         }
-        if self.is_on {
-            bits |= 1 << 15;
+        if !self.is_on {
+            bits |= 1 << 17;
         }
         bits
     }
@@ -768,19 +774,26 @@ mod tests {
 
     #[test]
     fn test_viewport_status_flags() {
-        // Spec layout (group 90): bit 15 = viewport on, bit 14 = locked,
-        // bit 0 = perspective. 0x8001 = on + perspective.
+        // DXF reference (group 90): bit 0 = perspective, bit 14 = locked,
+        // bit 15 = "currently always enabled", bit 17 = viewport OFF.
         let flags = ViewportStatusFlags::from_bits(0x8001);
         assert!(flags.is_on);
         assert!(flags.perspective);
         assert!(!flags.locked);
         assert_eq!(flags.to_bits(), 0x8001);
 
-        // Locked, off viewport: bit 14 only.
+        // Locked only, as ezdxf writes it: on, and written back with 0x8000.
         let locked = ViewportStatusFlags::from_bits(0x4000);
         assert!(locked.locked);
-        assert!(!locked.is_on);
-        assert_eq!(locked.to_bits(), 0x4000);
+        assert!(locked.is_on);
+        assert_eq!(locked.to_bits(), 0xC000);
+
+        // Switched off, with or without the always-set bit.
+        for bits in [0x2_0000, 0x2_8000, 0x2_C000] {
+            let off = ViewportStatusFlags::from_bits(bits);
+            assert!(!off.is_on, "{bits:#x}");
+            assert_eq!(off.to_bits(), bits | 0x8000, "{bits:#x}");
+        }
     }
 
     #[test]

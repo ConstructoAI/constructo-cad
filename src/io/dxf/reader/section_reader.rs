@@ -16186,6 +16186,10 @@ impl<'a> SectionReader<'a> {
         let mut ucs_origin = PointReader::new();
         let mut ucs_x_axis = PointReader::new();
         let mut ucs_y_axis = PointReader::new();
+        // Group 68, the viewport status: 0 = off, -1 = on but off screen,
+        // > 0 = on (stacking order). Applied after the loop: group 90 may come
+        // after it.
+        let mut status_field: Option<i16> = None;
 
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 {
@@ -16211,6 +16215,9 @@ impl<'a> SectionReader<'a> {
                     if let Some(v) = pair.as_double() {
                         vp.height = v;
                     }
+                }
+                68 => {
+                    status_field = pair.as_i16();
                 }
                 90 => {
                     if let Some(v) = pair.as_i32() {
@@ -16387,6 +16394,9 @@ impl<'a> SectionReader<'a> {
             grid_spacing_y.unwrap_or(10.0),
             0.0,
         );
+        if status_field == Some(0) {
+            vp.status.is_on = false;
+        }
 
         Ok(Some(vp))
     }
