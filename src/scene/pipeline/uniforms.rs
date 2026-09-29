@@ -1,5 +1,30 @@
 use crate::scene::view::camera::Camera;
 use iced::Rectangle;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Session-wide « print view »: lines, arcs, texts and 2-D fills drawn in black
+/// on a light background (white on a dark one), like a monochrome plot, while
+/// hatches (poché), meshes and images keep their colours. A DISPLAY setting of
+/// the running application only — it is never stored in a drawing, so it can
+/// not leak into a saved revision (unlike a plot style table, which is layout
+/// data). Driven by the `display_monochrome` control action.
+static DISPLAY_MONOCHROME: AtomicBool = AtomicBool::new(false);
+
+/// Whether the monochrome print view is on.
+pub fn display_monochrome() -> bool {
+    DISPLAY_MONOCHROME.load(Ordering::Relaxed)
+}
+
+/// Turn the monochrome print view on or off (every open drawing).
+pub fn set_display_monochrome(on: bool) {
+    DISPLAY_MONOCHROME.store(on, Ordering::Relaxed);
+}
+
+/// Ink grey level for a background: black on a light one, white on a dark one.
+pub fn ink_level_for_background(background: [f32; 4]) -> f32 {
+    let luminance = 0.299 * background[0] + 0.587 * background[1] + 0.114 * background[2];
+    if luminance > 0.5 { 0.0 } else { 1.0 }
+}
 
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
@@ -39,9 +64,15 @@ pub struct Uniforms {
     // jitter.
     pub view_rot: glam::Mat4,
     pub eye_high: [f32; 3],
-    pub _pad_eh: f32,
+    /// Display-only « ink » mode (the two former padding slots after the eye,
+    /// read by the wire, arc, text and 2-D fill shaders): 1.0 draws every such
+    /// primitive in `ink_level` instead of its colour, keeping its alpha;
+    /// hatches, meshes and images keep their colours. Never written to the
+    /// drawing: see [`set_display_monochrome`].
+    pub ink_mode: f32,
     pub eye_low: [f32; 3],
-    pub _pad_el: f32,
+    /// Grey level of the ink: 0.0 black (light background), 1.0 white.
+    pub ink_level: f32,
 
     // Up to four native AcDbLight/Sun sources. Positions are uploaded relative
     // to the current eye, preserving large-coordinate precision without
@@ -121,9 +152,9 @@ impl Uniforms {
             lineweight_scale: 1.0,
             view_rot: camera.view_proj_rte(bounds),
             eye_high,
-            _pad_eh: 0.0,
+            ink_mode: 0.0,
             eye_low,
-            _pad_el: 0.0,
+            ink_level: 0.0,
             light_position_type: [[0.0; 4]; 4],
             light_direction_intensity: [[0.0; 4]; 4],
             light_color_hotspot: [[0.0; 4]; 4],
@@ -151,6 +182,54 @@ impl Uniforms {
             light_web_profile_a: [[1.0; 4]; 4],
             light_web_profile_b: [[1.0; 4]; 4],
             light_web_rotation: [[0.0; 4]; 4],
+        }
+    }
+}
+
+#[cfg(test)]
+mod ink_tests {
+    use super::*;
+
+    #[test]
+    fn ink_contrasts_with_the_background() {
+        assert_eq!(ink_level_for_background([1.0, 1.0, 1.0, 1.0]), 0.0, "white paper: black ink");
+        assert_eq!(ink_level_for_background([0.98, 0.98, 0.98, 0.0]), 0.0);
+        assert_eq!(ink_level_for_background([0.0, 0.0, 0.0, 1.0]), 1.0, "black canvas: white ink");
+        assert_eq!(ink_level_for_background([33.0 / 255.0, 40.0 / 255.0, 48.0 / 255.0, 1.0]), 1.0);
+        let fresh = Uniforms::new(&Camera::default(), Rectangle::with_size(iced::Size::new(10.0, 10.0)), false);
+        assert_eq!((fresh.ink_mode, fresh.ink_level), (0.0, 0.0), "off unless the view turns it on");
+    }
+
+    // Lines, arcs, texts and 2-D fills take the ink; hatches (poché), meshes,
+    // images and wipeouts keep their colours. Each inked shader reads the two
+    // former padding slots of the shared uniform block under the new names.
+    #[test]
+    fn only_line_text_and_fill_shaders_take_the_ink() {
+        let inked = [
+            ("wire", include_str!("../../shaders/wire.wgsl")),
+            ("wire_indexed", include_str!("../../shaders/wire_indexed.wgsl")),
+            ("block_wire", include_str!("../../shaders/block_wire.wgsl")),
+            ("block_wire_storage", include_str!("../../shaders/block_wire_storage.wgsl")),
+            ("circle", include_str!("../../shaders/circle.wgsl")),
+            ("ellipse", include_str!("../../shaders/ellipse.wgsl")),
+            ("text", include_str!("../../shaders/text.wgsl")),
+            ("block_text", include_str!("../../shaders/block_text.wgsl")),
+            ("face3d", include_str!("../../shaders/face3d.wgsl")),
+            ("block_face3d", include_str!("../../shaders/block_face3d.wgsl")),
+        ];
+        for (name, source) in inked {
+            assert!(source.contains("ink_mode"), "{name}");
+            assert!(source.contains("ink_level"), "{name}");
+            assert!(source.contains("ink(in.color.rgb)"), "{name}: fs_main applies the ink");
+        }
+        let kept = [
+            ("hatch", include_str!("../../shaders/hatch.wgsl")),
+            ("mesh", include_str!("../../shaders/mesh.wgsl")),
+            ("image", include_str!("../../shaders/image.wgsl")),
+            ("wipeout", include_str!("../../shaders/wipeout.wgsl")),
+        ];
+        for (name, source) in kept {
+            assert!(!source.contains("ink("), "{name} keeps its colours");
         }
     }
 }

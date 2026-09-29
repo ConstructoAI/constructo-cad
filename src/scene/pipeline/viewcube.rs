@@ -447,12 +447,11 @@ impl ViewCubeText {
             bind_group_layouts: &[&bgl].map(Some),
             immediate_size: 0,
         });
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("vc.text_shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/viewcube_text.wgsl"
-            ))),
-        });
+        let shader = crate::scene::pipeline::shader_cache::shared_shader_module(
+            device,
+            "vc.text_shader",
+            include_str!("../../shaders/viewcube_text.wgsl"),
+        );
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("vc.text_pipe"),
             layout: Some(&layout),
@@ -1187,12 +1186,11 @@ impl ViewCubePipeline {
             bind_group_layouts: &[&bgl].map(Some),
             immediate_size: 0,
         });
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("vc.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/viewcube.wgsl"
-            ))),
-        });
+        let shader = crate::scene::pipeline::shader_cache::shared_shader_module(
+            device,
+            "vc.shader",
+            include_str!("../../shaders/viewcube.wgsl"),
+        );
         let init_size = Size::new(1, 1);
         let depth_tex = create_depth_texture(device, init_size);
         let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1278,12 +1276,11 @@ impl ViewCubePipeline {
             multiview_mask: None,
             cache: None,
         });
-        let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("vc.composite_shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/viewcube_composite.wgsl"
-            ))),
-        });
+        let composite_shader = crate::scene::pipeline::shader_cache::shared_shader_module(
+            device,
+            "vc.composite_shader",
+            include_str!("../../shaders/viewcube_composite.wgsl"),
+        );
         let composite_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("vc.composite_bgl"),

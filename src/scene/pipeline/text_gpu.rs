@@ -339,10 +339,11 @@ pub fn create_pipelines(
     wgpu::RenderPipeline,
     wgpu::RenderPipeline,
 ) {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("text.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(draw_order_shader!("text.wgsl").into()),
-    });
+    let shader = crate::scene::pipeline::shader_cache::shared_shader_module(
+        device,
+        "text.wgsl",
+        draw_order_shader!("text.wgsl"),
+    );
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("text.pipeline.layout"),
         bind_group_layouts: &[frame_bgl, atlas_bgl].map(Some),
@@ -388,10 +389,11 @@ pub fn create_pipelines(
             cache: None,
         })
     };
-    let block_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("block_text.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(draw_order_shader!("block_text.wgsl").into()),
-    });
+    let block_shader = crate::scene::pipeline::shader_cache::shared_shader_module(
+        device,
+        "block_text.wgsl",
+        draw_order_shader!("block_text.wgsl"),
+    );
     let create_block = |label, depth_write_enabled, depth_compare| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
