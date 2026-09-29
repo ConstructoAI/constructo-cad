@@ -770,6 +770,10 @@ impl OpenCADStudio {
 
         self.push_undo_snapshot(i, "DWGUNITS");
         self.tabs[i].scene.document.header.insertion_units = to;
+        // The standard linetypes follow the drawing into its units system.
+        if crate::io::linetypes::follow_insertion_units(&mut self.tabs[i].scene.document, from) > 0 {
+            self.tabs[i].scene.bump_geometry();
+        }
 
         let factor = units::conversion_factor(from, to).filter(|f| (f - 1.0).abs() > 1e-12);
         let (from_label, to_label) = (units::label(from), units::label(to));

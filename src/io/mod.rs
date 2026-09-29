@@ -2009,6 +2009,26 @@ fn fix_current_style_names(doc: &mut CadDocument) {
             doc.header.multiline_style = name;
         }
     }
+    // A dimension style's text style is stored by handle (DXF 340): the DXF
+    // reader keeps the handle and leaves the name at "Standard". The engine
+    // edits the name, and the save turns it back into the handle
+    // (`sync_dimension_text_styles`), so both must say the same on load.
+    let text_styles: Vec<(acadrust::Handle, String)> = doc
+        .text_styles
+        .iter()
+        .map(|style| (style.handle, style.name.clone()))
+        .collect();
+    for style in doc.dim_styles.iter_mut() {
+        if !style.dimtxsty_handle.is_valid() {
+            continue;
+        }
+        if let Some((_, name)) = text_styles
+            .iter()
+            .find(|(handle, _)| *handle == style.dimtxsty_handle)
+        {
+            style.dimtxsty = name.clone();
+        }
+    }
 
     // Current table / multileader style. DXF carries these as $CTABLESTYLE /
     // $CMLEADERSTYLE header vars (already read). DWG has no header field for
@@ -2180,8 +2200,61 @@ pub fn set_saved_active_layout(doc: &mut CadDocument, name: &str) {
 ///
 /// DXF additionally writes its own header vars from the names, so this keeps
 /// every representation consistent.
+/// Point every dimension style at its text style (DIMTXSTY) by HANDLE, the
+/// only form the DWG and DXF writers store. The engine and the records API
+/// set the style by name: a style re-pointed that way (the ERP's
+/// `style_cote`) kept its old handle — NULL, or Standard's — and the file read
+/// back "Standard" (measured by P1 on 2026-09-28). The name wins; a name the
+/// drawing does not know keeps the style the handle points to, else Standard.
+/// A text style without a handle (made by `STYLE NEW` before it allocated
+/// one) gets one first, or it could not be pointed at.
+pub(crate) fn sync_dimension_text_styles(doc: &mut CadDocument) {
+    use acadrust::TableEntry;
+    let missing: Vec<String> = doc
+        .text_styles
+        .iter()
+        .filter(|style| style.handle.is_null())
+        .map(|style| style.name.clone())
+        .collect();
+    for name in missing {
+        let handle = doc.allocate_handle();
+        if let Some(style) = doc.text_styles.get_mut(&name) {
+            style.set_handle(handle);
+        }
+    }
+    let text_styles: Vec<(String, acadrust::Handle)> = doc
+        .text_styles
+        .iter()
+        .map(|style| (style.name.clone(), style.handle))
+        .collect();
+    let standard = text_styles
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("Standard"))
+        .cloned();
+    for style in doc.dim_styles.iter_mut() {
+        let named = style.dimtxsty.trim().to_string();
+        if let Some((name, handle)) = text_styles
+            .iter()
+            .find(|(name, _)| !named.is_empty() && name.eq_ignore_ascii_case(&named))
+        {
+            style.dimtxsty_handle = *handle;
+            style.dimtxsty = name.clone();
+        } else if let Some((name, _)) = text_styles
+            .iter()
+            .find(|(_, handle)| !handle.is_null() && *handle == style.dimtxsty_handle)
+        {
+            style.dimtxsty = name.clone();
+        } else if let Some((name, handle)) = &standard {
+            style.dimtxsty_handle = *handle;
+            style.dimtxsty = name.clone();
+        }
+    }
+}
+
 fn sync_current_styles_on_save(doc: &mut CadDocument) {
     use acadrust::objects::ObjectType;
+
+    sync_dimension_text_styles(doc);
 
     let th = doc
         .text_styles
