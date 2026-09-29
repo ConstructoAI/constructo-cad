@@ -22,6 +22,7 @@ at its own labelled target in model space; the view is set by its center
 | `LOIN` | 29.5, 6.5 | 218400, −528000 | `0x0C000` on non-plotting layer `FENETRES-NP` | on, locked |
 
 Plus one overall paper-space viewport per layout (ODA writes `0x88020`).
+Checked by `io::viewport_status_tests::viewports_written_by_ezdxf_and_oda_load_on`.
 
 The reference (and ezdxf's `VSF_*` constants): `0x4000` locks the view,
 `0x8000` is "currently always enabled", `0x20000` turns the viewport off. ODA

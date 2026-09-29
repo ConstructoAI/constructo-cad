@@ -2480,6 +2480,66 @@ mod viewport_status_tests {
         assert_eq!(state_of(&doc, 10.25).0, dropped, "0x20000");
     }
 
+    // A real drawing from another writer (ezdxf, then ODA File Converter, the
+    // path of every Constructo plan): 12 viewports that differ only by their
+    // group 90, views far from the origin, a non-plotting layer. See
+    // `tests/fixtures/viewports/README.md`. A unit test on purpose: cargo stops
+    // at the first failing integration binary, and one fails upstream.
+    #[test]
+    fn viewports_written_by_ezdxf_and_oda_load_on() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/viewports/status-flags-ezdxf-oda.dwg"
+        );
+        let doc = load_bytes("status-flags-ezdxf-oda.dwg", std::fs::read(path).expect("fixture"))
+            .expect("load");
+        let viewports: Vec<&Viewport> = doc
+            .entities()
+            .filter_map(|e| match e {
+                EntityType::Viewport(vp) => Some(vp),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(viewports.len(), 14, "12 content viewports and 2 overall ones");
+        // (view center) → (group 90 written, locked)
+        let content: [((f64, f64), i32, bool); 12] = [
+            ((1000.0, 0.0), 0x04000, true),
+            ((1200.0, 0.0), 0x0C000, true),
+            ((1400.0, 0.0), 0x08000, false),
+            ((1600.0, 0.0), 0x00000, false),
+            ((1800.0, 0.0), 0x28000, false),
+            ((2000.0, 0.0), 0x20000, false),
+            ((0.0, 0.0), 0x0C000, true),
+            ((216000.0, 0.0), 0x0C000, true),
+            ((0.0, -528000.0), 0x0C000, true),
+            ((216000.0, -528000.0), 0x0C000, true),
+            ((217200.0, -528000.0), 0x08000, false),
+            ((218400.0, -528000.0), 0x0C000, true),
+        ];
+        // Until acadrust reads 0x20000, a switched-off viewport cannot be told
+        // apart and loads on, as it always did here.
+        let off_bit_dropped = acadrust_reads_viewport_on_from_bit_15();
+        for ((x, y), bits, locked) in content {
+            let vp = viewports
+                .iter()
+                .find(|vp| {
+                    (vp.width - 10.0).abs() < 1e-6
+                        && (vp.view_center.x - x).abs() < 1e-6
+                        && (vp.view_center.y - y).abs() < 1e-6
+                })
+                .unwrap_or_else(|| panic!("viewport looking at ({x}, {y}) missing"));
+            let on = bits & 0x20000 == 0 || off_bit_dropped;
+            assert_eq!(
+                (vp.status.is_on, vp.status.locked),
+                (on, locked),
+                "group 90 = {bits:#07x}, view center ({x}, {y})"
+            );
+        }
+        for vp in viewports.iter().filter(|vp| (vp.width - 39.6).abs() < 1e-6) {
+            assert!(vp.status.is_on, "overall viewport of a layout");
+        }
+    }
+
     // The whole load path, through acadrust's real DWG and DXF readers: a
     // viewport whose flags lack 0x8000 (what ezdxf and ODA write) comes back on.
     #[test]
