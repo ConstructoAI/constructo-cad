@@ -3075,6 +3075,74 @@ fn styled_dimension_text_position(
     dimension_text_pos_f64(dimension, Some(style), style.dimtxt * scale, scale)
 }
 
+/// Where the style puts the text of a linear or aligned dimension that nobody
+/// placed by hand: centred on the dimension line and lifted off it by DIMTAD,
+/// DIMGAP × DIMSCALE and half the text height (DIMTXT × DIMSCALE), or carried
+/// past the extension lines when it does not fit. It is the point the
+/// dimension picture uses for automatic text, and the one the reference
+/// application stores in group 11.
+///
+/// The creation commands used to store a fixed offset instead (0.15 drawing
+/// unit for DIMLINEAR, none at all for DIMALIGNED, DIMCONTINUE, DIMBASELINE
+/// and QDIM), and a stored point wins over the style: on a 1:24 sheet the text
+/// sat on the dimension line, 0.006" of paper off it instead of 0.086".
+///
+/// `None` for other dimension types, for text placed by hand, and when the
+/// dimension's style is missing.
+pub(crate) fn automatic_text_point(
+    dimension: &Dimension,
+    document: &CadDocument,
+) -> Option<Vector3> {
+    if !matches!(dimension, Dimension::Linear(_) | Dimension::Aligned(_))
+        || dimension.base().text_user_positioned
+    {
+        return None;
+    }
+    let style_name = dimension.base().style_name.as_str();
+    let source = document.dim_styles.iter().find(|style| {
+        style.name.eq_ignore_ascii_case(style_name)
+            || (style_name.trim().is_empty() && style.name.eq_ignore_ascii_case("Standard"))
+    })?;
+    // Cleared, the stored point no longer wins: the style decides.
+    let mut automatic = dimension.clone();
+    automatic.base_mut().text_middle_point = Vector3::ZERO;
+    let style = resolved_dimension_style(source, &automatic, document);
+    Some(styled_dimension_text_position(&automatic, &style, 1.0))
+}
+
+/// Give a dimension its automatic text point (see [`automatic_text_point`]);
+/// `false` when it has none. The legacy insertion point follows, as the
+/// creation commands keep the two together.
+pub(crate) fn place_automatic_text(dimension: &mut Dimension, document: &CadDocument) -> bool {
+    let Some(point) = automatic_text_point(dimension, document) else {
+        return false;
+    };
+    let base = dimension.base_mut();
+    base.text_middle_point = point;
+    base.insertion_point = point;
+    true
+}
+
+/// [`place_automatic_text`] for a dimension already in the drawing, after an
+/// edit that changes its text (format, size, gap, vertical position, fit) —
+/// the regeneration the reference application does for text nobody moved.
+pub(crate) fn replace_automatic_text(document: &mut CadDocument, handle: Handle) -> bool {
+    let point = match document.get_entity(handle) {
+        Some(EntityType::Dimension(dimension)) => automatic_text_point(dimension, document),
+        _ => None,
+    };
+    let Some(point) = point else {
+        return false;
+    };
+    let Some(EntityType::Dimension(dimension)) = document.get_entity_mut(handle) else {
+        return false;
+    };
+    let base = dimension.base_mut();
+    base.text_middle_point = point;
+    base.insertion_point = point;
+    true
+}
+
 pub(crate) fn materialize_large_radial_text_position(
     document: &mut CadDocument,
     handle: Handle,
@@ -3759,7 +3827,7 @@ fn tessellate_dimension_inner(
             dimfxlon,
             dimsoxd,
             dimcen,
-            ticks: dimtsz_raw > 1e-9,
+            ticks: dimtsz_raw > 1e-9 || (arrow1.is_stroke() && arrow2.is_stroke()),
             arrow_len: dimasz,
             text_width: text_layout.width,
             dimatfit: style.map(|s| s.dimatfit).unwrap_or(3),
@@ -6921,12 +6989,16 @@ fn format_architectural(inches: f64, precision: usize, dimfrac: i16, zin: i16) -
     let whole = rem / denom;
     let frac_str = format_fraction_component(&reduce_fraction(rem % denom, denom), dimfrac);
 
-    // DIMZIN feet/inch suppression:
+    // DIMZIN feet/inch suppression lives in its two low bits:
     //   0 suppress zero feet & zero inches, 1 include both,
     //   2 include zero feet / suppress zero inches,
     //   3 suppress zero feet / include zero inches.
-    let suppress_zero_feet = zin == 0 || zin == 3;
-    let suppress_zero_inches = zin == 0 || zin == 2;
+    // Bits 4 and 8 (leading / trailing decimal zeros) ride on the same value:
+    // a style with DIMZIN 11 (8 + 3) must still read as 3 here, or every
+    // dimension under a foot comes out as "0'-8"" instead of "8"".
+    let feet_inch_mode = zin & 3;
+    let suppress_zero_feet = feet_inch_mode == 0 || feet_inch_mode == 3;
+    let suppress_zero_inches = feet_inch_mode == 0 || feet_inch_mode == 2;
     let feet_zero = feet == 0;
     let inches_zero = whole == 0 && frac_str.is_empty();
     let show_feet = !feet_zero || !suppress_zero_feet;
@@ -6940,6 +7012,11 @@ fn format_architectural(inches: f64, precision: usize, dimfrac: i16, zin: i16) -
     let inch_part = if show_inches {
         if frac_str.is_empty() {
             format!("{}\"", whole)
+        } else if whole == 0 && !show_feet {
+            // With the feet suppressed a bare fraction reads "1/2"", the way
+            // the reference application and hand-lettered drawings write it;
+            // "0 1/2"" is kept after a foot value ("1'-0 1/2"").
+            format!("{}\"", frac_str)
         } else {
             format!("{} {}\"", whole, frac_str)
         }
@@ -7982,6 +8059,46 @@ mod arch_format_tests {
         assert_eq!(format_architectural(30.5, 4, 2, 1), "2'-6 1/2\"");
         assert_eq!(format_architectural(0.0, 4, 2, 1), "0'-0\"");
         assert_eq!(format_architectural(-30.25, 4, 2, 1), "-2'-6 1/4\"");
+    }
+
+    // DIMZIN carries the decimal zero bits (4, 8) next to the feet / inch
+    // mode (0..3). The ERP's dimension format sets "suppress zero feet,
+    // include zero inches" (3) on a style that already suppresses trailing
+    // zeros (8): DIMZIN 11 must still read as 3. Measured before the fix on
+    // the production engine: 23 dimensions of a set read "0'-8"" for "8"".
+    #[test]
+    fn arch_feet_inch_mode_ignores_the_decimal_zero_bits() {
+        for zin in [3, 7, 11, 15] {
+            assert_eq!(format_architectural(8.0, 4, 2, zin), "8\"", "DIMZIN {zin}");
+            assert_eq!(format_architectural(8.5, 4, 2, zin), "8 1/2\"", "DIMZIN {zin}");
+            assert_eq!(format_architectural(0.5, 4, 2, zin), "1/2\"", "DIMZIN {zin}");
+            assert_eq!(format_architectural(12.0, 4, 2, zin), "1'-0\"", "DIMZIN {zin}");
+            assert_eq!(format_architectural(110.0, 4, 2, zin), "9'-2\"", "DIMZIN {zin}");
+            assert_eq!(format_architectural(0.0, 4, 2, zin), "0\"", "DIMZIN {zin}");
+        }
+        for zin in [1, 9, 13] {
+            assert_eq!(format_architectural(8.0, 4, 2, zin), "0'-8\"", "DIMZIN {zin}");
+            assert_eq!(format_architectural(0.5, 4, 2, zin), "0'-0 1/2\"", "DIMZIN {zin}");
+        }
+        for zin in [2, 10] {
+            assert_eq!(format_architectural(12.0, 4, 2, zin), "1'", "DIMZIN {zin}");
+            assert_eq!(format_architectural(0.5, 4, 2, zin), "0'-0 1/2\"", "DIMZIN {zin}");
+        }
+        for zin in [0, 8] {
+            assert_eq!(format_architectural(12.0, 4, 2, zin), "1'", "DIMZIN {zin}");
+            assert_eq!(format_architectural(0.5, 4, 2, zin), "1/2\"", "DIMZIN {zin}");
+            assert_eq!(format_architectural(6.0, 4, 2, zin), "6\"", "DIMZIN {zin}");
+        }
+    }
+
+    // A bare fraction keeps its whole-inch zero after a foot value, and the
+    // stacked forms are untouched.
+    #[test]
+    fn arch_fraction_forms_with_suppressed_feet() {
+        assert_eq!(format_architectural(12.5, 4, 2, 3), "1'-0 1/2\"");
+        assert_eq!(format_architectural(0.5, 4, 0, 11), "\\S1/2;\"");
+        assert_eq!(format_architectural(8.5, 4, 1, 11), "8 \\S1#2;\"");
+        assert_eq!(format_architectural(-0.5, 4, 2, 3), "-1/2\"");
     }
 
     // Same carry bug lived in the plain fractional formatter.

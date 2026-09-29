@@ -225,6 +225,11 @@ impl OpenCADStudio {
                     scale.write_to_entity(&mut entity);
                 }
             }
+            // The text shows where the commit will put it (DIMTAD, DIMGAP and
+            // DIMTXT × DIMSCALE), not at the command's fixed offset.
+            if let EntityType::Dimension(dimension) = &mut entity {
+                crate::entities::dimension::place_automatic_text(dimension, &scene.document);
+            }
             entities.push(entity);
         }
         Some(entities)

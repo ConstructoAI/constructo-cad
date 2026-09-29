@@ -261,11 +261,164 @@ pub fn extract_pattern(desc: &str) -> String {
     desc.trim().to_string()
 }
 
+// ── Units of the bundled catalogs ─────────────────────────────────────────
+
+/// Millimetres per inch: the bundled `.lin` and `.pat` catalogs are the metric
+/// (acadiso) definitions, the imperial ones (acad.lin, acad.pat) are the same
+/// patterns 25.4 times smaller.
+pub const MM_PER_INCH: f64 = 25.4;
+
+/// INSUNITS codes of the imperial units: inches, feet, miles, microinches,
+/// mils, yards and the four US survey units. A drawing in one of them uses the
+/// imperial linetype and hatch definitions, as a drawing started from acad.dwt
+/// does; every other drawing, unitless included, keeps the metric catalog.
+pub fn imperial_units(insunits: i16) -> bool {
+    matches!(insunits, 1 | 2 | 3 | 8 | 9 | 10 | 21 | 22 | 23 | 24)
+}
+
+/// Whether `doc` is drawn in imperial units (see [`imperial_units`]).
+pub fn document_is_imperial(doc: &CadDocument) -> bool {
+    imperial_units(doc.header.insertion_units)
+}
+
+/// Whether the new linetypes and hatches of `doc` come from the imperial
+/// catalog: a drawing in imperial units, unless it still holds the metric
+/// HIDDEN of the catalog. That one is a drawing made in inches before the
+/// catalogs followed the units (CAD-000019): the script that drew it already
+/// compensated its dashes and hatches (LTSCALE 12/25.4, hatch scale / 25.4),
+/// so it keeps the metric catalog and the compensation stays the one fix.
+/// A drawing from another program holds acad.lin's HIDDEN (1/4") and takes
+/// the imperial catalog like a new one.
+pub fn document_uses_imperial_catalog(doc: &CadDocument) -> bool {
+    document_is_imperial(doc) && !holds_metric_catalog(doc)
+}
+
+/// The drawing's HIDDEN is exactly the metric catalog's (6.35, -3.175).
+fn holds_metric_catalog(doc: &CadDocument) -> bool {
+    let Some(metric) = catalog_linetypes(false)
+        .iter()
+        .find(|lt| lt.name.eq_ignore_ascii_case("HIDDEN"))
+    else {
+        return false;
+    };
+    doc.line_types
+        .get("HIDDEN")
+        .is_some_and(|lt| same_pattern(lt, metric))
+}
+
+/// Definitions that acad.lin and acad.pat give in millimetres, as acadiso
+/// does: the ISO 128 line families are sized for a 1 mm pen and scaled by the
+/// pen width, and the JIS patterns carry their spacing in their names
+/// (JIS_LC_20 = 20 mm). They are the same in both catalogs.
+pub fn metric_in_both_catalogs(name: &str) -> bool {
+    let upper = name.trim().to_ascii_uppercase();
+    let upper = upper.strip_prefix("ACAD_").unwrap_or(&upper);
+    upper.starts_with("ISO") || upper.starts_with("JIS_")
+}
+
+static IMPERIAL_LINETYPES: OnceLock<Vec<LineType>> = OnceLock::new();
+static METRIC_LINETYPES: OnceLock<Vec<LineType>> = OnceLock::new();
+
+/// The standard simple linetypes in one units system. Imperial: every length
+/// divided by 25.4 (HIDDEN 1/4" dash, 1/8" space, as in acad.lin), the ISO
+/// families unchanged.
+pub fn catalog_linetypes(imperial: bool) -> &'static [LineType] {
+    if imperial {
+        IMPERIAL_LINETYPES.get_or_init(|| {
+            parse(LIN_SOURCE)
+                .into_iter()
+                .map(|mut lt| {
+                    if !metric_in_both_catalogs(&lt.name) {
+                        for element in &mut lt.elements {
+                            element.length /= MM_PER_INCH;
+                        }
+                        lt.pattern_length /= MM_PER_INCH;
+                    }
+                    lt
+                })
+                .collect()
+        })
+    } else {
+        METRIC_LINETYPES.get_or_init(|| parse(LIN_SOURCE))
+    }
+}
+
+/// Whether two linetype definitions draw the same pattern.
+fn same_pattern(a: &LineType, b: &LineType) -> bool {
+    a.elements.len() == b.elements.len()
+        && a.elements.iter().zip(&b.elements).all(|(x, y)| {
+            (x.length - y.length).abs() <= 1e-6 * x.length.abs().max(y.length.abs()).max(1.0)
+                && x.complex.is_none()
+                && y.complex.is_none()
+        })
+}
+
+/// Follow a change of the drawing's INSUNITS from `previous`: when it crosses
+/// between metric and imperial units, each standard linetype the drawing
+/// still holds exactly as the catalog of the old units defines it is replaced
+/// by the definition of the new units. A linetype loaded from a file, edited,
+/// or unknown to the catalog keeps its numbers. The linetype scale (LTSCALE,
+/// CELTSCALE, per-object scales) is left alone: the catalog is the one fix.
+///
+/// A new drawing starts unitless with the metric catalog, and the ERP makes it
+/// a drawing in inches right away (INSUNITS 1): its HIDDEN line was a 6.35"
+/// dash, 25.4 times too long. A drawing that is already in inches when the
+/// same INSUNITS 1 arrives again is not touched, so one that compensated with
+/// LTSCALE keeps its look.
+///
+/// Returns how many linetypes were converted.
+pub fn follow_insertion_units(doc: &mut CadDocument, previous: i16) -> usize {
+    let was = imperial_units(previous);
+    let now = document_is_imperial(doc);
+    if was == now {
+        return 0;
+    }
+    let from = catalog_linetypes(was);
+    let to = catalog_linetypes(now);
+    let names: Vec<String> = doc
+        .line_types
+        .iter()
+        .filter(|lt| {
+            from.iter()
+                .find(|standard| standard.name.eq_ignore_ascii_case(&lt.name))
+                .is_some_and(|standard| same_pattern(lt, standard))
+        })
+        .map(|lt| lt.name.clone())
+        .collect();
+    let mut converted = 0;
+    for name in names {
+        let Some(target) = to
+            .iter()
+            .find(|standard| standard.name.eq_ignore_ascii_case(&name))
+        else {
+            continue;
+        };
+        let Some(lt) = doc.line_types.get_mut(&name) else {
+            continue;
+        };
+        if same_pattern(lt, target) {
+            continue;
+        }
+        lt.elements = target.elements.clone();
+        lt.pattern_length = target.pattern_length;
+        converted += 1;
+    }
+    converted
+}
+
 // ── Public API ────────────────────────────────────────────────────────────
 
-/// Add all standard OpenCADStudio linetypes to `doc`, skipping existing ones.
+/// Add all standard OpenCADStudio linetypes to `doc`, skipping existing ones,
+/// from the catalog of the drawing (see [`document_uses_imperial_catalog`]).
 pub fn populate_document(doc: &mut CadDocument) {
-    populate_document_from_source(doc, LIN_SOURCE);
+    let imperial = document_uses_imperial_catalog(doc);
+    for standard in catalog_linetypes(imperial) {
+        if !doc.line_types.contains(&standard.name) {
+            let mut lt = standard.clone();
+            lt.set_handle(doc.allocate_handle());
+            doc.line_types.add(lt).ok();
+        }
+    }
 }
 
 /// Add all simple linetypes parsed from a caller-supplied `.lin` source.
@@ -635,5 +788,144 @@ mod header_tests {
         let types = parse("*DASHED,Dashed __ __\nA,.5,-.25\n");
         assert_eq!(types[0].name, "DASHED");
         assert_eq!(types[0].description, "Dashed __ __");
+    }
+}
+
+#[cfg(test)]
+mod units_tests {
+    use super::{
+        catalog_linetypes, document_uses_imperial_catalog, follow_insertion_units,
+        imperial_units, metric_in_both_catalogs, populate_document,
+    };
+    use acadrust::tables::linetype::{LineType, LineTypeElement};
+    use acadrust::{CadDocument, TableEntry};
+
+    fn lengths(doc: &CadDocument, name: &str) -> Vec<f64> {
+        doc.line_types
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} missing"))
+            .elements
+            .iter()
+            .map(|element| element.length)
+            .collect()
+    }
+
+    fn close(a: &[f64], b: &[f64]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-12)
+    }
+
+    /// acad.lin: HIDDEN is a 1/4" dash and a 1/8" space, CENTER 1 1/4" _ 1/4",
+    /// the ISO 128 families stay in millimetres.
+    #[test]
+    fn the_imperial_catalog_is_acad_lin() {
+        let find = |imperial: bool, name: &str| {
+            catalog_linetypes(imperial)
+                .iter()
+                .find(|lt| lt.name == name)
+                .unwrap_or_else(|| panic!("{name}"))
+                .clone()
+        };
+        let hidden = find(true, "HIDDEN");
+        let lengths: Vec<f64> = hidden.elements.iter().map(|e| e.length).collect();
+        assert!(close(&lengths, &[0.25, -0.125]), "{lengths:?}");
+        assert!((hidden.pattern_length - 0.375).abs() < 1e-12);
+        let center: Vec<f64> = find(true, "CENTER").elements.iter().map(|e| e.length).collect();
+        assert!(close(&center, &[1.25, -0.25, 0.25, -0.25]), "{center:?}");
+        let dot: Vec<f64> = find(true, "DOT").elements.iter().map(|e| e.length).collect();
+        assert!(close(&dot, &[0.0, -0.25]), "{dot:?}");
+        let iso: Vec<f64> = find(true, "ISO02W100").elements.iter().map(|e| e.length).collect();
+        assert!(close(&iso, &[12.0, -3.0]), "{iso:?}");
+        let metric: Vec<f64> = find(false, "HIDDEN").elements.iter().map(|e| e.length).collect();
+        assert!(close(&metric, &[6.35, -3.175]), "{metric:?}");
+        assert_eq!(catalog_linetypes(true).len(), catalog_linetypes(false).len());
+    }
+
+    #[test]
+    fn imperial_units_and_metric_families() {
+        for code in [1, 2, 3, 8, 9, 10, 21, 22, 23, 24] {
+            assert!(imperial_units(code), "INSUNITS {code}");
+        }
+        for code in [0, 4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] {
+            assert!(!imperial_units(code), "INSUNITS {code}");
+        }
+        assert!(metric_in_both_catalogs("ISO02W100"));
+        assert!(metric_in_both_catalogs("acad_iso05w100"));
+        assert!(metric_in_both_catalogs("JIS_LC_20"));
+        assert!(!metric_in_both_catalogs("HIDDEN"));
+        assert!(!metric_in_both_catalogs("ANSI31"));
+    }
+
+    /// A new drawing in inches gets acad.lin directly.
+    #[test]
+    fn a_drawing_in_inches_is_populated_in_inches() {
+        let mut doc = CadDocument::new();
+        doc.header.insertion_units = 1;
+        assert!(document_uses_imperial_catalog(&doc));
+        populate_document(&mut doc);
+        assert!(close(&lengths(&doc, "HIDDEN"), &[0.25, -0.125]));
+        assert!(document_uses_imperial_catalog(&doc));
+        let mut doc = CadDocument::new();
+        populate_document(&mut doc);
+        assert!(close(&lengths(&doc, "HIDDEN"), &[6.35, -3.175]));
+        assert!(!document_uses_imperial_catalog(&doc));
+    }
+
+    /// CAD-000019: in inches, with the metric HIDDEN of the old engine. It
+    /// keeps the metric catalog — for the linetypes added when it is opened
+    /// too — since its script compensates; `INSUNITS 4` then `INSUNITS 1`
+    /// moves it to the imperial one.
+    #[test]
+    fn a_drawing_made_before_the_fix_keeps_its_catalog() {
+        let mut doc = CadDocument::new();
+        populate_document(&mut doc);
+        doc.header.insertion_units = 1;
+        assert!(!document_uses_imperial_catalog(&doc));
+        doc.line_types.remove("DASHED");
+        populate_document(&mut doc);
+        assert!(close(&lengths(&doc, "DASHED"), &[12.7, -6.35]), "added in its catalog");
+
+        doc.header.insertion_units = 4;
+        assert_eq!(follow_insertion_units(&mut doc, 1), 0, "already metric");
+        doc.header.insertion_units = 1;
+        assert!(follow_insertion_units(&mut doc, 4) > 30);
+        assert!(close(&lengths(&doc, "HIDDEN"), &[0.25, -0.125]));
+        assert!(document_uses_imperial_catalog(&doc));
+    }
+
+    /// The ERP's sequence: a unitless new drawing, then INSUNITS 1. The
+    /// standard linetypes cross over; a HIDDEN of the drawing's own and the
+    /// ISO families do not; the same INSUNITS again changes nothing; going
+    /// back to millimetres restores the metric catalog.
+    #[test]
+    fn standard_linetypes_follow_the_units() {
+        let mut doc = CadDocument::new();
+        populate_document(&mut doc);
+        let mut own = LineType::new("MYDASH");
+        own.add_element(LineTypeElement::dash(6.35));
+        own.add_element(LineTypeElement::space(3.175));
+        own.set_handle(doc.allocate_handle());
+        doc.line_types.add(own).unwrap();
+        // A HIDDEN edited by the user is not the catalog's.
+        doc.line_types.get_mut("HIDDEN2").unwrap().elements[0].length = 4.0;
+
+        doc.header.insertion_units = 1;
+        let converted = follow_insertion_units(&mut doc, 0);
+        assert!(converted > 30, "{converted} converted");
+        assert!(close(&lengths(&doc, "HIDDEN"), &[0.25, -0.125]));
+        assert!(close(&lengths(&doc, "DASHED"), &[0.5, -0.25]));
+        assert!(close(&lengths(&doc, "HIDDEN2"), &[4.0, -1.5875]), "edited: kept");
+        assert!(close(&lengths(&doc, "MYDASH"), &[6.35, -3.175]), "own: kept");
+        assert!(close(&lengths(&doc, "ISO02W100"), &[12.0, -3.0]));
+        let pattern = doc.line_types.get("HIDDEN").unwrap().pattern_length;
+        assert!((pattern - 0.375).abs() < 1e-12);
+
+        assert_eq!(follow_insertion_units(&mut doc, 1), 0, "inches again");
+        doc.header.insertion_units = 2;
+        assert_eq!(follow_insertion_units(&mut doc, 1), 0, "feet: still imperial");
+
+        doc.header.insertion_units = 4;
+        assert!(follow_insertion_units(&mut doc, 2) > 30);
+        assert!(close(&lengths(&doc, "HIDDEN"), &[6.35, -3.175]));
+        assert_eq!(doc.header.linetype_scale, 1.0, "LTSCALE untouched");
     }
 }

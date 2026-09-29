@@ -11124,7 +11124,39 @@ vis_index={:.1} visible_probe={:.1}",
 
     pub fn invalidate_dim_style_dependencies_many(&mut self, names: &[String]) {
         let targets = self.dependency_targets(DependencyKind::DimStyle, names);
+        // An edited style regenerates the dimensions drawn with it: linear
+        // and aligned text nobody moved goes where the new DIMTXT, DIMGAP,
+        // DIMSCALE or DIMTAD puts it. The same pass runs on undo and redo, so
+        // the text lands back where the restored style puts it.
+        for handle in &targets.source_handles {
+            crate::entities::dimension::replace_automatic_text(&mut self.document, *handle);
+        }
         self.invalidate_dependency_targets(targets);
+    }
+
+    /// A dimension style was edited (DIMSTYLE SET, the records API): every
+    /// dimension drawn with it drops the picture baked under the old settings
+    /// — drawn again on screen and at the next save — and its automatic text
+    /// moves where the new style puts it, as the Dimension Style Manager does.
+    pub fn refresh_dimensions_of_style(&mut self, name: &str) {
+        let stale: Vec<Handle> = self
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                EntityType::Dimension(dimension)
+                    if dimension.base().style_name.eq_ignore_ascii_case(name)
+                        || (dimension.base().style_name.trim().is_empty()
+                            && name.eq_ignore_ascii_case("Standard")) =>
+                {
+                    Some(entity.common().handle)
+                }
+                _ => None,
+            })
+            .collect();
+        for handle in stale {
+            self.invalidate_dim_block_recorded(handle);
+        }
+        self.invalidate_dim_style_dependencies(name);
     }
 
     pub fn invalidate_object_style_dependencies(&mut self, handles: &[Handle]) {

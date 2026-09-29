@@ -480,6 +480,22 @@ fn dim_terminator(
                 common,
             ));
         }
+        A::ArchTick { size } => {
+            // As the reference application draws `_ArchTick`: one polyline
+            // segment of constant width 0.15 × DIMASZ, from (-0.5, -0.5) to
+            // (0.5, 0.5) × DIMASZ in the frame of the dimension line.
+            let s = *size as f64;
+            let (ox, oy) = ((dx + px) * s * 0.5, (dy + py) * s * 0.5);
+            let mut stroke = acadrust::entities::LwPolyline::from_points(vec![
+                acadrust::types::Vector2::new(tip.x - ox, tip.y - oy),
+                acadrust::types::Vector2::new(tip.x + ox, tip.y + oy),
+            ]);
+            stroke.constant_width = s * 0.15;
+            stroke.elevation = tip.z;
+            stroke.common = common.clone();
+            stroke.common.handle = Handle::NULL;
+            out.push(EntityType::LwPolyline(stroke));
+        }
         A::Open { size, half_angle } => {
             let size = *size as f64;
             let hw = size * (*half_angle as f64).tan();
@@ -980,7 +996,7 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
     // lines (gap < 2·DIMASZ, arrows only) they flip to the outside with short
     // stubs unless DIMSOXD — matching the live fit logic. DIM-ARROWS-OUTSIDE.
     let push_dim_line = |result: &mut Vec<EntityType>, d1: Vector3, d2: Vector3, ux: f64, uy: f64| {
-        let ticks = met.dimtsz > 1e-9;
+        let ticks = met.dimtsz > 1e-9 || (met.arrow1.is_stroke() && met.arrow2.is_stroke());
         if !(met.dimsd1 && met.dimsd2) {
             let dle = if ticks { met.dimdle } else { 0.0 };
             let a = v3(d1.x - ux * dle, d1.y - uy * dle, d1.z);
@@ -1108,7 +1124,7 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
                 .sqrt()
                 .max(1e-12);
             let (ux, uy) = ((edge.x - far.x) / len, (edge.y - far.y) / len);
-            let ticks = met.dimtsz > 1e-9;
+            let ticks = met.dimtsz > 1e-9 || (met.arrow1.is_stroke() && met.arrow2.is_stroke());
             let extension = if ticks { met.dimdle } else { 0.0 };
             let edge_outer = v3(
                 edge.x + ux * extension,

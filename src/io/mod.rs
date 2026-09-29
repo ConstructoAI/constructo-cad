@@ -714,6 +714,7 @@ async fn load_web_bytes(
     if name.to_ascii_lowercase().ends_with(".dxf") {
         fix_dxf_dimension_rotations(&mut doc);
         fix_dxf_layout_plot_settings(&mut doc);
+        fix_dxf_current_style_handles(&mut doc);
     }
     fix_viewport_status_flags(&mut doc);
     fix_current_style_names(&mut doc);
@@ -767,6 +768,7 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
                 .map_err(|e| e.to_string())?;
             fix_dxf_dimension_rotations(&mut doc);
             fix_dxf_layout_plot_settings(&mut doc);
+            fix_dxf_current_style_handles(&mut doc);
             fix_viewport_status_flags(&mut doc);
             fix_current_style_names(&mut doc);
             Ok(doc)
@@ -1031,6 +1033,7 @@ fn finalize_loaded_outcome(
     if outcome.stats.source_format == Some(acadrust::SourceFormat::Dxf) {
         fix_dxf_dimension_rotations(doc);
         fix_dxf_layout_plot_settings(doc);
+        fix_dxf_current_style_handles(doc);
     }
     fix_viewport_status_flags(doc);
     fix_current_style_names(doc);
@@ -1971,6 +1974,26 @@ fn fix_current_style_names(doc: &mut CadDocument) {
             doc.header.multiline_style = name;
         }
     }
+    // A dimension style's text style is stored by handle (DXF 340): the DXF
+    // reader keeps the handle and leaves the name at "Standard". The engine
+    // edits the name, and the save turns it back into the handle
+    // (`sync_dimension_text_styles`), so both must say the same on load.
+    let text_styles: Vec<(acadrust::Handle, String)> = doc
+        .text_styles
+        .iter()
+        .map(|style| (style.handle, style.name.clone()))
+        .collect();
+    for style in doc.dim_styles.iter_mut() {
+        if !style.dimtxsty_handle.is_valid() {
+            continue;
+        }
+        if let Some((_, name)) = text_styles
+            .iter()
+            .find(|(handle, _)| *handle == style.dimtxsty_handle)
+        {
+            style.dimtxsty = name.clone();
+        }
+    }
 
     // Current table / multileader style. DXF carries these as $CTABLESTYLE /
     // $CMLEADERSTYLE header vars (already read). DWG has no header field for
@@ -2142,8 +2165,95 @@ pub fn set_saved_active_layout(doc: &mut CadDocument, name: &str) {
 ///
 /// DXF additionally writes its own header vars from the names, so this keeps
 /// every representation consistent.
+/// Point every dimension style at its text style (DIMTXSTY) by HANDLE, the
+/// only form the DWG and DXF writers store. The engine and the records API
+/// set the style by name: a style re-pointed that way (the ERP's
+/// `style_cote`) kept its old handle — NULL, or Standard's — and the file read
+/// back "Standard" (measured by P1 on 2026-09-28). The name wins; a name the
+/// drawing does not know keeps the style the handle points to, else Standard.
+/// A text style without a handle (made by `STYLE NEW` before it allocated
+/// one) gets one first, or it could not be pointed at.
+pub(crate) fn sync_dimension_text_styles(doc: &mut CadDocument) {
+    use acadrust::TableEntry;
+    let missing: Vec<String> = doc
+        .text_styles
+        .iter()
+        .filter(|style| style.handle.is_null())
+        .map(|style| style.name.clone())
+        .collect();
+    for name in missing {
+        let handle = doc.allocate_handle();
+        if let Some(style) = doc.text_styles.get_mut(&name) {
+            style.set_handle(handle);
+        }
+    }
+    let text_styles: Vec<(String, acadrust::Handle)> = doc
+        .text_styles
+        .iter()
+        .map(|style| (style.name.clone(), style.handle))
+        .collect();
+    let standard = text_styles
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("Standard"))
+        .cloned();
+    for style in doc.dim_styles.iter_mut() {
+        let named = style.dimtxsty.trim().to_string();
+        if let Some((name, handle)) = text_styles
+            .iter()
+            .find(|(name, _)| !named.is_empty() && name.eq_ignore_ascii_case(&named))
+        {
+            style.dimtxsty_handle = *handle;
+            style.dimtxsty = name.clone();
+        } else if let Some((name, _)) = text_styles
+            .iter()
+            .find(|(_, handle)| !handle.is_null() && *handle == style.dimtxsty_handle)
+        {
+            style.dimtxsty = name.clone();
+        } else if let Some((name, handle)) = &standard {
+            style.dimtxsty_handle = *handle;
+            style.dimtxsty = name.clone();
+        }
+    }
+}
+
+/// Give a handle to every table entry that has none, on the copy handed to
+/// the writers. The writers identify a table entry by its handle: two entries
+/// with the NULL handle collapse into one in the DWG, the DXF writes handle 0
+/// (ezdxf then refuses the whole file), and a current style pointed at a NULL
+/// handle falls back to Standard ($DIMSTYLE, T3 M1). Commands allocate one at
+/// creation; this catches whatever still comes without (a file, a plugin).
+pub(crate) fn ensure_table_handles(doc: &mut CadDocument) {
+    use acadrust::TableEntry;
+    macro_rules! ensure {
+        ($table:ident) => {{
+            let missing: Vec<String> = doc
+                .$table
+                .iter()
+                .filter(|entry| entry.handle().is_null())
+                .map(|entry| entry.name().to_string())
+                .collect();
+            for name in missing {
+                let handle = doc.allocate_handle();
+                if let Some(entry) = doc.$table.get_mut(&name) {
+                    entry.set_handle(handle);
+                }
+            }
+        }};
+    }
+    ensure!(layers);
+    ensure!(line_types);
+    ensure!(text_styles);
+    ensure!(dim_styles);
+    ensure!(app_ids);
+    ensure!(views);
+    ensure!(ucss);
+}
+
 fn sync_current_styles_on_save(doc: &mut CadDocument) {
     use acadrust::objects::ObjectType;
+
+    ensure_table_handles(doc);
+    sync_dimension_text_styles(doc);
 
     let th = doc
         .text_styles
@@ -2396,6 +2506,30 @@ fn fix_dxf_dimension_rotations(doc: &mut CadDocument) {
 /// The raw pairs are preserved on Layout, so trim and parse those authoritative
 /// values after loading. In particular, losing code 73 turns a 90°/270° sheet
 /// back to 0° and makes a landscape layout render as portrait (#505).
+/// A DXF names the current text and dimension styles ($TEXTSTYLE,
+/// $DIMSTYLE) and stores no handle for them: the reader keeps the handles of
+/// the defaults it starts from, Standard's, and `fix_current_style_names` then
+/// turned the name back into Standard — a DXF saved on ARCH-24 reopened on
+/// Standard (T3 M1). The names are the truth here: take the handles from them.
+fn fix_dxf_current_style_handles(doc: &mut CadDocument) {
+    let text = doc
+        .text_styles
+        .get(&doc.header.current_text_style_name)
+        .map(|style| (style.handle, style.name.clone()));
+    if let Some((handle, name)) = text {
+        doc.header.current_text_style_handle = handle;
+        doc.header.current_text_style_name = name;
+    }
+    let dimension = doc
+        .dim_styles
+        .get(&doc.header.current_dimstyle_name)
+        .map(|style| (style.handle, style.name.clone()));
+    if let Some((handle, name)) = dimension {
+        doc.header.current_dimstyle_handle = handle;
+        doc.header.current_dimstyle_name = name;
+    }
+}
+
 fn fix_dxf_layout_plot_settings(doc: &mut CadDocument) {
     use acadrust::objects::{ObjectType, PlotFlags};
 

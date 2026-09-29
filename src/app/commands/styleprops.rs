@@ -1376,6 +1376,8 @@ impl OpenCADStudio {
                         .then(|| value.as_deref()?.parse::<i16>().ok())
                         .flatten()
                         .filter(|value| (0..=3).contains(value));
+                    let previous_insertion_units =
+                        self.tabs[i].scene.document.header.insertion_units;
                     let outcome: Result<(String, bool), String> = {
                         let h = &mut self.tabs[i].scene.document.header;
                         match name.as_str() {
@@ -2442,6 +2444,17 @@ impl OpenCADStudio {
                                 if name == "FILLMODE" {
                                     self.tabs[i].scene.bump_geometry();
                                 }
+                                // The standard linetypes follow the drawing
+                                // into its units system: acad.lin lengths in
+                                // inches, the metric catalog otherwise.
+                                if name == "INSUNITS"
+                                    && crate::io::linetypes::follow_insertion_units(
+                                        &mut self.tabs[i].scene.document,
+                                        previous_insertion_units,
+                                    ) > 0
+                                {
+                                    self.tabs[i].scene.bump_geometry();
+                                }
                                 if matches!(name.as_str(), "PSLTSCALE" | "PLIMCHECK") {
                                     self.tabs[i].scene.persist_current_layout_state();
                                 }
@@ -2735,8 +2748,19 @@ impl OpenCADStudio {
                     self.command_line
                         .push_output(crate::tf!("CDIMSTY = \"{cur}\"").as_ref());
                 } else {
-                    if self.tabs[i].scene.document.dim_styles.contains(&name_arg) {
-                        self.tabs[i].scene.document.header.current_dimstyle_name = name_arg.clone();
+                    let found = self.tabs[i]
+                        .scene
+                        .document
+                        .dim_styles
+                        .get(&name_arg)
+                        .map(|style| (style.name.clone(), style.handle));
+                    if let Some((style_name, handle)) = found {
+                        // Name AND handle: the DWG writer keeps only the
+                        // handle, and falls back to Standard without one.
+                        let header = &mut self.tabs[i].scene.document.header;
+                        header.current_dimstyle_name = style_name.clone();
+                        header.current_dimstyle_handle = handle;
+                        self.ribbon.active_dim_style = style_name;
                         self.tabs[i].dirty = true;
                         self.command_line
                             .push_output(crate::tf!("Active dim style set to \"{name_arg}\"").as_ref());

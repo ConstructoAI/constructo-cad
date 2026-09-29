@@ -1204,9 +1204,13 @@ where
 }
 
 fn replace_table_entry<T: TableEntry>(table: &mut Table<T>, handle: acadrust::Handle, edited: T) {
+    // By handle AND name: a table keeps one entry per name, while a NULL
+    // handle (a style made by a command that gave it none) could be shared by
+    // several — the edit of the second new dimension style replaced the first.
+    let name = edited.name().to_string();
     let target = table
         .iter_mut()
-        .find(|entry| entry.handle() == handle)
+        .find(|entry| entry.handle() == handle && entry.name().eq_ignore_ascii_case(&name))
         .expect("validated table entry");
     *target = edited;
 }
@@ -1591,6 +1595,16 @@ impl OpenCADStudio {
                     "ucss" => patch_table!(ucss),
                     "vx_table" => patch_table!(vx_table),
                     _ => unreachable!(),
+                }
+                // A dimension style edited here is edited as by DIMSTYLE:
+                // its text style follows by handle (what the file keeps), and
+                // the dimensions drawn with it are regenerated.
+                if changed && collection == "dim_styles" {
+                    let i = self.active_tab;
+                    crate::io::sync_dimension_text_styles(&mut self.tabs[i].scene.document);
+                    if let Some(name) = result_name.clone() {
+                        self.tabs[i].scene.refresh_dimensions_of_style(&name);
+                    }
                 }
             }
         }

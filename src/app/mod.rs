@@ -38,6 +38,12 @@ mod startup;
 mod style_ops;
 mod text_inline;
 mod tolerance_dialog;
+#[cfg(test)]
+mod dimension_text_tests;
+#[cfg(test)]
+mod unit_catalog_tests;
+#[cfg(test)]
+mod style_table_tests;
 mod update;
 mod view;
 mod visibility;

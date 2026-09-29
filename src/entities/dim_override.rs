@@ -450,7 +450,62 @@ fn split_template(value: &str) -> (&str, &str) {
     value.split_once("<>").unwrap_or(("", value))
 }
 
+/// Set one dimension override from the Properties palette (or the control
+/// channel's `property` operation). An override that changes what the text
+/// says, its size or the rule that places it also re-places text nobody
+/// moved, as the reference application regenerates such a dimension: a
+/// format that widens the text can push it outside the extension lines, and
+/// a new DIMTXT, DIMGAP, DIMSCALE or DIMTAD lifts it by a different amount.
 pub fn set_property(
+    doc: &mut CadDocument,
+    handle: Handle,
+    field: &str,
+    value: &str,
+) -> bool {
+    let applied = set_property_value(doc, handle, field, value);
+    if applied && moves_automatic_text(field) {
+        crate::entities::dimension::replace_automatic_text(doc, handle);
+    }
+    applied
+}
+
+/// Overrides that change the text of a dimension or where the style puts it.
+/// Colours, line types, weights, arrowheads and the extension lines are drawn
+/// around the text and leave it where it is.
+fn moves_automatic_text(field: &str) -> bool {
+    field.starts_with("dim_suppress_")
+        || field.starts_with("dim_alt_")
+        || field.starts_with("dim_tolerance_")
+        || matches!(
+            field,
+            "dim_units"
+                | "dim_precision"
+                | "dim_decimal_separator"
+                | "dim_fractional_type"
+                | "dim_roundoff"
+                | "dim_scale_linear"
+                | "dim_prefix"
+                | "dim_suffix"
+                | "dim_sub_units_scale"
+                | "dim_sub_units_suffix"
+                | "dim_text_style"
+                | "dim_text_height"
+                | "dim_text_offset"
+                | "dim_scale_overall"
+                | "dim_text_pos_vert"
+                | "dim_text_pos_hor"
+                | "dim_text_outside_align"
+                | "dim_text_inside_align"
+                | "dim_text_inside"
+                | "dim_text_view_direction"
+                | "dim_fit"
+                | "dim_line_forced"
+                | "dim_line_inside"
+                | "dim_arrow_size"
+        )
+}
+
+fn set_property_value(
     doc: &mut CadDocument,
     handle: Handle,
     field: &str,

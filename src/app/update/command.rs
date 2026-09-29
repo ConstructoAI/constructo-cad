@@ -2140,7 +2140,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 let handles = self.property_target_handles(i);
                 if !handles.is_empty() {
                     use crate::scene::model::hatch_patterns;
-                    if let Some(entry) = hatch_patterns::find(&name) {
+                    if let Some(entry) =
+                        hatch_patterns::find_in(&self.tabs[i].scene.document, &name)
+                    {
                         self.push_undo_snapshot(i, "HATCHEDIT");
                         for &handle in &handles {
                             if let Some(acadrust::EntityType::Hatch(dxf)) =
@@ -3586,6 +3588,14 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                                     }
                                                 }
                                             }
+                                            // Linear and aligned text nobody moved
+                                            // follows an edit of the points, the
+                                            // text or the style (a no-op for
+                                            // anything else).
+                                            crate::entities::dimension::replace_automatic_text(
+                                                &mut self.tabs[i].scene.document,
+                                                handle,
+                                            );
                                             if matches!(field, "srf_u_isolines" | "srf_v_isolines")
                                             {
                                                 self.tabs[i].scene.reseed_derived_caches(handle);
