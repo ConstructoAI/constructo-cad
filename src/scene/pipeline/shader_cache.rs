@@ -11,6 +11,7 @@
 //! unaffected (a module is immutable once created).
 
 use std::cell::RefCell;
+use iced::wgpu;
 use std::collections::HashMap;
 
 type Modules = HashMap<(usize, usize), wgpu::ShaderModule>;
