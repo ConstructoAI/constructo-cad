@@ -416,7 +416,8 @@ pub fn resolve_material_with_base(
     let mut material = match document.objects.get(&handle) {
         Some(ObjectType::Material(material))
             if material.name.eq_ignore_ascii_case("ByLayer")
-                || material.name.eq_ignore_ascii_case("ByBlock") =>
+                || material.name.eq_ignore_ascii_case("ByBlock")
+                || is_stock_global(material) =>
         {
             MeshMaterial::entity_color(entity_color)
         }
@@ -427,6 +428,36 @@ pub fn resolve_material_with_base(
     };
     material.mapper = entity_material_mapper(entity);
     material
+}
+
+/// AutoCAD's "Global" material as every drawing carries it: the default
+/// material of every layer (so of every ByLayer object), diffuse "use the
+/// object's colour", no map. It stands for "no material" — AutoCAD shades such
+/// objects in their own colour, like the ByLayer and ByBlock placeholders.
+///
+/// Rendered as a real material it cost every object its colour: a white
+/// specular at full factor (against 0.08 for a plain colour) that also weights
+/// the environment reflection, and no visual-style highlight control
+/// (`source_state.z`, the handle). True colours came out washed to grey with
+/// white hot spots — CAD-000021 in the ERP viewer (140 MESH on layers carrying
+/// ODA's Global) — while the same boxes on a ByLayer-material layer kept theirs.
+///
+/// A Global the user did edit — diffuse colour overridden, or any map — stays
+/// a material.
+fn is_stock_global(material: &Material) -> bool {
+    material.name.eq_ignore_ascii_case("Global")
+        && material.diffuse_color.flag != 1
+        && [
+            &material.diffuse_map,
+            &material.specular_map,
+            &material.reflection_map,
+            &material.opacity_map,
+            &material.bump_map,
+            &material.refraction_map,
+            &material.normal_map,
+        ]
+        .iter()
+        .all(|map| map.file_name.trim().is_empty() && map.texture.is_none())
 }
 
 fn entity_material_mapper(entity: &EntityType) -> Option<MeshMaterialMapper> {
@@ -609,6 +640,74 @@ mod tests {
         assert_eq!(pixel(32, 0), [0, 255, 0, 255]);
         assert_eq!(pixel(0, 32), [0, 255, 0, 255]);
         assert_eq!(pixel(32, 32), [255, 0, 0, 255]);
+    }
+
+    /// A document whose layer "L" carries `material`, and a line on it
+    /// (material ByLayer, the default of every entity).
+    fn line_on_a_layer_with(mut material: Material) -> (CadDocument, EntityType) {
+        let mut document = CadDocument::new();
+        let handle = document.allocate_handle();
+        material.handle = handle;
+        document.objects.insert(handle, ObjectType::Material(material));
+        let mut layer = acadrust::tables::Layer::new("L");
+        layer.handle = document.allocate_handle();
+        layer.material = handle;
+        document.layers.add(layer).unwrap();
+        let mut line = Line::new();
+        line.common.layer = "L".to_string();
+        (document, EntityType::Line(line))
+    }
+
+    fn named(name: &str) -> Material {
+        let mut material = Material::new();
+        material.name = name.to_string();
+        material
+    }
+
+    const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+
+    // ODA and AutoCAD give every layer the stock Global material: it must
+    // shade the object in its own colour, like ByLayer and ByBlock, not as a
+    // white-specular material that washes true colours to grey (CAD-000021).
+    #[test]
+    fn the_stock_global_material_leaves_the_objects_own_colour() {
+        for name in ["Global", "GLOBAL"] {
+            let (document, line) = line_on_a_layer_with(named(name));
+            let material = resolve_material_with_base(&document, &line, RED, None, None);
+            assert!(material.handle.is_none(), "{name}: no material, the object's colour");
+            assert_eq!(material.diffuse, RED);
+            assert_eq!(material.specular, [0.08; 3], "{name}: no white specular");
+        }
+    }
+
+    #[test]
+    fn a_global_material_the_user_edited_stays_a_material() {
+        let mut overridden = named("Global");
+        overridden.diffuse_color = MaterialColor {
+            flag: 1,
+            factor: 1.0,
+            rgb: Some(0x00FF00),
+        };
+        let mut mapped = named("Global");
+        mapped.diffuse_map.file_name = "bois.jpg".to_string();
+        let mut procedural = named("Global");
+        procedural.bump_map.texture = Some(MaterialTexture::default());
+        for (case, material) in [("override", overridden), ("map", mapped), ("procedural", procedural)] {
+            let (document, line) = line_on_a_layer_with(material);
+            let material = resolve_material_with_base(&document, &line, RED, None, None);
+            assert!(material.handle.is_some(), "{case}: kept as a material");
+        }
+        let (document, line) = line_on_a_layer_with(named("Global"));
+        let MeshMaterial { diffuse, .. } = resolve_material_with_base(&document, &line, RED, None, None);
+        assert_eq!(diffuse, RED, "the stock one only");
+    }
+
+    #[test]
+    fn any_other_named_material_stays_a_material() {
+        let (document, line) = line_on_a_layer_with(named("Chene blanc"));
+        let material = resolve_material_with_base(&document, &line, RED, None, None);
+        assert!(material.handle.is_some());
+        assert_eq!(material.name, "Chene blanc");
     }
 
     #[test]
