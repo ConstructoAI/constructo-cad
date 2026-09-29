@@ -714,7 +714,6 @@ async fn load_web_bytes(
         fix_dxf_dimension_rotations(&mut doc);
         fix_dxf_layout_plot_settings(&mut doc);
     }
-    fix_viewport_status_flags(&mut doc);
     fix_current_style_names(&mut doc);
     progress.set(crate::app::OPEN_PHASE_CACHING, 7000, 0, 1);
     let dropped = purge_corrupt_entities(&mut doc);
@@ -755,7 +754,6 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
             let mut doc = DwgReader::from_stream(Cursor::new(bytes))
                 .read()
                 .map_err(|e| e.to_string())?;
-            fix_viewport_status_flags(&mut doc);
             fix_current_style_names(&mut doc);
             Ok(doc)
         }
@@ -766,7 +764,6 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
                 .map_err(|e| e.to_string())?;
             fix_dxf_dimension_rotations(&mut doc);
             fix_dxf_layout_plot_settings(&mut doc);
-            fix_viewport_status_flags(&mut doc);
             fix_current_style_names(&mut doc);
             Ok(doc)
         }
@@ -1031,7 +1028,6 @@ fn finalize_loaded_outcome(
         fix_dxf_dimension_rotations(doc);
         fix_dxf_layout_plot_settings(doc);
     }
-    fix_viewport_status_flags(doc);
     fix_current_style_names(doc);
     resolve_raster_image_paths(doc, path.parent());
     doc.source_path = Some(path.to_string_lossy().into_owned());
@@ -2461,19 +2457,181 @@ pub fn purge_corrupt_entities(doc: &mut CadDocument) -> usize {
     n
 }
 
-/// acadrust's ViewportStatusFlags::from_bits() maps bit 0 → is_on and bit 15 → locked,
-/// but the real DXF/DWG spec uses bit 15 (0x8000) → viewport on and bit 14 (0x4000) → locked.
-/// Files from AutoCAD and other tools always set bit 15 for active viewports, leaving bit 0
-/// clear, so acadrust reads every such viewport as off.  Correct that here after loading.
-fn fix_viewport_status_flags(doc: &mut CadDocument) {
-    for entity in doc.entities_mut() {
-        if let EntityType::Viewport(vp) = entity {
-            let bits = vp.status.to_bits();
-            // If bit 0 is not set but bit 15 is, this is an external-format viewport:
-            // treat bit 15 as "on" and bit 14 as "locked".
-            if (bits & 0x0001) == 0 && (bits & 0x8000) != 0 {
-                vp.status.is_on = true;
-                vp.status.locked = (bits & 0x4000) != 0;
+/// Tests of the on/off state of paper-space viewports, read and written through
+/// acadrust (patched: see the `[patch]` of Cargo.toml).
+///
+/// The rule is the DXF reference's: a viewport is OFF if and only if its status
+/// flags (group 90, the same bit-coded long in a DWG) carry 0x20000, or, in a
+/// DXF, its status (group 68) is 0. 0x8000 is "currently always enabled" and
+/// means nothing: AutoCAD always writes it, ezdxf — and ODA File Converter fed
+/// from one of its DXFs, the path of every Constructo plan — leaves it clear.
+/// Reading it as "on" is what emptied every layout of CAD-000020 in the ERP
+/// viewer (29 viewports flagged 0x4000 only).
+#[cfg(test)]
+mod viewport_status_tests {
+    use super::*;
+    use acadrust::entities::{Viewport, ViewportStatusFlags};
+    use acadrust::types::Vector3;
+    use acadrust::DxfVersion;
+
+    fn fixture(name: &str) -> Vec<u8> {
+        let path = format!("{}/tests/fixtures/viewports/{name}", env!("CARGO_MANIFEST_DIR"));
+        std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+    }
+
+    /// The content viewport (10 wide on paper in both fixtures) looking at (x, y).
+    fn content_viewport(doc: &CadDocument, x: f64, y: f64) -> &Viewport {
+        doc.entities()
+            .find_map(|e| match e {
+                EntityType::Viewport(vp)
+                    if (vp.width - 10.0).abs() < 1e-6
+                        && (vp.view_center.x - x).abs() < 1e-6
+                        && (vp.view_center.y - y).abs() < 1e-6 =>
+                {
+                    Some(vp)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("viewport looking at ({x}, {y}) missing"))
+    }
+
+    fn viewport_count(doc: &CadDocument) -> usize {
+        doc.entities()
+            .filter(|e| matches!(e, EntityType::Viewport(_)))
+            .count()
+    }
+
+    #[test]
+    fn group_90_follows_the_dxf_reference() {
+        // (group 90, on, locked)
+        let cases = [
+            (0x0_0000, true, false),
+            (0x0_4000, true, true), // ezdxf, and CAD-000020
+            (0x0_8000, true, false),
+            (0x0_C000, true, true), // AutoCAD
+            (0x0_8020, true, false),
+            (0x2_0000, false, false),
+            (0x2_8000, false, false), // AutoCAD, switched off
+            (0x2_C000, false, true),
+        ];
+        for (bits, on, locked) in cases {
+            let flags = ViewportStatusFlags::from_bits(bits);
+            assert_eq!((flags.is_on, flags.locked), (on, locked), "read {bits:#07x}");
+            let written = flags.to_bits();
+            assert_ne!(written & 0x8000, 0, "{bits:#07x}: 0x8000 is always written");
+            assert_eq!(written & 0x2_0000 != 0, !on, "{bits:#07x}: 0x20000 only when off");
+            assert_eq!(written & 0x4000 != 0, locked, "{bits:#07x}: lock kept");
+        }
+    }
+
+    // A DWG from another writer (ezdxf, then ODA File Converter): 12 viewports
+    // that differ only by their group 90, views far from the origin, a
+    // non-plotting layer. See `tests/fixtures/viewports/README.md`.
+    #[test]
+    fn a_dwg_viewport_is_off_only_with_0x20000() {
+        let doc = load_bytes("status-flags-ezdxf-oda.dwg", fixture("status-flags-ezdxf-oda.dwg"))
+            .expect("load");
+        assert_eq!(viewport_count(&doc), 14, "12 content viewports and 2 overall ones");
+        // (view center, group 90 written, locked)
+        let content: [((f64, f64), i32, bool); 12] = [
+            ((1000.0, 0.0), 0x0_4000, true),
+            ((1200.0, 0.0), 0x0_C000, true),
+            ((1400.0, 0.0), 0x0_8000, false),
+            ((1600.0, 0.0), 0x0_0000, false),
+            ((1800.0, 0.0), 0x2_8000, false),
+            ((2000.0, 0.0), 0x2_0000, false),
+            ((0.0, 0.0), 0x0_C000, true),
+            ((216000.0, 0.0), 0x0_C000, true),
+            ((0.0, -528000.0), 0x0_C000, true),
+            ((216000.0, -528000.0), 0x0_C000, true),
+            ((217200.0, -528000.0), 0x0_8000, false),
+            ((218400.0, -528000.0), 0x0_C000, true),
+        ];
+        for ((x, y), bits, locked) in content {
+            let vp = content_viewport(&doc, x, y);
+            assert_eq!(
+                (vp.status.is_on, vp.status.locked),
+                (bits & 0x2_0000 == 0, locked),
+                "group 90 = {bits:#07x}, view center ({x}, {y})"
+            );
+        }
+    }
+
+    // A DXF straight from ezdxf: 7 viewports that differ only by their groups
+    // 90 and 68. Off with 0x20000 (with or without 0x8000) or with status 0;
+    // status -1 ("on, but off screen") stays on.
+    #[test]
+    fn a_dxf_viewport_is_off_with_0x20000_or_status_0() {
+        let doc = load_bytes("status-flags-ezdxf.dxf", fixture("status-flags-ezdxf.dxf"))
+            .expect("load");
+        assert_eq!(viewport_count(&doc), 8, "7 content viewports and the overall one");
+        // (view center x, group 90, group 68, on, locked)
+        let content = [
+            (1000.0, 0x0_4000, 2, true, true),
+            (1200.0, 0x0_C000, 3, true, true),
+            (1400.0, 0x2_8000, 4, false, false),
+            (1600.0, 0x2_0000, 5, false, false),
+            (1800.0, 0x0_8000, 0, false, false),
+            (2000.0, 0x0_4000, -1, true, true),
+            (2200.0, 0x0_0000, 6, true, false),
+        ];
+        for (x, bits, status, on, locked) in content {
+            let vp = content_viewport(&doc, x, 0.0);
+            assert_eq!(
+                (vp.status.is_on, vp.status.locked),
+                (on, locked),
+                "group 90 = {bits:#07x}, group 68 = {status}"
+            );
+        }
+    }
+
+    /// A paper-space viewport of `width` (its identity here), on or off.
+    fn add_paper_viewport(doc: &mut CadDocument, on: bool, locked: bool, width: f64) {
+        let mut vp = Viewport::new();
+        vp.status.is_on = on;
+        vp.status.locked = locked;
+        vp.center = Vector3::new(18.0, 12.0, 0.0);
+        vp.width = width;
+        vp.height = 6.5;
+        vp.view_target = Vector3::new(1000.0, 0.0, 0.0);
+        vp.view_height = 78.0;
+        vp.common.owner_handle = doc.header.paper_space_block_handle;
+        doc.add_entity(EntityType::Viewport(vp)).unwrap();
+    }
+
+    fn state(doc: &CadDocument, width: f64) -> (bool, bool) {
+        doc.entities()
+            .find_map(|e| match e {
+                EntityType::Viewport(vp) if (vp.width - width).abs() < 1e-9 => {
+                    Some((vp.status.is_on, vp.status.locked))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("viewport of width {width} missing"))
+    }
+
+    // What the engine writes, it reads back: a viewport switched off here
+    // stays off after a save and a reload (written with 0x20000 and 0x8000, as
+    // AutoCAD does), one on stays on — through acadrust's real DWG and DXF
+    // writers and readers.
+    #[test]
+    fn on_and_off_survive_a_save_and_reload() {
+        let cases = [
+            (true, true, 10.0),
+            (true, false, 10.25),
+            (false, true, 10.5),
+            (false, false, 10.75),
+        ];
+        for ext in ["dwg", "dxf"] {
+            let mut doc = CadDocument::new();
+            crate::io::linetypes::populate_document(&mut doc);
+            for (on, locked, width) in cases {
+                add_paper_viewport(&mut doc, on, locked, width);
+            }
+            let bytes = save_to_bytes(&doc, ext, DxfVersion::AC1032).expect("save");
+            let loaded = load_bytes(&format!("fenetres.{ext}"), bytes).expect("reload");
+            for (on, locked, width) in cases {
+                assert_eq!(state(&loaded, width), (on, locked), "{ext}: on {on}, locked {locked}");
             }
         }
     }
