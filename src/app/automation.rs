@@ -213,10 +213,24 @@ fn entity_json(e: &acadrust::EntityType, detail: &str) -> Value {
         _ => {}
     }
     if detail == "full" {
-        let (min, max) = crate::scene::convert::tess::entity_bounds(e);
+        // D-11: a solid reopened from a DWG written without its wireframe cache
+        // has neither edges nor a box of its own; both are derived from its ACIS
+        // here, and `wires_derived` says so. Only `full` pays for it — the ERP
+        // never asks for `full`.
+        let derived = crate::scene::convert::acis_interop::derived_display(e);
+        let (min, max) = match &derived {
+            Some((_, min, max)) => (*min, *max),
+            None => crate::scene::convert::tess::entity_bounds(e),
+        };
         map.insert("bounds".into(), json!({ "min": min, "max": max }));
         if let Ok(Value::Object(wrapper)) = serde_json::to_value(e) {
-            if let Some((_, properties)) = wrapper.into_iter().next() {
+            if let Some((_, mut properties)) = wrapper.into_iter().next() {
+                if let (Some((wires, _, _)), Value::Object(fields)) = (&derived, &mut properties) {
+                    if let Ok(value) = serde_json::to_value(wires) {
+                        fields.insert("wires".into(), value);
+                        fields.insert("wires_derived".into(), Value::Bool(true));
+                    }
+                }
                 map.insert("properties".into(), properties);
             }
         }
@@ -738,6 +752,46 @@ impl OpenCADStudio {
 #[cfg(test)]
 mod tests {
     use crate::app::OpenCADStudio;
+
+    /// D-11 (T4, 2026-09-28): a solid read back from a DWG written without its
+    /// wireframe cache reported neither edges nor a box through `query`.
+    #[test]
+    fn query_full_derives_a_cacheless_solid_s_edges_and_box_from_its_acis() {
+        let cone = cadkernel::brep::make::cone([0.0; 3], 5.0, 30.0).unwrap();
+        let mut solid = acadrust::entities::Solid3D::new();
+        solid.set_sat_document(
+            &crate::scene::convert::acis_export::solid_to_sat(&cone).expect("ACIS"),
+        );
+        assert!(solid.wires.is_empty());
+        let entity = acadrust::EntityType::Solid3D(solid);
+
+        let full = super::entity_json(&entity, "full");
+        let wires = full["properties"]["wires"].as_array().expect("wires");
+        assert!(!wires.is_empty());
+        assert_eq!(full["properties"]["wires_derived"], true);
+        let near = |value: &serde_json::Value, expected: f64| {
+            (value.as_f64().expect("number") - expected).abs() < 1e-6
+        };
+        assert!(near(&full["bounds"]["min"][0], -5.0) && near(&full["bounds"]["min"][2], 0.0));
+        assert!(near(&full["bounds"]["max"][1], 5.0) && near(&full["bounds"]["max"][2], 30.0));
+
+        // Only `full` pays for it.
+        let summary = super::entity_json(&entity, "summary");
+        assert!(summary.get("properties").is_none() && summary.get("bounds").is_none());
+    }
+
+    #[test]
+    fn query_full_keeps_a_solid_s_own_cache() {
+        let cube = cadkernel::brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap();
+        let mut solid = acadrust::entities::Solid3D::new();
+        solid.set_sat_document(
+            &crate::scene::convert::acis_export::solid_to_sat(&cube).expect("ACIS"),
+        );
+        solid.wires = crate::scene::model::solid_model::edge_wires(&cube);
+        let full = super::entity_json(&acadrust::EntityType::Solid3D(solid), "full");
+        assert!(full["properties"].get("wires_derived").is_none());
+        assert_eq!(full["properties"]["wires"].as_array().map(Vec::len), Some(12));
+    }
 
     #[test]
     fn layout_notice_skips_grid_camera_and_scene_builds() {
