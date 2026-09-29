@@ -81,6 +81,18 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 
+# FORK CONSTRUCTO — acadrust (the cadcodec crate, also cadkernel's) comes
+# from the `deps/cadcodec-7ea4247-constructo` branch of THIS repository:
+# cadcodec 7ea4247134af60c8c1617426849d4fa8233660c8 as is (the rev pinned
+# above), then Constructo fixes, one commit each (paper-space viewports off if
+# and only if status bit 0x20000 is set or their DXF status is 0). A git
+# source, not a path: the plugin gate fingerprints acadrust by the commit hash
+# of its Cargo.lock source (`ocs_plugin_api::version_info`), and a path has
+# none. No cadcodec fork exists yet; moving this to a ConstructoAI fork, or
+# dropping it once upstream is fixed, only changes this section and the lock.
+[patch."https://github.com/HakanSeven12/cadcodec.git"]
+acadrust = { git = "https://github.com/ConstructoAI/constructo-cad.git", rev = "0f1be33f69740301b6069a1ad88184984786300b" }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "0.3"
 ocs_plugin_api = { path = "crates/ocs_plugin_api", features = ["host"] }
