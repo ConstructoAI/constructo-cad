@@ -86,7 +86,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.5.5"
-source = "git+https://github.com/ConstructoAI/constructo-cad.git?rev=0f1be33f69740301b6069a1ad88184984786300b#0f1be33f69740301b6069a1ad88184984786300b"
+source = "git+https://github.com/ConstructoAI/constructo-cad.git?rev=8d3c6041fc16c52825c78dee10a718974b6d678d#8d3c6041fc16c52825c78dee10a718974b6d678d"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
