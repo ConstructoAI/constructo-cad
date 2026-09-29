@@ -2748,8 +2748,19 @@ impl OpenCADStudio {
                     self.command_line
                         .push_output(crate::tf!("CDIMSTY = \"{cur}\"").as_ref());
                 } else {
-                    if self.tabs[i].scene.document.dim_styles.contains(&name_arg) {
-                        self.tabs[i].scene.document.header.current_dimstyle_name = name_arg.clone();
+                    let found = self.tabs[i]
+                        .scene
+                        .document
+                        .dim_styles
+                        .get(&name_arg)
+                        .map(|style| (style.name.clone(), style.handle));
+                    if let Some((style_name, handle)) = found {
+                        // Name AND handle: the DWG writer keeps only the
+                        // handle, and falls back to Standard without one.
+                        let header = &mut self.tabs[i].scene.document.header;
+                        header.current_dimstyle_name = style_name.clone();
+                        header.current_dimstyle_handle = handle;
+                        self.ribbon.active_dim_style = style_name;
                         self.tabs[i].dirty = true;
                         self.command_line
                             .push_output(crate::tf!("Active dim style set to \"{name_arg}\"").as_ref());

@@ -930,9 +930,9 @@ impl OpenCADStudio {
                                 self.push_undo_snapshot(i, "TABLESTYLE NEW");
                                 let mut style = TableStyle::standard();
                                 style.name = name.clone();
-                                let nh = acadrust::Handle::new(
-                                    self.tabs[i].scene.document.next_handle(),
-                                );
+                                // `next_handle` only peeks: the next object
+                                // made would have had the same handle.
+                                let nh = self.tabs[i].scene.document.allocate_handle();
                                 style.handle = nh;
                                 self.tabs[i]
                                     .scene
@@ -1009,9 +1009,9 @@ impl OpenCADStudio {
                                 self.push_undo_snapshot(i, "MLSTYLE NEW");
                                 let mut style = MLineStyle::standard();
                                 style.name = name.clone();
-                                let nh = acadrust::Handle::new(
-                                    self.tabs[i].scene.document.next_handle(),
-                                );
+                                // `next_handle` only peeks: the next object
+                                // made would have had the same handle.
+                                let nh = self.tabs[i].scene.document.allocate_handle();
                                 style.handle = nh;
                                 self.tabs[i]
                                     .scene
@@ -1126,7 +1126,13 @@ impl OpenCADStudio {
                                 "DIMSTYLE NEW",
                                 std::slice::from_ref(&name),
                             );
-                            let style = DimStyle::new(&name);
+                            let mut style = DimStyle::new(&name);
+                            // A handle of its own, as the style dialog gives.
+                            // With NULL, two new styles shared the handle 0:
+                            // an edit of the second through the records API
+                            // replaced the first, and the writers kept one of
+                            // them (T4, D-1).
+                            style.handle = self.tabs[i].scene.document.allocate_handle();
                             let _ = self.tabs[i].scene.document.dim_styles.add(style);
                             self.tabs[i].dirty = true;
                             self.commit_dim_style_undo(i, undo);
@@ -1140,7 +1146,95 @@ impl OpenCADStudio {
                         let style_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
                         let prop = parts.get(2).map(|s| s.to_lowercase()).unwrap_or_default();
                         let val_str = parts.get(3).map(|s| s.trim()).unwrap_or("");
-                        if let Ok(val) = val_str.parse::<f64>() {
+                        let arrow_property =
+                            matches!(prop.as_str(), "dimblk" | "dimblk1" | "dimblk2" | "dimldrblk");
+                        if arrow_property {
+                            // DIMSTYLE SET <style> dimblk _ARCHTICK — the
+                            // arrowhead by name; the standard block is made
+                            // in the drawing when it is missing.
+                            if !self.tabs[i].scene.document.dim_styles.contains(&style_name) {
+                                self.command_line.push_error(
+                                    crate::tf!("DIMSTYLE: '{}' not found.", style_name).as_ref(),
+                                );
+                            } else {
+                                match self.tabs[i].scene.ensure_standard_arrow_block(val_str) {
+                                    Err(message) => self
+                                        .command_line
+                                        .push_error(crate::tf!("DIMSTYLE: {message}.").as_ref()),
+                                    Ok((block, block_name)) => {
+                                        let undo = self.begin_dim_style_undo(
+                                            i,
+                                            "DIMSTYLE SET",
+                                            std::slice::from_ref(&style_name),
+                                        );
+                                        let style_before = self.tabs[i]
+                                            .scene
+                                            .document
+                                            .dim_styles
+                                            .get(&style_name)
+                                            .cloned();
+                                        if let Some(ds) = self.tabs[i]
+                                            .scene
+                                            .document
+                                            .dim_styles
+                                            .get_mut(&style_name)
+                                        {
+                                            match prop.as_str() {
+                                                // Both ends, as the reference
+                                                // application does for DIMBLK.
+                                                "dimblk" => {
+                                                    ds.dimblk = block;
+                                                    ds.dimblk_name = block_name.clone();
+                                                    ds.dimblk1 = block;
+                                                    ds.dimblk1_name = block_name.clone();
+                                                    ds.dimblk2 = block;
+                                                    ds.dimblk2_name = block_name.clone();
+                                                    ds.dimsah = false;
+                                                }
+                                                "dimblk1" => {
+                                                    ds.dimblk1 = block;
+                                                    ds.dimblk1_name = block_name.clone();
+                                                    ds.dimsah = true;
+                                                }
+                                                "dimblk2" => {
+                                                    ds.dimblk2 = block;
+                                                    ds.dimblk2_name = block_name.clone();
+                                                    ds.dimsah = true;
+                                                }
+                                                _ => {
+                                                    ds.dimldrblk = block;
+                                                }
+                                            }
+                                            // An arrowhead block draws only
+                                            // when DIMTSZ is 0: a tick size
+                                            // replaces every arrowhead.
+                                            if prop != "dimldrblk" {
+                                                ds.dimtsz = 0.0;
+                                            }
+                                        }
+                                        let style_after = self.tabs[i]
+                                            .scene
+                                            .document
+                                            .dim_styles
+                                            .get(&style_name)
+                                            .cloned();
+                                        if style_after != style_before {
+                                            self.tabs[i]
+                                                .scene
+                                                .refresh_dimensions_of_style(&style_name);
+                                        }
+                                        self.tabs[i].dirty = true;
+                                        self.commit_dim_style_undo(i, undo);
+                                        let shown =
+                                            if block_name.is_empty() { "." } else { block_name.as_str() };
+                                        self.command_line.push_output(
+                                            crate::tf!("DIMSTYLE: '{style_name}'.{prop} = {shown}")
+                                                .as_ref(),
+                                        );
+                                    }
+                                }
+                            }
+                        } else if let Ok(val) = val_str.parse::<f64>() {
                             let undo = self.begin_dim_style_undo(
                                 i,
                                 "DIMSTYLE SET",

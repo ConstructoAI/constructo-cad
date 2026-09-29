@@ -85,7 +85,9 @@ iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0
 # from the `deps/cadcodec-7ea4247-constructo` branch of THIS repository:
 # cadcodec 7ea4247134af60c8c1617426849d4fa8233660c8 as is (the rev pinned
 # above), then Constructo fixes, one commit each (paper-space viewports off if
-# and only if status bit 0x20000 is set or their DXF status is 0). A git
+# and only if status bit 0x20000 is set or their DXF status is 0 ; an
+# explicit transparency written in a DWG with method 2, as AutoCAD and ODA
+# do ; per-viewport layer overrides read through the layer's pointer). A git
 # source, not a path: the plugin gate fingerprints acadrust by the commit hash
 # of its Cargo.lock source (`ocs_plugin_api::version_info`), and a path has
 # none. No cadcodec fork exists yet; moving this to a ConstructoAI fork, or

@@ -2401,6 +2401,10 @@ pub(crate) enum ArrowKind {
     None,
     Triangle { size: f32, filled: bool, size_mul: f32 },
     Tick { size: f32 },
+    /// The `_ArchTick` block of the reference application: a stroke from
+    /// (-0.5, -0.5) to (0.5, 0.5) with a constant width of 0.15, scaled by
+    /// DIMASZ — short and heavy, where DIMTSZ draws a long thin stroke.
+    ArchTick { size: f32 },
     Open { size: f32, half_angle: f32 },
     Dot { size: f32, filled: bool },
     Origin { size: f32 },
@@ -2506,7 +2510,8 @@ fn builtin_arrow_from_block_name(name: &str, dimasz: f32) -> Option<ArrowKind> {
         // `ArrowKind::Tick` draws the stroke `size` to either side of the tip
         // (total 2·size — its `size` is a half-length, matching DIMTSZ). For
         // a block-selected tick DIMASZ is the full stroke length, so halve it.
-        "OBLIQUE" | "ARCHTICK" => Some(ArrowKind::Tick { size: dimasz * 0.5 }),
+        "OBLIQUE" => Some(ArrowKind::Tick { size: dimasz * 0.5 }),
+        "ARCHTICK" => Some(ArrowKind::ArchTick { size: dimasz }),
         "BOXFILLED" => Some(ArrowKind::Box_ {
             size: dimasz,
             filled: true,
@@ -2927,6 +2932,16 @@ pub(crate) fn append_arrow(g: &mut DimGeom, tip: Vec3, dir: Vec3, arrow: &ArrowK
             let off = (dir + perp).normalize_or_zero() * *size;
             add_segment(&mut g.dim_lines, tip - off, tip + off);
         }
+        ArrowKind::ArchTick { size } => {
+            // The block's stroke, (-0.5, -0.5)..(0.5, 0.5) along the dim line
+            // and across it, filled to its 0.15 width; the centre line keeps
+            // it visible when the width is below a pixel.
+            let [a, b, c, d] = arch_tick_corners(tip, dir, perp, *size);
+            let half = (dir + perp) * (*size * 0.5);
+            add_segment(&mut g.dim_lines, tip - half, tip + half);
+            push_tri(&mut g.arrow_fill, a, b, c);
+            push_tri(&mut g.arrow_fill, a, c, d);
+        }
         ArrowKind::Open { size, half_angle } => {
             let base = tip + dir * *size;
             let half_w = *size * half_angle.tan();
@@ -3027,6 +3042,24 @@ pub(crate) fn append_arrow(g: &mut DimGeom, tip: Vec3, dir: Vec3, arrow: &ArrowK
             }
         }
     }
+}
+
+impl ArrowKind {
+    /// A stroke across the dimension line rather than an arrowhead: the
+    /// DIMTSZ tick, `_Oblique` and `_ArchTick`. The dimension line then runs
+    /// DIMDLE past the extension lines and the marks never flip outside.
+    pub(crate) fn is_stroke(&self) -> bool {
+        matches!(self, ArrowKind::Tick { .. } | ArrowKind::ArchTick { .. })
+    }
+}
+
+/// The four corners of an architectural tick at `tip`: the stroke from
+/// `tip - (dir + perp) * size / 2` to `tip + (dir + perp) * size / 2`, widened
+/// by 0.15 × `size` square to it — the `_ArchTick` block's polyline.
+pub(crate) fn arch_tick_corners(tip: Vec3, dir: Vec3, perp: Vec3, size: f32) -> [Vec3; 4] {
+    let half = (dir + perp) * (size * 0.5);
+    let across = Vec3::new(-half.y, half.x, 0.0).normalize_or_zero() * (size * 0.075);
+    [tip - half - across, tip + half - across, tip + half + across, tip - half + across]
 }
 
 pub(crate) fn add_segment(points: &mut Vec<[f32; 3]>, a: Vec3, b: Vec3) {

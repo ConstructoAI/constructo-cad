@@ -44,6 +44,8 @@ mod tolerance_dialog;
 mod dimension_text_tests;
 #[cfg(test)]
 mod unit_catalog_tests;
+#[cfg(test)]
+mod style_table_tests;
 mod update;
 mod view;
 mod visibility;
