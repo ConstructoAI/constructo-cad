@@ -943,3 +943,36 @@ fn test_pline_arc_switch_preview_and_render() {
         }
     }
 }
+
+/// Every viewport of a paper sheet gets its own `Pipeline` slot. The slots
+/// must share the shader modules: on WebGL, wgpu caches linked GL programs by
+/// module identity, so private modules made each new slot compile and link
+/// every program again (about 10 s on sheet A300 of C22-025).
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn new_viewport_slots_reuse_the_shader_modules() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter =
+        block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).unwrap();
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .unwrap();
+    let mut pipeline = <MultiPipeline as iced::widget::shader::Pipeline>::new(
+        &device,
+        &queue,
+        wgpu::TextureFormat::Bgra8UnormSrgb,
+    );
+    let _ = pipeline.resolve_slots(&device, &queue, &[10]);
+    let modules = shader_cache::cached_module_count();
+    assert!(modules > 0, "the first slot creates its modules through the cache");
+    let slots = pipeline.resolve_slots(&device, &queue, &[10, 20, 30, 40]);
+    assert_eq!(slots.len(), 4);
+    assert!(pipeline.inners.len() >= 4);
+    assert_eq!(
+        shader_cache::cached_module_count(),
+        modules,
+        "three more viewport slots must not create a single new shader module"
+    );
+}

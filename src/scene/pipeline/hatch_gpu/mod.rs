@@ -71,18 +71,19 @@ impl HatchGpu {
             bind_group_layouts: &[frame_bind_group_layout, &bind_group_layout].map(Some),
             immediate_size: 0,
         });
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(if uses_storage {
+        let shader = crate::scene::pipeline::shader_cache::shared_shader_module(
+            device,
+            if uses_storage {
                 "hatch.storage.shader"
             } else {
                 "hatch.texture.shader"
-            }),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(if uses_storage {
+            },
+            if uses_storage {
                 draw_order_shader!("hatch.wgsl")
             } else {
                 draw_order_shader!("hatch_texture.wgsl")
-            })),
-        });
+            },
+        );
         let vertex_layouts = if uses_storage {
             vec![storage::HatchVertex::layout(), storage::HatchPlacement::layout()]
         } else {

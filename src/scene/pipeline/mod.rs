@@ -24,6 +24,7 @@ pub mod face3d_gpu;
 pub mod gpu_budget;
 pub mod gpu_upload;
 pub mod hatch_gpu;
+pub(crate) mod shader_cache;
 pub mod wipeout_gpu;
 pub mod image_gpu;
 pub mod mesh_gpu;
@@ -634,25 +635,25 @@ impl Pipeline {
         let depth_tex = create_depth_texture(device, Size::new(1, 1));
         let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let wire_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("wire.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(match wire_mode {
+        let wire_shader = shader_cache::shared_shader_module(
+            device,
+            "wire.shader",
+            match wire_mode {
                 wire_gpu::WirePipelineMode::IndexedStorage => {
                     draw_order_shader!("wire_indexed.wgsl")
                 }
                 wire_gpu::WirePipelineMode::Packed => draw_order_shader!("wire.wgsl"),
-            })),
-        });
-        let block_wire_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("block_wire.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
-                if wire_mode.uses_storage() {
-                    draw_order_shader!("block_wire_storage.wgsl")
-                } else {
-                    draw_order_shader!("block_wire.wgsl")
-                },
-            )),
-        });
+            },
+        );
+        let block_wire_shader = shader_cache::shared_shader_module(
+            device,
+            "block_wire.shader",
+            if wire_mode.uses_storage() {
+                draw_order_shader!("block_wire_storage.wgsl")
+            } else {
+                draw_order_shader!("block_wire.wgsl")
+            },
+        );
 
         // Stencil test shared by every paper content pipeline: draw only where
         // the stencil equals the bound reference. Non-clipped content binds
@@ -673,12 +674,11 @@ impl Pipeline {
             write_mask: 0x00,
         };
 
-        let background_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("background.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/background.wgsl"
-            ))),
-        });
+        let background_shader = shader_cache::shared_shader_module(
+            device,
+            "background.shader",
+            include_str!("../../shaders/background.wgsl"),
+        );
         let background_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("background.pipeline_layout"),
             bind_group_layouts: &[Some(&frame_bgl)],
@@ -769,12 +769,11 @@ impl Pipeline {
         // no colour, no depth, stencil `Invert` (even-odd fill → interior marked
         // for any polygon, convex or not). The boundary is drawn as a triangle
         // fan in paper coordinates and transformed exactly like wires.
-        let clip_mask_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("clip_mask.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/clip_mask.wgsl"
-            ))),
-        });
+        let clip_mask_shader = shader_cache::shared_shader_module(
+            device,
+            "clip_mask.shader",
+            include_str!("../../shaders/clip_mask.wgsl"),
+        );
         let clip_mask_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("clip_mask.pipeline_layout"),
             bind_group_layouts: &[],
@@ -1033,12 +1032,11 @@ impl Pipeline {
             immediate_size: 0,
         });
 
-        let wipeout_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("wipeout.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(draw_order_shader!(
-                "wipeout.wgsl"
-            ))),
-        });
+        let wipeout_shader = shader_cache::shared_shader_module(
+            device,
+            "wipeout.shader",
+            draw_order_shader!("wipeout.wgsl"),
+        );
 
         let wipeout_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("wipeout.pipeline"),
@@ -1121,12 +1119,11 @@ impl Pipeline {
         );
 
         // ── Mesh pipeline ──────────────────────────────────────────────────
-        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mesh.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/mesh.wgsl"
-            ))),
-        });
+        let mesh_shader = shader_cache::shared_shader_module(
+            device,
+            "mesh.shader",
+            include_str!("../../shaders/mesh.wgsl"),
+        );
         let mesh_material_bgl =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("mesh.material.bgl"),
@@ -1278,12 +1275,11 @@ impl Pipeline {
             immediate_size: 0,
         });
 
-        let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("shadow.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/shadow.wgsl"
-            ))),
-        });
+        let shadow_shader = shader_cache::shared_shader_module(
+            device,
+            "shadow.shader",
+            include_str!("../../shaders/shadow.wgsl"),
+        );
         let shadow_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("shadow.pipeline_layout"),
             bind_group_layouts: &[&shadow_frame_bgl, &mesh_material_bgl].map(Some),
@@ -1687,12 +1683,11 @@ impl Pipeline {
             "fs_edge_black",
             mesh_gpu::MeshVertex::edge_layout(),
         );
-        let silhouette_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mesh.silhouette.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/silhouette.wgsl"
-            ))),
-        });
+        let silhouette_shader = shader_cache::shared_shader_module(
+            device,
+            "mesh.silhouette.shader",
+            include_str!("../../shaders/silhouette.wgsl"),
+        );
         let silhouette_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("mesh.silhouette.layout"),
@@ -1847,18 +1842,16 @@ impl Pipeline {
             });
 
         // ── Face3D pipeline ────────────────────────────────────────────────
-        let face3d_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("face3d.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(draw_order_shader!(
-                "face3d.wgsl"
-            ))),
-        });
-        let block_face3d_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("block_face3d.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(draw_order_shader!(
-                "block_face3d.wgsl"
-            ))),
-        });
+        let face3d_shader = shader_cache::shared_shader_module(
+            device,
+            "face3d.shader",
+            draw_order_shader!("face3d.wgsl"),
+        );
+        let block_face3d_shader = shader_cache::shared_shader_module(
+            device,
+            "block_face3d.shader",
+            draw_order_shader!("block_face3d.wgsl"),
+        );
 
         let face3d_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("face3d.pipeline_layout"),
@@ -2059,12 +2052,11 @@ impl Pipeline {
             immediate_size: 0,
         });
 
-        let image_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("image.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(draw_order_shader!(
-                "image.wgsl"
-            ))),
-        });
+        let image_shader = shader_cache::shared_shader_module(
+            device,
+            "image.shader",
+            draw_order_shader!("image.wgsl"),
+        );
 
         let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("image.pipeline"),
@@ -2151,12 +2143,11 @@ impl Pipeline {
         let resolve_view = resolve_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
         // ── Blit pipeline (resolve texture → surface target) ──────────────
-        let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("blit.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/blit.wgsl"
-            ))),
-        });
+        let blit_shader = shader_cache::shared_shader_module(
+            device,
+            "blit.shader",
+            include_str!("../../shaders/blit.wgsl"),
+        );
 
         let blit_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("blit.bgl"),
