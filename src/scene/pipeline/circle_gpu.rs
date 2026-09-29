@@ -111,10 +111,11 @@ pub fn create_pipelines(
     sample_count: u32,
     content_stencil: &wgpu::StencilState,
 ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("circle.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(draw_order_shader!("circle.wgsl").into()),
-    });
+    let shader = crate::scene::pipeline::shader_cache::shared_shader_module(
+        device,
+        "circle.wgsl",
+        draw_order_shader!("circle.wgsl"),
+    );
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("circle.pipeline.layout"),
         bind_group_layouts: &[Some(frame_bgl)],

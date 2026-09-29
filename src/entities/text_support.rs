@@ -873,6 +873,13 @@ pub fn resolve_font<'a>(state: &'a RunState, base: &'a str) -> std::borrow::Cow<
         return std::borrow::Cow::Borrowed(font);
     }
     if let Some(canonical) = crate::scene::text::sysfont::canonical_family_name(font) {
+        // `\f…|b1;` asks for the bold face; only reachable where the bold face
+        // is a family of its own (the web build's Arial substitute).
+        if state.bold {
+            if let Some(bold) = crate::scene::text::sysfont::bold_variant(&canonical) {
+                return std::borrow::Cow::Borrowed(bold);
+            }
+        }
         std::borrow::Cow::Owned(canonical)
     } else {
         std::borrow::Cow::Borrowed(base)

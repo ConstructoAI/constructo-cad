@@ -155,7 +155,7 @@ pub fn glyph(family: &str, ch: char) -> Option<Arc<Glyph>> {
     let built = sysfont::with_face_data(family, |data, index| {
         let face = ttf_parser::Face::parse(data, index).ok()?;
         let gid = face.glyph_index(ch)?;
-        let k = cap_scale(&face);
+        let k = cap_scale_for(family, &face);
 
         let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
         let mut fl = OutlineFlattener::new(k);
@@ -186,6 +186,16 @@ fn cap_scale(face: &ttf_parser::Face) -> f32 {
         .map(|c| c as f32)
         .unwrap_or(0.7 * upem);
     CAP_UNITS / cap
+}
+
+/// [`cap_scale`] for a face resolved by family: a face standing in for
+/// another font (the embedded Arial substitute) takes that font's cap height,
+/// so its texts keep the size they have with the real font.
+fn cap_scale_for(family: &str, face: &ttf_parser::Face) -> f32 {
+    match sysfont::cap_height_override(family) {
+        Some(cap) => CAP_UNITS / cap,
+        None => cap_scale(face),
+    }
 }
 
 fn triangulate_contours(contours: &[Vec<[f32; 2]>]) -> Vec<[f32; 2]> {
@@ -397,8 +407,18 @@ fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
+fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
+
+    // The shaper below only knows the per-script Noto fonts. A face embedded
+    // for a drawing's own style (the Arial substitute) must keep its glyphs:
+    // no run, and the caller lays the text out glyph by glyph from that face
+    // (Latin text needs no shaping; complex scripts still come here).
+    if sysfont::is_embedded_family(family)
+        && !crate::scene::text::web_font::requires_shaping(text)
+    {
+        return None;
+    }
 
     let mut fonts: Vec<Arc<Vec<u8>>> = Vec::new();
     let mut waiting = false;
@@ -494,11 +514,12 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     let mut primary_metrics = sysfont::with_face_data(family, |data, idx| {
         let f = ttf_parser::Face::parse(data, idx).ok()?;
         let upem = f.units_per_em() as f32;
-        let cap = f
-            .capital_height()
-            .filter(|&c| c > 0)
-            .map(|c| c as f32)
-            .unwrap_or(0.7 * upem);
+        let cap = sysfont::cap_height_override(family).unwrap_or_else(|| {
+            f.capital_height()
+                .filter(|&c| c > 0)
+                .map(|c| c as f32)
+                .unwrap_or(0.7 * upem)
+        });
         Some((upem, cap))
     })
     .flatten();

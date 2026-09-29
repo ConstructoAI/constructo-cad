@@ -146,6 +146,87 @@ fn is_active_vport_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("*Active")
 }
 
+/// What a model view restored on open is worth (see
+/// `Scene::saved_model_view_verdict`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SavedModelView {
+    /// A chosen view that shows the drawing: kept as saved.
+    Shows,
+    /// A chosen view that misses the drawing: framed on the drawing instead.
+    MissesDrawing,
+    /// Nobody chose it: the drawing's default opening view instead.
+    Placeholder,
+}
+
+/// Share of the screen the drawing must cover for a saved view to be kept.
+const MIN_OPENING_VIEW_COVERAGE: f64 = 0.01;
+
+/// Whether a `*Active` entry is the placeholder a writer leaves when nobody
+/// ever set a view: a plan view of the origin, untwisted, whose height is
+/// either this engine's default camera (written by every headless save — the
+/// ERP's server — as `ortho_size × 2`, 50.0039) or a fresh VPORT's.
+fn is_placeholder_vport(vport: &acadrust::tables::VPort) -> bool {
+    let plan = vport.view_direction.x.abs() < 1e-9
+        && vport.view_direction.y.abs() < 1e-9
+        && vport.view_direction.z > 0.0;
+    let at_origin = [
+        vport.view_target.x,
+        vport.view_target.y,
+        vport.view_target.z,
+        vport.view_center.x,
+        vport.view_center.y,
+    ]
+    .iter()
+    .all(|v| v.abs() < 1e-9);
+    let default_heights = [
+        view::camera::Camera::default().ortho_size() as f64 * 2.0,
+        acadrust::tables::VPort::new("*Active").view_height,
+    ];
+    let default_height = default_heights
+        .iter()
+        .any(|h| (vport.view_height - h).abs() <= 1e-4 * h.abs().max(1.0));
+    plan && at_origin && vport.view_twist.abs() < 1e-9 && default_height
+}
+
+/// Fraction of a camera's screen (width = `aspect` × height) covered by the
+/// projection of the box `min`–`max`: 0 when the box is off screen, 1 when it
+/// fills the view.
+fn view_coverage(
+    camera: &view::camera::Camera,
+    min: glam::DVec3,
+    max: glam::DVec3,
+    aspect: f64,
+) -> f64 {
+    let right = (camera.rotation * glam::Vec3::X).as_dvec3();
+    let up = (camera.rotation * glam::Vec3::Y).as_dvec3();
+    let (mut u0, mut u1, mut v0, mut v1) = (
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    );
+    for corner in 0..8 {
+        let point = glam::DVec3::new(
+            if corner & 1 == 0 { min.x } else { max.x },
+            if corner & 2 == 0 { min.y } else { max.y },
+            if corner & 4 == 0 { min.z } else { max.z },
+        ) - camera.target;
+        let (u, v) = (point.dot(right), point.dot(up));
+        u0 = u0.min(u);
+        u1 = u1.max(u);
+        v0 = v0.min(v);
+        v1 = v1.max(v);
+    }
+    let half_height = camera.ortho_size() as f64;
+    let half_width = half_height * aspect;
+    if !(half_height > 0.0 && half_width > 0.0) {
+        return 0.0;
+    }
+    let overlap_u = (u1.min(half_width) - u0.max(-half_width)).max(0.0);
+    let overlap_v = (v1.min(half_height) - v0.max(-half_height)).max(0.0);
+    (overlap_u * overlap_v) / (4.0 * half_width * half_height)
+}
+
 impl Scene {
     /// A geometry mutation makes every fitted Model camera AABB stale. Clear
     /// both the live camera and inactive tile snapshots immediately so no view
@@ -1161,12 +1242,28 @@ impl Scene {
 
 
     /// Restore the camera from the file's saved view (called once on open).
-    /// Falls back to fit_all() if no saved view is available.
+    /// Falls back to fit_all() if no saved view is available — and, in model
+    /// space, when the saved view is not one anybody chose (the placeholder a
+    /// writer leaves when it never set a view) or does not show the drawing.
     pub fn restore_saved_camera(&mut self) {
         let restored = if self.current_layout == "Model" {
             // Tiled-layout restore takes precedence — it sets the camera too.
             // Single-tile files fall through to the *Active branch.
-            self.restore_model_tiles_from_vports() || self.apply_active_vport_camera()
+            if self.restore_model_tiles_from_vports() {
+                true
+            } else if self.apply_active_vport_camera() {
+                match self.saved_model_view_verdict() {
+                    SavedModelView::Shows => true,
+                    SavedModelView::MissesDrawing => false,
+                    SavedModelView::Placeholder => {
+                        self.adopt_default_model_view();
+                        false
+                    }
+                }
+            } else {
+                self.adopt_default_model_view();
+                false
+            }
         } else {
             // Every paper layout has a full-screen sheet viewport that holds
             // its view; create one if a loaded file lacks it.
@@ -1184,6 +1281,75 @@ impl Scene {
         } else {
             self.fit_all();
         }
+    }
+
+    /// Judge the model view just restored from `*Active` against the drawing.
+    ///
+    /// Two kinds of saved view are not an opening view: the PLACEHOLDER a
+    /// writer leaves when it never set one — this engine's default camera
+    /// (plan view of the origin, 50 units high: every drawing made headless by
+    /// the ERP's server, like CAD-000018, opened on a few strokes of a 4'-2"
+    /// square) or a fresh VPORT (10 units) — and a view that MISSES the drawing
+    /// (panned away, or zoomed out until the drawing is a dot). A view somebody
+    /// chose is kept, however close: an architect's saved detail view of a
+    /// large plan covers the screen with drawing and stays as saved.
+    fn saved_model_view_verdict(&self) -> SavedModelView {
+        let Some(vport) = self
+            .document
+            .vports
+            .iter()
+            .find(|v| is_active_vport_name(&v.name))
+        else {
+            return SavedModelView::Shows;
+        };
+        let Some((min, max)) = self.model_space_extents() else {
+            // Nothing to fit: the saved view is as good as any.
+            return SavedModelView::Shows;
+        };
+        if is_placeholder_vport(vport) {
+            return SavedModelView::Placeholder;
+        }
+        let aspect = self.last_render_aspect.get();
+        let aspect = if aspect.is_finite() && aspect > 0.01 {
+            aspect
+        } else {
+            16.0 / 9.0
+        };
+        let coverage = view_coverage(&self.camera.borrow(), min.as_dvec3(), max.as_dvec3(), aspect as f64);
+        if coverage >= MIN_OPENING_VIEW_COVERAGE {
+            SavedModelView::Shows
+        } else {
+            SavedModelView::MissesDrawing
+        }
+    }
+
+    /// The view a drawing opens on when it has none of its own: plan view for
+    /// a 2-D drawing (the camera as it stands); an isometric, shaded view when
+    /// model space holds 3-D content (solids and meshes with real depth), as a
+    /// modeller would show it. `fit_all` then frames it.
+    fn adopt_default_model_view(&mut self) {
+        let Some((min, max)) = self.model_space_extents() else {
+            return;
+        };
+        let size = max - min;
+        let depth_is_real = size.z > 0.01 * size.x.max(size.y).max(1e-6);
+        if self.meshes.is_empty() || !depth_is_real {
+            return;
+        }
+        // AutoCAD's « SE isometric » viewpoint (1, -1, 1).
+        let direction = glam::Vec3::new(1.0, -1.0, 1.0).normalize();
+        let pitch = direction.z.asin();
+        let yaw = direction.x.atan2(-direction.y);
+        {
+            let mut camera = self.camera.borrow_mut();
+            camera.yaw = yaw;
+            camera.pitch = pitch;
+            camera.rotation = view::camera::yaw_pitch_to_quat(yaw, pitch, 0.0);
+        }
+        self.camera_generation += 1;
+        self.set_active_model_tile_render_mode(
+            acadrust::entities::ViewportRenderMode::GouraudShaded,
+        );
     }
 
     /// Size the camera's near/far from the drawing's own recorded extent,
@@ -1567,4 +1733,90 @@ impl Scene {
     }
 
     pub fn update(&mut self, _dt: Duration) {}
+}
+
+#[cfg(test)]
+mod opening_view_tests {
+    use super::*;
+    use acadrust::tables::VPort;
+    use acadrust::types::{Vector2, Vector3};
+
+    fn vport(target: [f64; 3], center: [f64; 2], height: f64, direction: [f64; 3]) -> VPort {
+        let mut entry = VPort::new("*Active");
+        entry.view_target = Vector3::new(target[0], target[1], target[2]);
+        entry.view_center = Vector2::new(center[0], center[1]);
+        entry.view_height = height;
+        entry.view_direction = Vector3::new(direction[0], direction[1], direction[2]);
+        entry
+    }
+
+    #[test]
+    fn placeholders_are_the_views_nobody_set() {
+        let engine_default = view::camera::Camera::default().ortho_size() as f64 * 2.0;
+        assert!((engine_default - 50.0039).abs() < 1e-3, "{engine_default}");
+        // As written by a headless save of this engine (CAD-000018: 50.00386428833008).
+        assert!(is_placeholder_vport(&vport([0.0; 3], [0.0; 2], 50.00386428833008, [0.0, 0.0, 1.0])));
+        assert!(is_placeholder_vport(&VPort::new("*Active")), "a fresh VPORT (10 units)");
+        // Anything somebody chose is not.
+        assert!(!is_placeholder_vport(&vport([0.0; 3], [120.0, 40.0], 50.0039, [0.0, 0.0, 1.0])));
+        assert!(!is_placeholder_vport(&vport([5.0, 0.0, 0.0], [0.0; 2], 50.0039, [0.0, 0.0, 1.0])));
+        assert!(!is_placeholder_vport(&vport([0.0; 3], [0.0; 2], 75.0, [0.0, 0.0, 1.0])));
+        assert!(!is_placeholder_vport(&vport([0.0; 3], [0.0; 2], 50.0039, [-1.0, -1.0, 0.8])));
+    }
+
+    #[test]
+    fn coverage_measures_how_much_of_the_screen_the_drawing_fills() {
+        let mut camera = view::camera::Camera::default(); // plan view, ortho half-height 25
+        camera.target = glam::DVec3::new(100.0, 100.0, 0.0);
+        let (lo, hi) = (glam::DVec3::new(50.0, 75.0, 0.0), glam::DVec3::new(150.0, 125.0, 0.0));
+        // Box 100 x 50 around the target; view 50 x 50 (aspect 1): fills it.
+        assert!((view_coverage(&camera, lo, hi, 1.0) - 1.0).abs() < 1e-3);
+        // Panned away: nothing on screen.
+        camera.target = glam::DVec3::new(1000.0, 1000.0, 0.0);
+        assert_eq!(view_coverage(&camera, lo, hi, 1.0), 0.0);
+        // Zoomed far out: a dot.
+        camera.target = glam::DVec3::new(100.0, 100.0, 0.0);
+        camera.distance *= 1000.0;
+        assert!(view_coverage(&camera, lo, hi, 1.0) < MIN_OPENING_VIEW_COVERAGE);
+    }
+
+    /// A scene with one line far from the origin and the given `*Active` view.
+    fn scene_with(view: VPort) -> Scene {
+        let mut scene = Scene::new();
+        let mut line = acadrust::entities::Line::new();
+        line.start = Vector3::new(500.0, 500.0, 0.0);
+        line.end = Vector3::new(600.0, 560.0, 0.0);
+        scene.add_entity(EntityType::Line(line));
+        scene.document.vports.add_or_replace(view);
+        scene
+    }
+
+    fn target(scene: &Scene) -> glam::DVec3 {
+        scene.camera.borrow().target
+    }
+
+    // The ERP's headless saves leave the engine's default view: the drawing
+    // opens framed on its content, not on the origin.
+    #[test]
+    fn a_placeholder_view_opens_framed_on_the_drawing() {
+        let mut scene = scene_with(vport([0.0; 3], [0.0; 2], 50.00386428833008, [0.0, 0.0, 1.0]));
+        scene.restore_saved_camera();
+        let t = target(&scene);
+        assert!((t.x - 550.0).abs() < 5.0 && (t.y - 530.0).abs() < 5.0, "{t}");
+        assert_eq!(scene.active_model_tile_render_mode(), acadrust::entities::ViewportRenderMode::Wireframe2D, "2-D stays in plan");
+    }
+
+    // A view somebody chose is kept, even a close-up; one that misses the
+    // drawing is framed on it (in its own direction).
+    #[test]
+    fn a_chosen_view_is_kept_unless_it_misses_the_drawing() {
+        let mut close_up = scene_with(vport([540.0, 520.0, 0.0], [0.0; 2], 20.0, [0.0, 0.0, 1.0]));
+        close_up.restore_saved_camera();
+        assert_eq!(target(&close_up), glam::DVec3::new(540.0, 520.0, 0.0), "kept as saved");
+
+        let mut away = scene_with(vport([9000.0, -4000.0, 0.0], [0.0; 2], 80.0, [0.0, 0.0, 1.0]));
+        away.restore_saved_camera();
+        let t = target(&away);
+        assert!((t.x - 550.0).abs() < 5.0 && (t.y - 530.0).abs() < 5.0, "framed: {t}");
+    }
 }

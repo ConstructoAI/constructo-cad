@@ -15,11 +15,18 @@ struct Uniforms {
     lineweight_scale: f32,
     view_rot:         mat4x4<f32>,
     eye_high:         vec3<f32>,
-    _pad_eh:          f32,
+    ink_mode:          f32,
     eye_low:          vec3<f32>,
-    _pad_el:          f32,
+    ink_level:          f32,
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
+
+// Display-only monochrome print view (`ink_mode`, `ink_level`: see
+// `scene::pipeline::uniforms::set_display_monochrome`): the colour gives way to
+// the ink grey, the alpha is kept.
+fn ink(rgb: vec3<f32>) -> vec3<f32> {
+    return select(rgb, vec3<f32>(u.ink_level), u.ink_mode > 0.5);
+}
 
 // Per-wire constants (std430). Must match `WireConst` in wire_gpu.rs.
 struct WireConst {
@@ -312,7 +319,7 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
         }
     }
     let alpha = select(1.0, in.color.a, u.transparency_enable > 0.5);
-    return vec4<f32>(in.color.rgb, alpha);
+    return vec4<f32>(ink(in.color.rgb), alpha);
 }
 
 // Black variant: used for 3D mesh outline edges in filled render modes so the

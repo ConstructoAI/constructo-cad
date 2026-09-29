@@ -7,11 +7,18 @@ struct Uniforms {
     _pad: vec2<f32>,
     view_rot: mat4x4<f32>,
     eye_high: vec3<f32>,
-    _pad_eh: f32,
+    ink_mode: f32,
     eye_low: vec3<f32>,
-    _pad_el: f32,
+    ink_level: f32,
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
+
+// Display-only monochrome print view (`ink_mode`, `ink_level`: see
+// `scene::pipeline::uniforms::set_display_monochrome`): the colour gives way to
+// the ink grey, the alpha is kept.
+fn ink(rgb: vec3<f32>) -> vec3<f32> {
+    return select(rgb, vec3<f32>(u.ink_level), u.ink_mode > 0.5);
+}
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
@@ -41,5 +48,5 @@ fn vs_main(v: VertexIn) -> VertexOut {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    return in.color;
+    return vec4<f32>(ink(in.color.rgb), in.color.a);
 }

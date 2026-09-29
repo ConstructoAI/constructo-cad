@@ -91,7 +91,7 @@ iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0
 # none. No cadcodec fork exists yet; moving this to a ConstructoAI fork, or
 # dropping it once upstream is fixed, only changes this section and the lock.
 [patch."https://github.com/HakanSeven12/cadcodec.git"]
-acadrust = { git = "https://github.com/ConstructoAI/constructo-cad.git", rev = "0f1be33f69740301b6069a1ad88184984786300b" }
+acadrust = { git = "https://github.com/ConstructoAI/constructo-cad.git", rev = "9eee9ca9fac29dca3deac62d7bfb8a9376f7f633" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "0.3"
