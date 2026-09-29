@@ -26,10 +26,19 @@ struct Fixture {
     other_viewport: Handle,
 }
 
+/// A layer as the readers and the engines leave it: with its own handle
+/// (`Table::add` does not allocate one, and a layer without a handle would
+/// share the null owner of the root dictionary).
+fn add_layer(doc: &mut CadDocument, name: &str) {
+    let mut layer = Layer::new(name);
+    layer.handle = doc.allocate_handle();
+    doc.layers.add(layer).unwrap();
+}
+
 fn fixture() -> Fixture {
     let mut doc = CadDocument::new();
-    doc.layers.add(Layer::new("OVERRIDDEN")).unwrap();
-    doc.layers.add(Layer::new("PLAIN")).unwrap();
+    add_layer(&mut doc, "OVERRIDDEN");
+    add_layer(&mut doc, "PLAIN");
     let mut first = Viewport::new();
     first.id = 2;
     let overridden_viewport = doc
