@@ -430,23 +430,33 @@ pub fn resolve_material_with_base(
     material
 }
 
-/// AutoCAD's "Global" material as every drawing carries it: the default
-/// material of every layer (so of every ByLayer object), diffuse "use the
-/// object's colour", no map. It stands for "no material" — AutoCAD shades such
-/// objects in their own colour, like the ByLayer and ByBlock placeholders.
+/// The "Global" material as drawings carry it: the default material of every
+/// layer (so of every ByLayer object), with no map. It stands for "no
+/// material" — AutoCAD shades such objects in their own colour, like the
+/// ByLayer and ByBlock placeholders.
 ///
-/// Rendered as a real material it cost every object its colour: a white
-/// specular at full factor (against 0.08 for a plain colour) that also weights
-/// the environment reflection, and no visual-style highlight control
-/// (`source_state.z`, the handle). True colours came out washed to grey with
-/// white hot spots — CAD-000021 in the ERP viewer (140 MESH on layers carrying
-/// ODA's Global) — while the same boxes on a ByLayer-material layer kept theirs.
+/// Two stock forms exist. AutoCAD writes its diffuse as "use the object's
+/// colour" (method 0). ezdxf — and so every drawing built on it, the
+/// Constructo plan and model generators included, even after ODA File
+/// Converter — writes ByBlock, ByLayer and Global with the diffuse OVERRIDDEN
+/// to white (method 1, 0xC2FFFFFF, factor 1): its `Material.DEFAULT_ATTRIBS`.
+/// Rendered as a material, that white replaced every object's colour, the
+/// object colour only surviving in the ambient term, plus a white specular at
+/// full factor (against 0.08 for a plain colour) that also weights the
+/// environment reflection, and no visual-style highlight control
+/// (`source_state.z`, the handle). True colours came out washed to grey, pink
+/// or pale with white hot spots — CAD-000021 in the ERP viewer, 140 MESH —
+/// while the same boxes on a layer whose material is ByLayer kept theirs.
 ///
-/// A Global the user did edit — diffuse colour overridden, or any map — stays
-/// a material.
+/// A Global the user did edit — a map, or a diffuse overridden with any colour
+/// but white at full factor — stays a material.
 fn is_stock_global(material: &Material) -> bool {
+    let diffuse = &material.diffuse_color;
+    let object_colour = diffuse.flag != 1
+        || (diffuse.factor >= 1.0 - 1e-9
+            && diffuse.rgb.map(|packed| packed as u32 & 0x00FF_FFFF) == Some(0x00FF_FFFF));
     material.name.eq_ignore_ascii_case("Global")
-        && material.diffuse_color.flag != 1
+        && object_colour
         && [
             &material.diffuse_map,
             &material.specular_map,
@@ -666,17 +676,34 @@ mod tests {
 
     const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 
-    // ODA and AutoCAD give every layer the stock Global material: it must
+    /// The Global material as ezdxf writes it (and ODA keeps it): diffuse
+    /// overridden to white, 0xC2FFFFFF, factor 1.
+    fn ezdxf_global() -> Material {
+        let mut material = named("Global");
+        material.diffuse_color = MaterialColor {
+            flag: 1,
+            factor: 1.0,
+            rgb: Some(0xC2FF_FFFFu32 as i32),
+        };
+        material
+    }
+
+    // Every layer carries the stock Global material, in AutoCAD's form
+    // (diffuse by object) or in ezdxf's (diffuse overridden to white): it must
     // shade the object in its own colour, like ByLayer and ByBlock, not as a
-    // white-specular material that washes true colours to grey (CAD-000021).
+    // white material that washes true colours to grey (CAD-000021).
     #[test]
     fn the_stock_global_material_leaves_the_objects_own_colour() {
-        for name in ["Global", "GLOBAL"] {
-            let (document, line) = line_on_a_layer_with(named(name));
+        for (case, stock) in [
+            ("AutoCAD", named("Global")),
+            ("AutoCAD, capitals", named("GLOBAL")),
+            ("ezdxf", ezdxf_global()),
+        ] {
+            let (document, line) = line_on_a_layer_with(stock);
             let material = resolve_material_with_base(&document, &line, RED, None, None);
-            assert!(material.handle.is_none(), "{name}: no material, the object's colour");
-            assert_eq!(material.diffuse, RED);
-            assert_eq!(material.specular, [0.08; 3], "{name}: no white specular");
+            assert!(material.handle.is_none(), "{case}: no material, the object's colour");
+            assert_eq!(material.diffuse, RED, "{case}");
+            assert_eq!(material.specular, [0.08; 3], "{case}: no white specular");
         }
     }
 
@@ -692,7 +719,17 @@ mod tests {
         mapped.diffuse_map.file_name = "bois.jpg".to_string();
         let mut procedural = named("Global");
         procedural.bump_map.texture = Some(MaterialTexture::default());
-        for (case, material) in [("override", overridden), ("map", mapped), ("procedural", procedural)] {
+        let mut dimmed_white = ezdxf_global();
+        dimmed_white.diffuse_color.factor = 0.5;
+        let mut ezdxf_with_a_map = ezdxf_global();
+        ezdxf_with_a_map.diffuse_map.file_name = "bois.jpg".to_string();
+        for (case, material) in [
+            ("override", overridden),
+            ("map", mapped),
+            ("procedural", procedural),
+            ("white at half factor", dimmed_white),
+            ("ezdxf white with a map", ezdxf_with_a_map),
+        ] {
             let (document, line) = line_on_a_layer_with(material);
             let material = resolve_material_with_base(&document, &line, RED, None, None);
             assert!(material.handle.is_some(), "{case}: kept as a material");
