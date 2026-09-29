@@ -39,14 +39,19 @@ fn line_on(doc: &mut CadDocument, layer: &str, y: f64) -> Handle {
     doc.add_entity(EntityType::Line(line)).unwrap()
 }
 
+/// A layer as a reader or the LAYER command leaves it: with its own handle
+/// (`Table::add` does not allocate one).
+fn add_layer(doc: &mut CadDocument, name: &str, color: AcadColor) {
+    let mut layer = Layer::new(name);
+    layer.handle = doc.allocate_handle();
+    layer.color = color;
+    doc.layers.add(layer).unwrap();
+}
+
 fn fixture() -> Fixture {
     let mut doc = CadDocument::new();
-    let mut overridden = Layer::new("PLANCHER");
-    overridden.color = AcadColor::Index(3);
-    doc.layers.add(overridden).unwrap();
-    let mut plain = Layer::new("MURS");
-    plain.color = AcadColor::Index(5);
-    doc.layers.add(plain).unwrap();
+    add_layer(&mut doc, "PLANCHER", AcadColor::Index(3));
+    add_layer(&mut doc, "MURS", AcadColor::Index(5));
     let on_overridden_layer = line_on(&mut doc, "PLANCHER", 0.0);
     let on_plain_layer = line_on(&mut doc, "MURS", 5.0);
     let mut first = Viewport::new();
