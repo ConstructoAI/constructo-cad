@@ -229,3 +229,91 @@ fn truetype_styles_are_made_and_saved_without_a_screen() {
     assert_eq!(style_of_text(&reopened).as_deref(), Some("ARCH-GRAS"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The text style of the dimensions' picture: the one of the baked `*D`
+/// block, as a reader draws it.
+fn baked_text_styles(app: &OpenCADStudio) -> Vec<String> {
+    let doc = &app.tabs[app.active_tab].scene.document;
+    let mut styles = Vec::new();
+    for entity in doc.entities() {
+        let EntityType::Dimension(dimension) = entity else {
+            continue;
+        };
+        let Some(block) = doc.block_records.get(&dimension.base().block_name) else {
+            continue;
+        };
+        for handle in &block.entity_handles {
+            match doc.get_entity(*handle) {
+                Some(EntityType::MText(text)) => styles.push(text.style.clone()),
+                Some(EntityType::Text(text)) => styles.push(text.style.clone()),
+                _ => {}
+            }
+        }
+    }
+    styles
+}
+
+/// The ERP points its dimension style at a TrueType style by NAME
+/// (`set_properties` on `dim_styles`, path `/dimtxsty`), and the DWG and DXF
+/// writers keep only the handle: the file read back "Standard" (measured by
+/// P1). The style now follows by handle — in the session, in the DWG and in
+/// the DXF — and the dimension picture is drawn in it.
+#[test]
+fn a_dimension_style_keeps_its_truetype_font_in_dwg_and_dxf() {
+    let mut app = fresh_app();
+    run_ok(&mut app, "INSUNITS 1");
+    run_ok(&mut app, "STYLE NEW ARCH arial.ttf");
+    let edited = control(
+        &mut app,
+        json!({
+            "op":"set_properties",
+            "collection":"dim_styles",
+            "name":"Standard",
+            "updates":[{"path":"/dimtxsty","value":"ARCH"}]
+        }),
+    );
+    assert_ne!(edited["ok"], false, "{edited}");
+    let arch = |app: &OpenCADStudio| {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .text_styles
+            .get("ARCH")
+            .expect("ARCH")
+            .handle
+    };
+    let dimension_style = |app: &OpenCADStudio| {
+        let style = app.tabs[app.active_tab]
+            .scene
+            .document
+            .dim_styles
+            .get("Standard")
+            .expect("Standard")
+            .clone();
+        (style.dimtxsty, style.dimtxsty_handle)
+    };
+    assert_eq!(dimension_style(&app), ("ARCH".to_string(), arch(&app)), "in the session");
+    run_ok(&mut app, "DIMLINEAR 0,0 100,0 H 50,20");
+
+    for extension in ["dwg", "dxf"] {
+        let (dir, path) = temp_dwg(&format!("dimtxsty-{extension}"));
+        let path = path.replace(".dwg", &format!(".{extension}"));
+        let saved = app.automation_op(&json!({ "op": "save", "path": path }).to_string());
+        assert_eq!(saved["ok"], true, "{extension}: {saved}");
+        let mut reopened = fresh_app();
+        let opened = reopened.automation_op(&json!({ "op": "open", "path": path }).to_string());
+        assert_eq!(opened["ok"], true, "{extension}: {opened}");
+        assert_eq!(
+            dimension_style(&reopened),
+            ("ARCH".to_string(), arch(&reopened)),
+            "{extension}: DIMTXSTY read back"
+        );
+        let styles = baked_text_styles(&reopened);
+        assert!(!styles.is_empty(), "{extension}: the dimension has its picture");
+        assert!(
+            styles.iter().all(|style| style.eq_ignore_ascii_case("ARCH")),
+            "{extension}: picture drawn in {styles:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

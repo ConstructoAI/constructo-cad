@@ -1211,31 +1211,11 @@ impl OpenCADStudio {
                                     .get(&style_name)
                                     .cloned();
                                 if style_after != style_before {
-                                    let stale: Vec<acadrust::Handle> = self.tabs[i]
-                                        .scene
-                                        .document
-                                        .entities()
-                                        .filter_map(|entity| match entity {
-                                            acadrust::EntityType::Dimension(dimension)
-                                                if dimension
-                                                    .base()
-                                                    .style_name
-                                                    .eq_ignore_ascii_case(&style_name)
-                                                    || (dimension.base().style_name.trim().is_empty()
-                                                        && style_name
-                                                            .eq_ignore_ascii_case("Standard")) =>
-                                            {
-                                                Some(entity.common().handle)
-                                            }
-                                            _ => None,
-                                        })
-                                        .collect();
-                                    for handle in stale {
-                                        self.tabs[i].scene.invalidate_dim_block_recorded(handle);
-                                    }
+                                    self.tabs[i].scene.refresh_dimensions_of_style(&style_name);
+                                } else {
+                                    self.tabs[i].scene
+                                        .invalidate_dim_style_dependencies(&style_name);
                                 }
-                                self.tabs[i].scene
-                                    .invalidate_dim_style_dependencies(&style_name);
                                 self.commit_dim_style_undo(i, undo);
                                 self.command_line.push_output(crate::tf!(
                                     "DIMSTYLE: '{style_name}'.{prop} = {val:.3}"
