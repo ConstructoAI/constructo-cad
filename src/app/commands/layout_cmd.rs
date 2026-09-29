@@ -1629,4 +1629,136 @@ mod tests {
         assert_eq!(viewport["view_center"], json!([0.0, 0.0]));
         assert_eq!(viewport["locked"], true);
     }
+
+    /// The groups of every VIEWPORT of an ASCII DXF: handle (5), owner
+    /// (330), status (68), id (69), flags (90).
+    fn dxf_viewports(path: &std::path::Path) -> Vec<std::collections::HashMap<i32, String>> {
+        let text = String::from_utf8_lossy(&std::fs::read(path).unwrap()).into_owned();
+        let lines: Vec<&str> = text.lines().collect();
+        let mut viewports = Vec::new();
+        let mut current: Option<std::collections::HashMap<i32, String>> = None;
+        for pair in lines.chunks(2) {
+            let [code, value] = pair else { break };
+            let Ok(code) = code.trim().parse::<i32>() else { continue };
+            if code == 0 {
+                viewports.extend(current.take());
+                if value.trim() == "VIEWPORT" {
+                    current = Some(Default::default());
+                }
+            } else if let Some(groups) = current.as_mut() {
+                if matches!(code, 5 | 330 | 68 | 69 | 90) {
+                    groups.entry(code).or_insert_with(|| value.trim().to_string());
+                }
+            }
+        }
+        viewports.extend(current);
+        viewports
+    }
+
+    /// The set of the reference sheets (A-501, escalier) — seven ARCH D
+    /// layouts, 29 locked viewports — saved to DWG, reopened and written to
+    /// DXF, the file the server previews and turns into PDF. Every viewport
+    /// is on (status > 0, 0x8000, never 0x20000) with its id on its sheet:
+    /// 1 for the sheet, then 2, 3, … Before, the DXF had no group 68 and id 0
+    /// everywhere, and ezdxf drew every sheet empty.
+    #[test]
+    fn a_sheet_set_written_to_dxf_keeps_its_viewports_on() {
+        let stem = format!("ocs_p4_dxf_viewports_{}", std::process::id());
+        let dwg = std::env::temp_dir().join(format!("{stem}.dwg"));
+        let dxf = std::env::temp_dir().join(format!("{stem}.dxf"));
+        let sheets = [
+            ("A-001", 2),
+            ("A-100", 3),
+            ("A-101", 3),
+            ("A-102", 3),
+            ("A-301", 3),
+            ("A-302", 3),
+            ("A-501", 12),
+        ];
+        let mut app = fresh_app();
+        run_ok(&mut app, "CIRCLE 0,0 10");
+        run_ok(&mut app, "LAYOUT R Layout1 A-001");
+        run_ok(&mut app, "LAYOUT P A-001 36 24 IN");
+        for (name, _) in &sheets[1..] {
+            run_ok(&mut app, &format!("LAYOUT N {name} 36 24 IN"));
+        }
+        for (name, count) in sheets {
+            run_ok(&mut app, &format!("LAYOUT S {name}"));
+            for n in 0..count {
+                let x = 1.0 + 2.8 * n as f64;
+                run_ok(
+                    &mut app,
+                    &format!("MVIEW {x},1 {},3 CENTER 0,0 SCALE 1/8 LOCK", x + 2.5),
+                );
+            }
+        }
+        run_ok(&mut app, "LAYOUT S Model");
+        let path = |p: &std::path::Path| p.to_string_lossy().replace('\', "\\\\");
+        let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{}"}}"#, path(&dwg)));
+        assert_eq!(saved["ok"], true, "{saved}");
+        drop(app);
+
+        let mut app = fresh_app();
+        let opened = app.automation_op(&format!(r#"{{"op":"open","path":"{}"}}"#, path(&dwg)));
+        assert_eq!(opened["ok"], true, "{opened}");
+        let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{}"}}"#, path(&dxf)));
+        assert_eq!(saved["ok"], true, "{saved}");
+
+        let viewports = dxf_viewports(&dxf);
+        assert_eq!(viewports.len(), 36, "7 sheet viewports and 29 views");
+        let mut by_sheet: std::collections::HashMap<String, Vec<i32>> = Default::default();
+        let mut views = 0;
+        for groups in &viewports {
+            let number = |code: i32| -> i32 {
+                groups
+                    .get(&code)
+                    .unwrap_or_else(|| panic!("group {code} missing: {groups:?}"))
+                    .parse()
+                    .unwrap()
+            };
+            let (status, id, flags) = (number(68), number(69), number(90));
+            assert!(status > 0, "on: {groups:?}");
+            assert_eq!(status, id, "stacked in id order: {groups:?}");
+            assert_ne!(flags & 0x8000, 0, "0x8000 always set: {groups:?}");
+            assert_eq!(flags & 0x2_0000, 0, "never 0x20000 when on: {groups:?}");
+            if id != 1 {
+                views += 1;
+                assert_ne!(flags & 0x4000, 0, "locked: {groups:?}");
+            }
+            by_sheet.entry(groups[&330].clone()).or_default().push(id);
+        }
+        assert_eq!(views, 29);
+        assert_eq!(by_sheet.len(), 7);
+        let mut counts: Vec<usize> = by_sheet.values().map(Vec::len).collect();
+        counts.sort_unstable();
+        assert_eq!(counts, vec![3, 4, 4, 4, 4, 4, 13]);
+        for ids in by_sheet.values_mut() {
+            ids.sort_unstable();
+            assert_eq!(*ids, (1..=ids.len() as i32).collect::<Vec<_>>());
+        }
+
+        // The engine reads its own DXF back with every view on and locked.
+        drop(app);
+        let mut app = fresh_app();
+        let opened = app.automation_op(&format!(r#"{{"op":"open","path":"{}"}}"#, path(&dxf)));
+        assert_eq!(opened["ok"], true, "{opened}");
+        let summary = app.automation_op(r#"{"op":"layouts"}"#);
+        let listed: Vec<&Value> = summary["layouts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|layout| layout["viewports"].as_array().unwrap().iter())
+            .collect();
+        assert_eq!(listed.len(), 29, "{summary}");
+        assert!(listed.iter().all(|v| v["on"] == true && v["locked"] == true), "{summary}");
+        drop(app);
+        for file in [&dwg, &dxf] {
+            let sidecar = file.with_file_name(format!(
+                ".{}.ocs.lock",
+                file.file_name().unwrap().to_string_lossy()
+            ));
+            let _ = std::fs::remove_file(sidecar);
+            let _ = std::fs::remove_file(file);
+        }
+    }
 }
