@@ -4654,6 +4654,21 @@ impl Scene {
         uniforms.flat_shade = if flags.flat_shade { 1.0 } else { 0.0 };
         uniforms.transparency_enable = if self.transparency_display { 1.0 } else { 0.0 };
         uniforms.viewport_background = display.background.base;
+        if crate::scene::pipeline::uniforms::display_monochrome() {
+            // The ink contrasts with what is really behind the lines: the
+            // drawing's own background object when it supplies one, else the
+            // paper (layouts and their viewports) or the model canvas.
+            let background = if display.background.base[3] > 0.5 {
+                display.background.base
+            } else if self.current_layout == "Model" {
+                self.bg_color
+            } else {
+                self.paper_bg_color
+            };
+            uniforms.ink_mode = 1.0;
+            uniforms.ink_level =
+                crate::scene::pipeline::uniforms::ink_level_for_background(background);
+        }
         uniforms.view_tone = [display.brightness, display.contrast, 0.0, 0.0];
         uniforms.background_top = display.background.colors[0];
         uniforms.background_middle = display.background.colors[1];

@@ -64,6 +64,7 @@ pub(super) const NAMES: &[&str] = &[
     "layer_current",
     "view_home",
     "zoom_extents",
+    "display_monochrome",
     "undo",
     "redo",
 ];
@@ -304,6 +305,38 @@ impl OpenCADStudio {
             }
             "view_home" => Message::ViewCubeHome,
             "zoom_extents" => return Ok(self.dispatch_command("ZOOM EXTENTS")),
+            // Monochrome print view: a display setting of the session, never
+            // written to the drawing. `value`: true, false or "toggle" (absent:
+            // toggle).
+            "display_monochrome" => {
+                use crate::scene::pipeline::uniforms::{display_monochrome, set_display_monochrome};
+                let on = match req.get("value") {
+                    None | Some(Value::Null) => !display_monochrome(),
+                    Some(Value::Bool(on)) => *on,
+                    Some(Value::String(text)) => match text.as_str() {
+                        "toggle" => !display_monochrome(),
+                        "true" | "on" | "1" => true,
+                        "false" | "off" | "0" => false,
+                        _ => {
+                            return Err(failure(
+                                "invalid_value",
+                                "display_monochrome value: true, false or \"toggle\"",
+                            ))
+                        }
+                    },
+                    Some(_) => {
+                        return Err(failure(
+                            "invalid_value",
+                            "display_monochrome value: true, false or \"toggle\"",
+                        ))
+                    }
+                };
+                set_display_monochrome(on);
+                for tab in &self.tabs {
+                    tab.scene.request_refresh(crate::scene::ViewportRefreshScope::All);
+                }
+                return Ok(Task::none());
+            }
             "undo" => Message::Undo,
             "redo" => Message::Redo,
             "layer_visible" | "layer_locked" | "layer_frozen" | "layer_current" => {

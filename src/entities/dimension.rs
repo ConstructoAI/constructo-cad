@@ -3827,7 +3827,7 @@ fn tessellate_dimension_inner(
             dimfxlon,
             dimsoxd,
             dimcen,
-            ticks: dimtsz_raw > 1e-9,
+            ticks: dimtsz_raw > 1e-9 || (arrow1.is_stroke() && arrow2.is_stroke()),
             arrow_len: dimasz,
             text_width: text_layout.width,
             dimatfit: style.map(|s| s.dimatfit).unwrap_or(3),

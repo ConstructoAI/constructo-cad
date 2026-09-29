@@ -399,6 +399,7 @@ impl OpenCADStudio {
             "selection":tab.scene.selected_handles_in_order().iter().map(|h|format!("{:X}",h.value())).collect::<Vec<_>>(),
             "command":command,"modal":self.active_modal.as_ref().map(|m|format!("{m:?}")),
             "layout":tab.scene.current_layout,
+            "display_monochrome":crate::scene::pipeline::uniforms::display_monochrome(),
             "ucs":tab.active_ucs.as_ref().map(|u|json!({"name":u.name,"origin":[u.origin.x,u.origin.y,u.origin.z],"x_axis":[u.x_axis.x,u.x_axis.y,u.x_axis.z],"y_axis":[u.y_axis.x,u.y_axis.y,u.y_axis.z],"elevation":u.elevation})),
             "cursor":{"world":tab.last_cursor_world.to_array(),"screen":[tab.last_cursor_screen.x,tab.last_cursor_screen.y]},
             "viewport_size":({let s=tab.scene.selection.borrow();[s.vp_size.0,s.vp_size.1]}),
@@ -1242,6 +1243,47 @@ mod tests {
         assert_eq!(app.automation_op(r#"{"op":"entities"}"#)["total"], 1);
         request(&mut app, json!({"op":"undo"}));
         assert_eq!(app.automation_op(r#"{"op":"entities"}"#)["total"], 0);
+    }
+    // The monochrome print view is a DISPLAY setting: the control channel
+    // switches it (true, false, "toggle", absent = toggle), `state` reports it,
+    // and the drawing is untouched — no revision, no dirty flag, no entity.
+    #[test]
+    fn display_monochrome_is_a_display_setting_only() {
+        use crate::scene::pipeline::uniforms::{display_monochrome, set_display_monochrome};
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        let before = app.control_state();
+        let entities = app.automation_op(r#"{"op":"entities"}"#)["total"].clone();
+        let action = |app: &mut OpenCADStudio, value: Value| {
+            let mut req = json!({"op":"action","name":"display_monochrome"});
+            if !value.is_null() {
+                req["value"] = value;
+            }
+            request(app, req)
+        };
+        for (value, expected) in [
+            (json!(true), true),
+            (json!("toggle"), false),
+            (Value::Null, true),
+            (json!("off"), false),
+            (json!("on"), true),
+            (json!(false), false),
+        ] {
+            let reply = action(&mut app, value.clone());
+            assert_eq!(reply["ok"], true, "{value}: {reply}");
+            assert_eq!(display_monochrome(), expected, "{value}");
+            assert_eq!(app.control_state()["display_monochrome"], expected, "{value}");
+        }
+        let refused = action(&mut app, json!("gris"));
+        assert_eq!(refused["code"], "invalid_value", "{refused}");
+        assert!(!display_monochrome(), "a refused value changes nothing");
+        let after = app.control_state();
+        assert_eq!(after["revision"], before["revision"], "the drawing was not edited");
+        let active = after["documents"].as_array().unwrap().iter()
+            .find(|d| d["id"] == after["document_id"]).expect("active document").clone();
+        assert_eq!(active["dirty"], false);
+        assert_eq!(app.automation_op(r#"{"op":"entities"}"#)["total"], entities);
+        set_display_monochrome(false);
     }
     #[test]
     fn command_discovery_explains_batch_and_interactive_use() {

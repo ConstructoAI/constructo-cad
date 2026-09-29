@@ -713,6 +713,7 @@ async fn load_web_bytes(
     if name.to_ascii_lowercase().ends_with(".dxf") {
         fix_dxf_dimension_rotations(&mut doc);
         fix_dxf_layout_plot_settings(&mut doc);
+        fix_dxf_current_style_handles(&mut doc);
     }
     fix_current_style_names(&mut doc);
     progress.set(crate::app::OPEN_PHASE_CACHING, 7000, 0, 1);
@@ -764,6 +765,7 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
                 .map_err(|e| e.to_string())?;
             fix_dxf_dimension_rotations(&mut doc);
             fix_dxf_layout_plot_settings(&mut doc);
+            fix_dxf_current_style_handles(&mut doc);
             fix_current_style_names(&mut doc);
             Ok(doc)
         }
@@ -1027,6 +1029,7 @@ fn finalize_loaded_outcome(
     if outcome.stats.source_format == Some(acadrust::SourceFormat::Dxf) {
         fix_dxf_dimension_rotations(doc);
         fix_dxf_layout_plot_settings(doc);
+        fix_dxf_current_style_handles(doc);
     }
     fix_current_style_names(doc);
     resolve_raster_image_paths(doc, path.parent());
@@ -2247,9 +2250,43 @@ pub(crate) fn sync_dimension_text_styles(doc: &mut CadDocument) {
     }
 }
 
+/// Give a handle to every table entry that has none, on the copy handed to
+/// the writers. The writers identify a table entry by its handle: two entries
+/// with the NULL handle collapse into one in the DWG, the DXF writes handle 0
+/// (ezdxf then refuses the whole file), and a current style pointed at a NULL
+/// handle falls back to Standard ($DIMSTYLE, T3 M1). Commands allocate one at
+/// creation; this catches whatever still comes without (a file, a plugin).
+pub(crate) fn ensure_table_handles(doc: &mut CadDocument) {
+    use acadrust::TableEntry;
+    macro_rules! ensure {
+        ($table:ident) => {{
+            let missing: Vec<String> = doc
+                .$table
+                .iter()
+                .filter(|entry| entry.handle().is_null())
+                .map(|entry| entry.name().to_string())
+                .collect();
+            for name in missing {
+                let handle = doc.allocate_handle();
+                if let Some(entry) = doc.$table.get_mut(&name) {
+                    entry.set_handle(handle);
+                }
+            }
+        }};
+    }
+    ensure!(layers);
+    ensure!(line_types);
+    ensure!(text_styles);
+    ensure!(dim_styles);
+    ensure!(app_ids);
+    ensure!(views);
+    ensure!(ucss);
+}
+
 fn sync_current_styles_on_save(doc: &mut CadDocument) {
     use acadrust::objects::ObjectType;
 
+    ensure_table_handles(doc);
     sync_dimension_text_styles(doc);
 
     let th = doc
@@ -2665,6 +2702,30 @@ fn fix_dxf_dimension_rotations(doc: &mut CadDocument) {
 /// The raw pairs are preserved on Layout, so trim and parse those authoritative
 /// values after loading. In particular, losing code 73 turns a 90°/270° sheet
 /// back to 0° and makes a landscape layout render as portrait (#505).
+/// A DXF names the current text and dimension styles ($TEXTSTYLE,
+/// $DIMSTYLE) and stores no handle for them: the reader keeps the handles of
+/// the defaults it starts from, Standard's, and `fix_current_style_names` then
+/// turned the name back into Standard — a DXF saved on ARCH-24 reopened on
+/// Standard (T3 M1). The names are the truth here: take the handles from them.
+fn fix_dxf_current_style_handles(doc: &mut CadDocument) {
+    let text = doc
+        .text_styles
+        .get(&doc.header.current_text_style_name)
+        .map(|style| (style.handle, style.name.clone()));
+    if let Some((handle, name)) = text {
+        doc.header.current_text_style_handle = handle;
+        doc.header.current_text_style_name = name;
+    }
+    let dimension = doc
+        .dim_styles
+        .get(&doc.header.current_dimstyle_name)
+        .map(|style| (style.handle, style.name.clone()));
+    if let Some((handle, name)) = dimension {
+        doc.header.current_dimstyle_handle = handle;
+        doc.header.current_dimstyle_name = name;
+    }
+}
+
 fn fix_dxf_layout_plot_settings(doc: &mut CadDocument) {
     use acadrust::objects::{ObjectType, PlotFlags};
 

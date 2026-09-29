@@ -4,9 +4,23 @@
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use iced::wgpu;
 
-/// Width (in texels) of the RGBA32F data texture. Height grows to fit; a hatch
-/// with N total texels uses ceil(N / WIDTH) rows.
+/// Maximum width (in texels) of the RGBA32F data texture. Height grows to fit;
+/// a hatch with N total texels uses ceil(N / WIDTH) rows.
 const DATA_TEX_WIDTH: u32 = 1024;
+
+/// Size `(width, height)` of the data texture holding `texel_count` texels:
+/// rows of at most [`DATA_TEX_WIDTH`] texels, never wider than the data (the
+/// shader addresses texel `i` at `(i % tex_width, i / tex_width)`).
+///
+/// A hatch is usually a few dozen texels. Padding every one of them to a full
+/// 1 024-texel row (16 KiB of RGBA32F) made the WebGL path allocate, zero and
+/// upload tens of times more than the data: on a real AutoCAD sheet with
+/// thousands of hatches (C22-025, A300) that was about 30 s of a 70 s freeze.
+fn data_texture_extent(texel_count: usize) -> (u32, u32) {
+    let count = u32::try_from(texel_count).unwrap_or(u32::MAX).max(1);
+    let width = count.min(DATA_TEX_WIDTH);
+    (width, count.div_ceil(width))
+}
 
 // ── Vertex ────────────────────────────────────────────────────────────────
 
@@ -319,8 +333,7 @@ impl TextureHatch {
         if texels.is_empty() {
             texels.push([0.0; 4]);
         }
-        let width = DATA_TEX_WIDTH;
-        let height = ((texels.len() as u32).div_ceil(width)).max(1);
+        let (width, height) = data_texture_extent(texels.len());
         texels.resize((width * height) as usize, [0.0; 4]);
         let data_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("hatch.texture.data_tex"),
@@ -418,5 +431,34 @@ impl TextureHatch {
             _uniform_buf,
             _data_tex: data_tex,
         })
+    }
+}
+
+#[cfg(test)]
+mod data_texture_tests {
+    use super::{data_texture_extent, DATA_TEX_WIDTH};
+
+    #[test]
+    fn a_small_hatch_gets_a_texture_as_wide_as_its_data() {
+        assert_eq!(data_texture_extent(0), (1, 1));
+        assert_eq!(data_texture_extent(1), (1, 1));
+        assert_eq!(data_texture_extent(37), (37, 1));
+        assert_eq!(data_texture_extent(1024), (1024, 1));
+        assert_eq!(data_texture_extent(1025), (1024, 2));
+        assert_eq!(data_texture_extent(5000), (1024, 5));
+    }
+
+    #[test]
+    fn every_texel_lands_inside_the_texture_with_at_most_one_padded_row() {
+        for count in [1usize, 2, 37, 1023, 1024, 1025, 4097, 70_000] {
+            let (width, height) = data_texture_extent(count);
+            assert!(width >= 1 && width <= DATA_TEX_WIDTH, "count {count}: width {width}");
+            // The shader reads texel i at (i % width, i / width).
+            let last = (count - 1) as u32;
+            assert!(last / width < height, "count {count}: last texel outside");
+            let capacity = (width * height) as usize;
+            assert!(capacity >= count, "count {count}: capacity {capacity}");
+            assert!(capacity - count < width as usize, "count {count}: more than one padded row");
+        }
     }
 }

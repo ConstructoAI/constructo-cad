@@ -1,0 +1,18 @@
+Liberation Sans 2.1.5 (Regular, Bold), metric-compatible with Arial.
+
+Embedded in the WEB build only (src/scene/text/sysfont.rs): the browser has no system
+fonts, so a drawing text style naming arial.ttf / arialbd.ttf fell back to the LFF stroke
+font, wider than Arial, and table texts overflowed their cells. The desktop and server
+builds keep using the installed fonts.
+
+Source : https://github.com/liberationfonts/liberation-fonts/releases/tag/2.1.5
+Archive : liberation-fonts-ttf-2.1.5.tar.gz
+  sha256 7191c669bf38899f73a2094ed00f7b800553364f90e2637010a69c0e268f25d0
+Files (sha256):
+  LiberationSans-Regular.ttf  76d04c18ea243f426b7de1f3ad208e927008f961dc5945e5aad352d0dfde8ee8
+  LiberationSans-Bold.ttf     788abee4c806d660e8aee46689dd8540cd4bb98da03dcc9d171ce3efd99a9173
+License: SIL Open Font License 1.1 (LICENSE, copied from the archive; also shipped with the
+web bundle as fonts/LiberationSans-OFL.txt). "Liberation" is a Reserved Font Name: the
+files are NOT modified (no subsetting). The engine only looks them up under the family
+names "Liberation Sans" and "Liberation Sans Bold" and, at layout time, scales them by
+Arial's cap height (1467 / 1466 units instead of 1409) so a text keeps Arial's size.

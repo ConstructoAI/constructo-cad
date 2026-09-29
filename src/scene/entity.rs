@@ -330,7 +330,9 @@ impl Scene {
         if let EntityType::RasterImage(ref mut img) = entity {
             if img.definition_handle.is_none() {
                 use acadrust::objects::{ImageDefinition, ObjectType};
-                let def_handle = Handle::new(self.document.next_handle());
+                // `next_handle` only peeks: the image entity added right
+                // after took the same handle as its own definition.
+                let def_handle = self.document.allocate_handle();
                 if self.is_recording_undo() {
                     self.record_undo_object_before(def_handle, None);
                 }
@@ -992,6 +994,81 @@ impl Scene {
     /// block-local coordinates (unlike `define_block_from_owned_entities`,
     /// which folds in a base offset). No-op if the block already exists.
     /// Used when pasting an INSERT whose block this drawing lacks. (#135)
+    /// The block record of a standard arrowhead, made in the drawing the way
+    /// the reference application makes it the first time a style names it,
+    /// and its handle and name. `.`, `CLOSEDFILLED` (or an empty name) is the
+    /// default arrow: no block, the NULL handle. Made here: `_ArchTick` (one
+    /// polyline segment (-0.5, -0.5)..(0.5, 0.5), constant width 0.15),
+    /// `_Oblique` (the same segment, a line) and `_None` (empty). An existing
+    /// block of that name is used as it is.
+    pub fn ensure_standard_arrow_block(&mut self, name: &str) -> Result<(Handle, String), String> {
+        use acadrust::types::{Color, LineWeight, Vector3};
+        let key = name.trim().trim_start_matches('_').to_ascii_uppercase();
+        let (block_name, content): (&str, Option<EntityType>) = match key.as_str() {
+            "" | "." | "CLOSEDFILLED" => return Ok((Handle::NULL, String::new())),
+            "ARCHTICK" => {
+                let mut stroke = acadrust::entities::LwPolyline::from_points(vec![
+                    Vector2::new(-0.5, -0.5),
+                    Vector2::new(0.5, 0.5),
+                ]);
+                stroke.constant_width = 0.15;
+                (
+                    "_ArchTick",
+                    Some(EntityType::LwPolyline(stroke)),
+                )
+            }
+            "OBLIQUE" => (
+                "_Oblique",
+                Some(EntityType::Line(acadrust::entities::Line::from_points(
+                    Vector3::new(-0.5, -0.5, 0.0),
+                    Vector3::new(0.5, 0.5, 0.0),
+                ))),
+            ),
+            "NONE" => ("_None", None),
+            _ => {
+                return Err(format!(
+                    "arrowhead '{name}' is not one this command makes: ARCHTICK, OBLIQUE, NONE or CLOSEDFILLED"
+                ))
+            }
+        };
+        if let Some(record) = self.document.block_records.get(block_name) {
+            return Ok((record.handle, record.name.clone()));
+        }
+        // Three handles taken from the counter, never peeked: the record, the
+        // BLOCK and ENDBLK markers.
+        let record_handle = self.document.allocate_handle();
+        let block_handle = self.document.allocate_handle();
+        let end_handle = self.document.allocate_handle();
+        let mut record = acadrust::tables::BlockRecord::new(block_name);
+        record.handle = record_handle;
+        record.block_entity_handle = block_handle;
+        record.block_end_handle = end_handle;
+        self.document
+            .block_records
+            .add(record)
+            .map_err(|error| error.to_string())?;
+        let mut block = Block::new(block_name, Vector3::ZERO);
+        block.common.handle = block_handle;
+        block.common.owner_handle = record_handle;
+        let _ = self.document.add_entity(EntityType::Block(block));
+        let mut block_end = BlockEnd::new();
+        block_end.common.handle = end_handle;
+        block_end.common.owner_handle = record_handle;
+        let _ = self.document.add_entity(EntityType::BlockEnd(block_end));
+        if let Some(mut entity) = content {
+            // Drawn in the dimension's own colour and weight.
+            let common = entity.common_mut();
+            common.layer = "0".to_string();
+            common.color = Color::ByBlock;
+            common.line_weight = LineWeight::ByBlock;
+            common.handle = Handle::NULL;
+            common.owner_handle = record_handle;
+            let _ = self.document.add_entity(entity);
+        }
+        self.bump_geometry();
+        Ok((record_handle, block_name.to_string()))
+    }
+
     pub fn define_block_raw(
         &mut self,
         name: &str,
