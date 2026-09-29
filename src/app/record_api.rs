@@ -1592,6 +1592,16 @@ impl OpenCADStudio {
                     "vx_table" => patch_table!(vx_table),
                     _ => unreachable!(),
                 }
+                // A dimension style edited here is edited as by DIMSTYLE:
+                // its text style follows by handle (what the file keeps), and
+                // the dimensions drawn with it are regenerated.
+                if changed && collection == "dim_styles" {
+                    let i = self.active_tab;
+                    crate::io::sync_dimension_text_styles(&mut self.tabs[i].scene.document);
+                    if let Some(name) = result_name.clone() {
+                        self.tabs[i].scene.refresh_dimensions_of_style(&name);
+                    }
+                }
             }
         }
         if changed {

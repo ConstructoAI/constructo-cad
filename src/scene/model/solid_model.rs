@@ -314,6 +314,12 @@ pub fn grip_preview_wires(
 
 /// B-rep edge nearest a world-space surface pick.
 pub fn nearest_edge(body: &Body, pick: [f64; 3]) -> Option<EdgeKey> {
+    nearest_edge_with_distance(body, pick).map(|(key, _)| key)
+}
+
+/// B-rep edge nearest a world-space point, with its distance to the point —
+/// what tells, among several solids, whose edge a typed point designates.
+pub fn nearest_edge_with_distance(body: &Body, pick: [f64; 3]) -> Option<(EdgeKey, f64)> {
     let pick = cadkernel::space::Vec3::from(pick);
     body.edge_keys()
         .filter_map(|key| {
@@ -343,7 +349,6 @@ pub fn nearest_edge(body: &Body, pick: [f64; 3]) -> Option<EdgeKey> {
             Some((key, nearest))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(key, _)| key)
 }
 
 /// Planar face nearest a world-space surface pick.

@@ -292,6 +292,9 @@ pub enum StepInput {
     EditorClosed(bool),
     /// Advance / finish the current step — Enter, or Space-as-Enter (`on_enter`).
     Enter,
+    /// The Enter that ends a one-line command (`on_line_end`, a plain Enter
+    /// unless the command finishes differently at the end of a line).
+    LineEnd,
     /// Cancel the command (`on_escape`).
     Escape,
 }
@@ -2391,6 +2394,27 @@ pub trait CadCommand: Send {
 
     /// Called when the user presses Enter (finalize / next option).
     fn on_enter(&mut self) -> CmdResult;
+
+    /// End of a one-line command (`DIMCONTINUE 40,0 60,0`,
+    /// `LEADER 0,0 10,10 See detail 3`): every token of the line has been
+    /// fed and no further input will come. The default is a plain Enter,
+    /// which is what ends most commands. A command whose Enter only moves it
+    /// to another prompt (DIMCONTINUE's "Select continued dimension", LEADER's
+    /// annotation prompt) finishes here instead, so a scripted line never
+    /// leaves it waiting — and, driven headlessly, blocking every request
+    /// after it with `command_busy`.
+    fn on_line_end(&mut self) -> CmdResult {
+        self.on_enter()
+    }
+
+    /// One-line commands only: offered each remaining token before it is fed.
+    /// `true` means this token starts free text that runs to the end of the
+    /// line, spaces included; the whole remainder then reaches
+    /// [`Self::on_text_input`] as one string instead of word by word.
+    /// Default `false`: tokens are fed one at a time.
+    fn takes_rest_of_line(&mut self, _token: &str) -> bool {
+        false
+    }
 
     /// Whether a bare Enter should supply the drawing's continuation point as
     /// this command's first point instead of calling [`Self::on_enter`]. Draw

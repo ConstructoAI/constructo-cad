@@ -1146,6 +1146,8 @@ impl OpenCADStudio {
                                 "DIMSTYLE SET",
                                 std::slice::from_ref(&style_name),
                             );
+                            let style_before =
+                                self.tabs[i].scene.document.dim_styles.get(&style_name).cloned();
                             if let Some(ds) =
                                 self.tabs[i].scene.document.dim_styles.get_mut(&style_name)
                             {
@@ -1197,8 +1199,23 @@ impl OpenCADStudio {
                                     }
                                 }
                                 self.tabs[i].dirty = true;
-                                self.tabs[i].scene
-                                    .invalidate_dim_style_dependencies(&style_name);
+                                // As in the Dimension Style Manager: every
+                                // dimension on this style was drawn under the
+                                // old settings, so its picture is dropped and
+                                // made again — text placed by the new style —
+                                // on screen and in the next save.
+                                let style_after = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .dim_styles
+                                    .get(&style_name)
+                                    .cloned();
+                                if style_after != style_before {
+                                    self.tabs[i].scene.refresh_dimensions_of_style(&style_name);
+                                } else {
+                                    self.tabs[i].scene
+                                        .invalidate_dim_style_dependencies(&style_name);
+                                }
                                 self.commit_dim_style_undo(i, undo);
                                 self.command_line.push_output(crate::tf!(
                                     "DIMSTYLE: '{style_name}'.{prop} = {val:.3}"
@@ -1418,9 +1435,21 @@ impl OpenCADStudio {
                         }
                     }
                     "SET" | "S" => {
-                        // STYLE SET <name> — set active text style (for future text commands)
+                        // STYLE SET <name> — the current text style (TEXTSTYLE),
+                        // which TEXT and MTEXT take when no style is named.
                         let name = parts.get(1).map(|s| s.trim()).unwrap_or("");
-                        if self.tabs[i].scene.document.text_styles.get(name).is_some() {
+                        let found = self.tabs[i]
+                            .scene
+                            .document
+                            .text_styles
+                            .get(name)
+                            .map(|style| (style.name.clone(), style.handle));
+                        if let Some((style_name, handle)) = found {
+                            let header = &mut self.tabs[i].scene.document.header;
+                            header.current_text_style_name = style_name.clone();
+                            header.current_text_style_handle = handle;
+                            self.ribbon.active_text_style = style_name;
+                            self.tabs[i].dirty = true;
                             self.command_line
                                 .push_output(crate::tf!("{prefix}: active style set to '{name}'.").as_ref());
                         } else {
@@ -1429,7 +1458,10 @@ impl OpenCADStudio {
                         }
                     }
                     "NEW" | "N" => {
+                        // STYLE NEW <name> [<font_file>] — a TrueType file
+                        // (arial.ttf, arialbd.ttf for bold) or an SHX font.
                         let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        let font = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
                         if name.is_empty() {
                             self.command_line
                                 .push_error(crate::tf!("Usage: {prefix} NEW <name>").as_ref());
@@ -1442,7 +1474,14 @@ impl OpenCADStudio {
                                 "STYLE NEW",
                                 std::slice::from_ref(&name),
                             );
-                            let style = acadrust::tables::TextStyle::new(&name);
+                            let mut style = acadrust::tables::TextStyle::new(&name);
+                            // A handle of its own, as the style dialog gives:
+                            // a dimension's DIMTXSTY override refers to the
+                            // style by handle, and NULL named no style at all.
+                            style.handle = self.tabs[i].scene.document.allocate_handle();
+                            if !font.is_empty() {
+                                style.font_file = font.clone();
+                            }
                             let _ = self.tabs[i].scene.document.text_styles.add(style);
                             self.tabs[i].dirty = true;
                             self.commit_text_style_undo(i, undo);

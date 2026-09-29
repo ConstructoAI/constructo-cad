@@ -12,6 +12,7 @@ mod fileops;
 mod inquiry;
 mod layerprops;
 mod layers;
+mod layout_cmd;
 mod plotvars;
 mod styleprops;
 mod view;
@@ -256,6 +257,11 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_inquiry(cmd, i) {
+            return Some(t);
+        }
+        // `LAYOUT`, the one-line `MVIEW` and `LAYER PLOT`: ahead of the view
+        // and layer families, which own the bare verbs.
+        if let Some(t) = self.dispatch_layout_cmd(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_view(cmd, i) {

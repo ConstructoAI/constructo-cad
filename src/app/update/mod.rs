@@ -4588,7 +4588,14 @@ impl OpenCADStudio {
                 if let Ok(degrees) = state.base_angle.trim().parse::<f64>() {
                     header.angle_base = degrees.to_radians();
                 }
+                let previous_insertion_units = header.insertion_units;
                 header.insertion_units = state.insertion_units;
+                // The standard linetypes follow the drawing into its units
+                // system (acad.lin lengths in inches, metric otherwise).
+                crate::io::linetypes::follow_insertion_units(
+                    &mut self.tabs[i].scene.document,
+                    previous_insertion_units,
+                );
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_geometry();
                 self.refresh_properties();
@@ -4660,6 +4667,13 @@ impl OpenCADStudio {
                 // menu having done nothing. (#668)
                 self.push_undo_snapshot(i, "UNITS");
                 self.tabs[i].scene.document.header.insertion_units = code;
+                if crate::io::linetypes::follow_insertion_units(
+                    &mut self.tabs[i].scene.document,
+                    current,
+                ) > 0
+                {
+                    self.tabs[i].scene.bump_geometry();
+                }
                 self.tabs[i].dirty = true;
                 let label = crate::modules::draw::units::label(code);
                 self.command_line.push_output(

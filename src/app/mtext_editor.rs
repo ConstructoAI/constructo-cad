@@ -755,6 +755,7 @@ impl super::OpenCADStudio {
             }
         }
         self.mtext_editor = Some(state);
+        self.mtext_editor_openings = self.mtext_editor_openings.wrapping_add(1);
         // Open centred at the editor's natural size: it renders through the
         // shared modal frame, which `modal_offset` positions and `modal_resize`
         // grows (both draggable, so reset on open).

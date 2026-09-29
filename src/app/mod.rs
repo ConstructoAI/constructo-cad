@@ -15,6 +15,8 @@ pub(crate) mod dim_viewport;
 mod viewport_dimension_tests;
 #[cfg(test)]
 mod dimension_preview_tests;
+#[cfg(test)]
+mod headless_commands_tests;
 mod document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
@@ -38,6 +40,10 @@ mod startup;
 mod style_ops;
 mod text_inline;
 mod tolerance_dialog;
+#[cfg(test)]
+mod dimension_text_tests;
+#[cfg(test)]
+mod unit_catalog_tests;
 mod update;
 mod view;
 mod visibility;
@@ -971,6 +977,11 @@ pub(super) struct OpenCADStudio {
     pending_command_editor_text: Option<String>,
     /// Open in-place single-line TEXT editor (plain text-entry box), if any.
     text_inline: Option<text_inline::TextInlineState>,
+    /// How many times the TEXT / MTEXT editors have been opened. A one-line
+    /// command compares them before and after its tokens to know that the
+    /// editor now open is its own, not one left over (`finish_active_command`).
+    text_editor_openings: u64,
+    mtext_editor_openings: u64,
     /// Cursor-anchored one-shot snap override menu (Shift+RMB): the canvas
     /// point it opened at, or `None` when closed (#337).
     snap_override_popup: Option<iced::Point>,
@@ -4083,6 +4094,8 @@ impl OpenCADStudio {
             command_mtext_input: false,
             pending_command_editor_text: None,
             text_inline: None,
+            text_editor_openings: 0,
+            mtext_editor_openings: 0,
             snap_override_popup: None,
             axis_lock_dir: None,
             layout_rename_state: None,
