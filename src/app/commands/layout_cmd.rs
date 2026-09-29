@@ -1693,7 +1693,7 @@ mod tests {
             }
         }
         run_ok(&mut app, "LAYOUT S Model");
-        let path = |p: &std::path::Path| p.to_string_lossy().replace('\', "\\\\");
+        let path = |p: &std::path::Path| p.to_string_lossy().replace('\\', "\\\\");
         let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{}"}}"#, path(&dwg)));
         assert_eq!(saved["ok"], true, "{saved}");
         drop(app);
