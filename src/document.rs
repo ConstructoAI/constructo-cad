@@ -3623,6 +3623,18 @@ impl CadDocument {
     }
 
     /// Read all viewport-specific overrides of one kind from a layer.
+    ///
+    /// The layer's extension dictionary is found through the layer's own
+    /// pointer, which every reader (DWG and DXF) and
+    /// [`CadDocument::ensure_extension_dictionary`] record in `xdic_by_handle`.
+    /// The generic [`CadDocument::xrecord`] would, for a layer that has no
+    /// extension dictionary -- the common case --, fall back to scanning every
+    /// object of the drawing for a dictionary naming the layer as its owner.
+    /// Renderers call this once per entity, per viewport and per kind of
+    /// override, so that scan made a paper-space sheet of a large drawing
+    /// quadratic (about 15 s of a 70 s freeze on one real sheet). A
+    /// dictionary that names the layer as its owner without the layer
+    /// pointing back to it is not the layer's extension dictionary.
     pub fn layer_viewport_overrides(
         &self,
         layer: Handle,
@@ -3643,9 +3655,24 @@ impl CadDocument {
             }
             _ => return Vec::new(),
         };
-        self.xrecord(layer, key)
-            .map(|record| record.layer_viewport_overrides(value_code))
-            .unwrap_or_default()
+        let Some(dictionary_handle) = self
+            .xdic_by_handle
+            .get(&layer)
+            .copied()
+            .filter(|handle| !handle.is_null())
+        else {
+            return Vec::new();
+        };
+        let Some(ObjectType::Dictionary(dictionary)) = self.objects.get(&dictionary_handle) else {
+            return Vec::new();
+        };
+        let Some(record_handle) = dictionary.get(key) else {
+            return Vec::new();
+        };
+        match self.objects.get(&record_handle) {
+            Some(ObjectType::XRecord(record)) => record.layer_viewport_overrides(value_code),
+            _ => Vec::new(),
+        }
     }
 
     /// Walk the ownership chain upward from `start` (inclusive) and report
